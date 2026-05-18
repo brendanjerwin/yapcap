@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.6.0 · **Last updated:** 2026-05-18
+**Status:** As-built v0.5.0 · **Last updated:** 2026-05-18
 
 ## Document Metadata
 
@@ -789,7 +789,7 @@ that integration: settings live under `…/cosmic/io.github.TopiCsarno.YapCap/vN
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
 files manually if you need to salvage values after a version bump.
-The Copilot release uses schema `v600` as a deliberate fresh-start boundary
+The Copilot release uses schema `v500` as a deliberate fresh-start boundary
 after the provider account model changes. Existing `v400` COSMIC settings may
 remain on disk, but YapCap starts from fresh defaults and users must re-add
 accounts. The schema bump does not delete YapCap-owned account directories,
@@ -1028,7 +1028,7 @@ All paths come from `config::paths()`.
 
 **Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-- Config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v600`
+- Config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v500`
 - Snapshot cache: under the XDG cache root (typically `~/.cache/yapcap/snapshots.json`)
 - Managed accounts and logs: under the XDG state root (typically
   `~/.local/state/yapcap/`), including `codex-accounts/`, `claude-accounts/`,

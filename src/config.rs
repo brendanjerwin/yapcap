@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 600]
+#[version = 500]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -425,7 +425,7 @@ mod tests {
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 600);
+        assert_eq!(Config::VERSION, 500);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());

@@ -17,7 +17,7 @@
     <ul>
       <li>Codex usage tracking and credits</li>
       <li>Claude usage tracking and extra usage meter</li>
-      <li>Cursor usage tracking: API, Composer and Total</li>
+      <li>Cursor usage tracking: Total, Auto + Composer, and API</li>
       <li>Gemini usage tracking: Pro, Flash and Lite quotas</li>
       <li>GitHub Copilot usage tracking: Free and paid quota shapes</li>
       <li>Multiple accounts per provider</li>
@@ -32,19 +32,23 @@
     </screenshot>
     <screenshot>
       <caption>Codex usage, reset times, and credit balance</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-codex-zoom.png</image>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-codex.png</image>
     </screenshot>
     <screenshot>
       <caption>Claude Code usage with extra usage tracking</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-claude-zoom.png</image>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-claude.png</image>
     </screenshot>
     <screenshot>
       <caption>Cursor usage across Total, Auto + Composer, and API quotas</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-cursor-zoom.png</image>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-cursor.png</image>
     </screenshot>
     <screenshot>
-      <caption>Configure refresh, styling, and provider settings</caption>
-      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-settings-general.png</image>
+      <caption>Gemini usage across Pro, Flash, and Lite quota bars</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-gemini.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>GitHub Copilot usage for chat and completions</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-copilot.png</image>
     </screenshot>
   </screenshots>
   <icon type="remote" width="64" height="64" scale="1">
@@ -83,12 +87,11 @@
     <keyword>Applet</keyword>
   </keywords>
   <releases>
-    <release type="stable" version="0.6.0" date="2026-05-18">
+    <release type="stable" version="0.5.0" date="2026-05-18">
       <description>
         <p>Adds GitHub Copilot as a fifth provider with browser device-flow login, Free and paid usage parsing, multi-account support, re-auth handling, and mixed one-bar/two-bar panel rendering.</p>
       </description>
     </release>
-    <release type="stable" version="0.5.0" date="2026-05-15" />
     <release type="stable" version="0.4.0" date="2026-05-04" />
   </releases>
   <content_rating type="oars-1.1" />
