@@ -201,6 +201,7 @@ impl AppModel {
             ProviderId::Claude => new_config.claude_enabled = enabled,
             ProviderId::Cursor => new_config.cursor_enabled = enabled,
             ProviderId::Gemini => new_config.gemini_enabled = enabled,
+            ProviderId::Copilot => new_config.copilot_enabled = enabled,
         });
         if enabled {
             runtime::reconcile_provider(&self.config, &mut self.state, provider);
@@ -407,6 +408,26 @@ impl AppModel {
         {
             return refresh_provider_task(&self.config, &mut self.state, ProviderId::Gemini);
         }
+        Task::none()
+    }
+
+    pub(super) fn delete_copilot_account(&mut self, account_id: &str) -> Task<Message> {
+        let provider = ProviderId::Copilot;
+        if !self
+            .config
+            .copilot_managed_accounts
+            .iter()
+            .any(|account| account.id == account_id)
+        {
+            return Task::none();
+        }
+
+        self.write_config(|new_config| {
+            let _ = registry::delete_account(provider, account_id, new_config);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
+        });
+        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::persist_state(&self.state);
         Task::none()
     }
 }

@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 500]
+#[version = 600]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -22,6 +22,8 @@ pub struct Config {
     pub cursor_enabled: bool,
     #[serde(default = "default_gemini_enabled")]
     pub gemini_enabled: bool,
+    #[serde(default = "default_copilot_enabled")]
+    pub copilot_enabled: bool,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -34,10 +36,18 @@ pub struct Config {
     pub selected_gemini_account_ids: Vec<String>,
     #[serde(default)]
     pub gemini_managed_accounts: Vec<ManagedGeminiAccountConfig>,
+    #[serde(default)]
+    pub selected_copilot_account_ids: Vec<String>,
+    #[serde(default)]
+    pub copilot_managed_accounts: Vec<ManagedCopilotAccountConfig>,
     pub log_level: String,
 }
 
 fn default_gemini_enabled() -> bool {
+    true
+}
+
+fn default_copilot_enabled() -> bool {
     true
 }
 
@@ -53,6 +63,7 @@ impl Default for Config {
             claude_enabled: true,
             cursor_enabled: true,
             gemini_enabled: true,
+            copilot_enabled: true,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -62,6 +73,8 @@ impl Default for Config {
             cursor_managed_accounts: Vec::new(),
             selected_gemini_account_ids: Vec::new(),
             gemini_managed_accounts: Vec::new(),
+            selected_copilot_account_ids: Vec::new(),
+            copilot_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -79,6 +92,7 @@ impl Config {
             ProviderId::Claude => self.claude_enabled,
             ProviderId::Cursor => self.cursor_enabled,
             ProviderId::Gemini => self.gemini_enabled,
+            ProviderId::Copilot => self.copilot_enabled,
         }
     }
 
@@ -89,6 +103,7 @@ impl Config {
             ProviderId::Claude => &self.selected_claude_account_ids,
             ProviderId::Cursor => &self.selected_cursor_account_ids,
             ProviderId::Gemini => &self.selected_gemini_account_ids,
+            ProviderId::Copilot => &self.selected_copilot_account_ids,
         }
     }
 
@@ -98,6 +113,7 @@ impl Config {
             ProviderId::Claude => &mut self.selected_claude_account_ids,
             ProviderId::Cursor => &mut self.selected_cursor_account_ids,
             ProviderId::Gemini => &mut self.selected_gemini_account_ids,
+            ProviderId::Copilot => &mut self.selected_copilot_account_ids,
         }
     }
 
@@ -120,6 +136,7 @@ impl Config {
             ProviderId::Claude => &mut self.claude_enabled,
             ProviderId::Cursor => &mut self.cursor_enabled,
             ProviderId::Gemini => &mut self.gemini_enabled,
+            ProviderId::Copilot => &mut self.copilot_enabled,
         };
         let changed = *target != enabled;
         *target = enabled;
@@ -205,6 +222,17 @@ pub struct ManagedGeminiAccountConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedCopilotAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub github_user_id: u64,
+    pub login: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedCursorAccountConfig {
     #[serde(default)]
     pub id: String,
@@ -244,6 +272,7 @@ pub struct AppPaths {
     pub claude_accounts_dir: PathBuf,
     pub cursor_accounts_dir: PathBuf,
     pub gemini_accounts_dir: PathBuf,
+    pub copilot_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -343,6 +372,11 @@ pub fn managed_gemini_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn managed_copilot_account_dir(account_id: &str) -> PathBuf {
+    paths().copilot_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn paths() -> AppPaths {
     let cache_root = cache_root_dir();
     let state_root = state_parent_dir();
@@ -352,6 +386,7 @@ pub fn paths() -> AppPaths {
     let claude_accounts_dir = state_dir.join("claude-accounts");
     let cursor_accounts_dir = state_dir.join("cursor-accounts");
     let gemini_accounts_dir = state_dir.join("gemini-accounts");
+    let copilot_accounts_dir = state_dir.join("copilot-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         snapshot_file: cache_dir.join("snapshots.json"),
@@ -360,6 +395,7 @@ pub fn paths() -> AppPaths {
         claude_accounts_dir,
         cursor_accounts_dir,
         gemini_accounts_dir,
+        copilot_accounts_dir,
         log_dir,
     }
 }
@@ -375,6 +411,7 @@ mod tests {
         assert!(config.provider_enabled(ProviderId::Claude));
         assert!(config.provider_enabled(ProviderId::Cursor));
         assert!(config.provider_enabled(ProviderId::Gemini));
+        assert!(config.provider_enabled(ProviderId::Copilot));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::AutoInitPending
@@ -388,11 +425,30 @@ mod tests {
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 500);
+        assert_eq!(Config::VERSION, 600);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());
         assert!(config.gemini_managed_accounts.is_empty());
+        assert!(config.copilot_managed_accounts.is_empty());
+    }
+
+    #[test]
+    fn copilot_account_config_does_not_serialize_account_root() {
+        let now = Utc::now();
+        let account = ManagedCopilotAccountConfig {
+            id: "copilot-42".to_string(),
+            label: "octocat".to_string(),
+            github_user_id: 42,
+            login: "octocat".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        };
+
+        let value = serde_json::to_value(account).unwrap();
+
+        assert!(value.get("account_root").is_none());
     }
 
     #[test]

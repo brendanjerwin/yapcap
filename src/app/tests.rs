@@ -1,6 +1,7 @@
 use super::applet::{
-    applet_bar_width, applet_button_size, applet_percent_cell_alignment, applet_percent_cell_width,
-    applet_percent_text, select_provider, selected_provider_all_percents,
+    AppletBarLayout, applet_bar_layout, applet_bar_width, applet_button_size,
+    applet_percent_cell_alignment, applet_percent_cell_width, applet_percent_text, select_provider,
+    selected_provider_all_bar_layouts,
 };
 use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size, popup_settings_size};
 use super::{
@@ -159,10 +160,10 @@ fn applet_button_size_percent_styles_ignore_current_percent_digits() {
     let short_state = state_with_selected_account_percents(&[0.0, 8.5]);
     let wide_state = state_with_selected_account_percents(&[86.5, 100.0]);
     let short_n =
-        selected_provider_all_percents(&short_state, ProviderId::Codex, UsageAmountFormat::Used)
+        selected_provider_all_bar_layouts(&short_state, ProviderId::Codex, UsageAmountFormat::Used)
             .len();
     let wide_n =
-        selected_provider_all_percents(&wide_state, ProviderId::Codex, UsageAmountFormat::Used)
+        selected_provider_all_bar_layouts(&wide_state, ProviderId::Codex, UsageAmountFormat::Used)
             .len();
 
     assert_eq!(short_n, 2);
@@ -182,10 +183,10 @@ fn applet_percent_groups_are_capped_to_four_selected_accounts() {
     let state = state_with_selected_account_percents(&[1.0, 2.0, 3.0, 4.0, 5.0]);
 
     let percents =
-        selected_provider_all_percents(&state, ProviderId::Codex, UsageAmountFormat::Used);
+        selected_provider_all_bar_layouts(&state, ProviderId::Codex, UsageAmountFormat::Used);
 
     assert_eq!(percents.len(), 4);
-    assert_eq!(percents.last().map(|&(p0, _)| p0), Some(4.0));
+    assert_eq!(percents.last().map(|layout| layout.primary), Some(4.0));
 }
 
 #[test]
@@ -299,12 +300,80 @@ fn selected_provider_all_percents_uses_first_panel_window() {
     state.upsert_account(account);
 
     let percents_used =
-        selected_provider_all_percents(&state, ProviderId::Codex, UsageAmountFormat::Used);
-    assert_eq!(percents_used.first().map(|&(p0, _)| p0), Some(86.5));
+        selected_provider_all_bar_layouts(&state, ProviderId::Codex, UsageAmountFormat::Used);
+    assert_eq!(
+        percents_used.first().map(|layout| layout.primary),
+        Some(86.5)
+    );
+    assert_eq!(
+        percents_used.first().and_then(|layout| layout.secondary),
+        Some(42.0)
+    );
 
     let percents_left =
-        selected_provider_all_percents(&state, ProviderId::Codex, UsageAmountFormat::Left);
-    assert_eq!(percents_left.first().map(|&(p0, _)| p0), Some(13.5));
+        selected_provider_all_bar_layouts(&state, ProviderId::Codex, UsageAmountFormat::Left);
+    assert_eq!(
+        percents_left.first().map(|layout| layout.primary),
+        Some(13.5)
+    );
+}
+
+#[test]
+fn applet_bar_layout_preserves_single_bar_shape() {
+    let snapshot = UsageSnapshot {
+        provider: ProviderId::Copilot,
+        source: "test".to_string(),
+        updated_at: Utc::now(),
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "premium_interactions".to_string(),
+            used_percent: 37.5,
+            reset_at: None,
+            window_seconds: None,
+            reset_description: None,
+        }],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity::default(),
+    };
+
+    let layout = applet_bar_layout(
+        snapshot.applet_windows(),
+        snapshot.updated_at,
+        UsageAmountFormat::Used,
+    );
+
+    assert_eq!(layout, AppletBarLayout::single_bar(37.5));
+}
+
+#[test]
+fn selected_provider_all_bar_layouts_keeps_mixed_copilot_account_shapes() {
+    let mut state = AppState::empty();
+    state
+        .provider_mut(ProviderId::Copilot)
+        .unwrap()
+        .selected_account_ids = vec!["casey-free".to_string(), "morgan-pro".to_string()];
+
+    let mut free =
+        ProviderAccountRuntimeState::empty(ProviderId::Copilot, "casey-free", "casey-free");
+    free.snapshot = Some(snapshot_with_percents(ProviderId::Copilot, &[30.0, 80.0]));
+    state.upsert_account(free);
+
+    let mut paid =
+        ProviderAccountRuntimeState::empty(ProviderId::Copilot, "morgan-pro", "morgan-pro");
+    paid.snapshot = Some(snapshot_with_percents(ProviderId::Copilot, &[100.0]));
+    state.upsert_account(paid);
+
+    let layouts =
+        selected_provider_all_bar_layouts(&state, ProviderId::Copilot, UsageAmountFormat::Used);
+
+    assert_eq!(
+        layouts,
+        vec![
+            AppletBarLayout::two_bar(30.0, 80.0),
+            AppletBarLayout::single_bar(100.0)
+        ]
+    );
 }
 
 fn state_with_selected_account_percents(percents: &[f32]) -> AppState {
@@ -390,6 +459,29 @@ fn snapshot_with_windows(
                 units: "USD".to_string(),
             },
         }),
+        identity: ProviderIdentity::default(),
+    }
+}
+
+fn snapshot_with_percents(provider: ProviderId, percents: &[f32]) -> UsageSnapshot {
+    UsageSnapshot {
+        provider,
+        source: "test".to_string(),
+        updated_at: Utc::now(),
+        headline: UsageHeadline(0),
+        windows: percents
+            .iter()
+            .enumerate()
+            .map(|(i, percent)| UsageWindow {
+                label: format!("Window {i}"),
+                used_percent: *percent,
+                reset_at: None,
+                window_seconds: None,
+                reset_description: None,
+            })
+            .collect(),
+        provider_cost: None,
+        extra_usage: None,
         identity: ProviderIdentity::default(),
     }
 }

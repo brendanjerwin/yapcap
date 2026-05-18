@@ -1,0 +1,39 @@
+{
+  "endpoint": "copilot_user",
+  "method": "GET",
+  "requested_at": "2026-01-30T19:39:29.744Z",
+  "url": "https://api.github.com/copilot_internal/user",
+  "status_code": 200,
+  "response_headers": {},
+  "body_text": "",
+  "body_json": {
+    "access_type_sku": "plus_monthly_subscriber_quota",
+    "copilot_plan": "individual_pro",
+    "quota_reset_date": "2026-02-01",
+    "quota_snapshots": {
+      "chat": {
+        "entitlement": 0,
+        "percent_remaining": 100.0,
+        "quota_id": "chat",
+        "unlimited": true
+      },
+      "completions": {
+        "entitlement": 0,
+        "percent_remaining": 100.0,
+        "quota_id": "completions",
+        "unlimited": true
+      },
+      "premium_interactions": {
+        "entitlement": 1500,
+        "overage_count": 0,
+        "percent_remaining": 88.504,
+        "quota_id": "premium_interactions",
+        "quota_remaining": 1327.56,
+        "remaining": 1327,
+        "unlimited": false,
+        "timestamp_utc": "2026-01-30T19:39:29.744Z"
+      }
+    }
+  },
+  "_source": "zed-industries/zed discussion #44499, redacted/edited; not from probe.py"
+}

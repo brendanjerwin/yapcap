@@ -6,6 +6,42 @@ use super::{
     progress_bar, provider_icon_handle, provider_icon_variant, row, usage_display, widget,
 };
 use crate::account_selection::MAX_MULTI_ACCOUNT_SELECTION;
+use crate::model::AppletWindows;
+
+const APPLET_PRIMARY_BAR_GIRTH: f32 = 6.0;
+const APPLET_SECONDARY_BAR_GIRTH: f32 = 3.0;
+const APPLET_BAR_SPACING: f32 = 3.0;
+const APPLET_BAR_STACK_HEIGHT: f32 =
+    APPLET_PRIMARY_BAR_GIRTH + APPLET_BAR_SPACING + APPLET_SECONDARY_BAR_GIRTH;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct AppletBarLayout {
+    pub primary: f32,
+    pub secondary: Option<f32>,
+}
+
+impl AppletBarLayout {
+    fn empty_two_bar() -> Self {
+        Self {
+            primary: 0.0,
+            secondary: Some(0.0),
+        }
+    }
+
+    pub(super) fn single_bar(primary: f32) -> Self {
+        Self {
+            primary,
+            secondary: None,
+        }
+    }
+
+    pub(super) fn two_bar(primary: f32, secondary: f32) -> Self {
+        Self {
+            primary,
+            secondary: Some(secondary),
+        }
+    }
+}
 
 pub(crate) fn applet_settings() -> cosmic::app::Settings {
     let preview_core = cosmic::Core::default();
@@ -58,7 +94,7 @@ pub(super) fn applet_indicator<'a>(
     let logo_size = f32::from(logo_size_px);
     let bar_width = applet_bar_width(suggested_w, suggested_h);
     let account_percents =
-        selected_provider_all_percents(state, selected_provider, usage_amount_format);
+        selected_provider_all_bar_layouts(state, selected_provider, usage_amount_format);
 
     let bars_row = {
         let mut r = row![].align_y(Alignment::Center);
@@ -68,19 +104,11 @@ pub(super) fn applet_indicator<'a>(
                     cosmic::iced::widget::Space::new().width(Length::Fixed(APPLET_ACCOUNT_GAP)),
                 );
             }
-            let (p0, p1) = account_percents.get(i).copied().unwrap_or((0.0, 0.0));
-            r = r.push(
-                cosmic::iced::widget::column![
-                    progress_bar(0.0..=100.0, p0)
-                        .girth(Length::Fixed(6.0))
-                        .length(Length::Fixed(bar_width)),
-                    progress_bar(0.0..=100.0, p1)
-                        .girth(Length::Fixed(3.0))
-                        .length(Length::Fixed(bar_width)),
-                ]
-                .spacing(3)
-                .width(Length::Fixed(bar_width)),
-            );
+            let layout = account_percents
+                .get(i)
+                .copied()
+                .unwrap_or_else(AppletBarLayout::empty_two_bar);
+            r = r.push(applet_bar_column(layout, bar_width));
         }
         r
     };
@@ -199,16 +227,40 @@ pub(super) fn applet_percent_cell_alignment() -> Alignment {
     Alignment::Start
 }
 
-fn account_percents_row(account_percents: &[(f32, f32)]) -> Element<'static, Message> {
+fn applet_bar_column(layout: AppletBarLayout, bar_width: f32) -> Element<'static, Message> {
+    let primary = progress_bar(0.0..=100.0, layout.primary)
+        .girth(Length::Fixed(APPLET_PRIMARY_BAR_GIRTH))
+        .length(Length::Fixed(bar_width));
+    let content: Element<'static, Message> = match layout.secondary {
+        Some(secondary) => cosmic::iced::widget::column![
+            primary,
+            progress_bar(0.0..=100.0, secondary)
+                .girth(Length::Fixed(APPLET_SECONDARY_BAR_GIRTH))
+                .length(Length::Fixed(bar_width)),
+        ]
+        .spacing(APPLET_BAR_SPACING)
+        .width(Length::Fixed(bar_width))
+        .into(),
+        None => primary.into(),
+    };
+
+    widget::container(content)
+        .width(Length::Fixed(bar_width))
+        .height(Length::Fixed(APPLET_BAR_STACK_HEIGHT))
+        .align_y(cosmic::iced::alignment::Vertical::Center)
+        .into()
+}
+
+fn account_percents_row(account_percents: &[AppletBarLayout]) -> Element<'static, Message> {
     let mut r = row![].align_y(Alignment::Center);
-    for (i, &(p0, _)) in account_percents.iter().enumerate() {
+    for (i, layout) in account_percents.iter().enumerate() {
         if i > 0 {
             r = r.push(
                 cosmic::iced::widget::Space::new().width(Length::Fixed(APPLET_PERCENT_ACCOUNT_GAP)),
             );
         }
         let w = applet_percent_cell_width();
-        let cell = widget::container(widget::text(applet_percent_text(p0)).size(13))
+        let cell = widget::container(widget::text(applet_percent_text(layout.primary)).size(13))
             .width(Length::Fixed(w))
             .align_x(applet_percent_cell_alignment());
         r = r.push(cell);
@@ -216,42 +268,52 @@ fn account_percents_row(account_percents: &[(f32, f32)]) -> Element<'static, Mes
     r.into()
 }
 
-pub(super) fn selected_provider_all_percents(
+pub(super) fn selected_provider_all_bar_layouts(
     state: &AppState,
     selected_provider: ProviderId,
     usage_amount_format: UsageAmountFormat,
-) -> Vec<(f32, f32)> {
+) -> Vec<AppletBarLayout> {
     let now = chrono::Utc::now();
     let accounts = state.display_selected_accounts(selected_provider);
     if accounts.is_empty() {
         let snapshot = state
             .provider(selected_provider)
             .and_then(|p| p.legacy_display_snapshot.as_ref());
-        let (w0, w1) = snapshot.map_or((None, None), |s| s.applet_windows());
-        let p0 = w0.map_or(0.0, |w| {
-            usage_display::displayed_amount_percent(w, now, usage_amount_format)
-        });
-        let p1 = w1.map_or(0.0, |w| {
-            usage_display::displayed_amount_percent(w, now, usage_amount_format)
-        });
-        return vec![(p0, p1)];
+        return vec![applet_bar_layout(
+            snapshot.and_then(|s| s.applet_windows()),
+            now,
+            usage_amount_format,
+        )];
     }
     accounts
         .iter()
         .map(|account| {
-            let (w0, w1) = account
-                .snapshot
-                .as_ref()
-                .map_or((None, None), |s| s.applet_windows());
-            let p0 = w0.map_or(0.0, |w| {
-                usage_display::displayed_amount_percent(w, now, usage_amount_format)
-            });
-            let p1 = w1.map_or(0.0, |w| {
-                usage_display::displayed_amount_percent(w, now, usage_amount_format)
-            });
-            (p0, p1)
+            applet_bar_layout(
+                account.snapshot.as_ref().and_then(|s| s.applet_windows()),
+                now,
+                usage_amount_format,
+            )
         })
         .collect()
+}
+
+pub(super) fn applet_bar_layout(
+    windows: Option<AppletWindows<'_>>,
+    now: chrono::DateTime<chrono::Utc>,
+    usage_amount_format: UsageAmountFormat,
+) -> AppletBarLayout {
+    let Some(windows) = windows else {
+        return AppletBarLayout::empty_two_bar();
+    };
+    let primary =
+        usage_display::displayed_amount_percent(windows.primary, now, usage_amount_format);
+    match windows.secondary {
+        Some(secondary) => AppletBarLayout::two_bar(
+            primary,
+            usage_display::displayed_amount_percent(secondary, now, usage_amount_format),
+        ),
+        None => AppletBarLayout::single_bar(primary),
+    }
 }
 
 pub(super) fn select_provider(current: ProviderId, state: &AppState) -> ProviderId {

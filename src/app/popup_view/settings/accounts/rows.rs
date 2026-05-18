@@ -341,6 +341,82 @@ pub(super) fn gemini_account_settings_row<'a>(
     ))
 }
 
+pub(super) fn copilot_account_settings_row<'a>(
+    account: &'a ProviderAccountRuntimeState,
+    selected_ids: &[&str],
+    config: &Config,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let is_selected = selected_ids.contains(&account.account_id.as_str());
+    let requires_action = account.auth_state == AuthState::ActionRequired;
+    let account_id = account.account_id.clone();
+    let action_support =
+        account_action_support(config, ProviderId::Copilot, account.account_id.as_str());
+    let can_reauthenticate = enabled
+        && requires_action
+        && action_support
+            .as_ref()
+            .is_some_and(|support| support.can_reauthenticate);
+    let title_row = row![account_label_text(&account.label, 14)]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+    let mut selector_body = cosmic::iced::widget::column![title_row]
+        .spacing(6)
+        .width(Length::Fill);
+    if requires_action {
+        selector_body = selector_body.push(
+            row![badge_with_tooltip(
+                if enabled {
+                    badge_warning(fl!("badge-login-required"))
+                } else {
+                    badge_warning_soft(fl!("badge-login-required"))
+                },
+                fl!("badge-login-required-tooltip"),
+            )]
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        );
+    }
+    let selector_content = container(selector_body)
+        .padding([10, 12])
+        .width(Length::Fill);
+    let selector = widget::button::custom(selector_content)
+        .class(account_row_button_class(is_selected))
+        .width(Length::Fill)
+        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
+            ProviderId::Copilot,
+            account_id.clone(),
+        )));
+
+    let can_delete = action_support.is_some_and(|support| support.can_delete);
+    let delete_press =
+        (enabled && can_delete).then_some(Message::DeleteCopilotAccount(account_id.clone()));
+    let mut actions = row![account_selected_marker(is_selected, enabled)]
+        .spacing(0)
+        .align_y(Alignment::Center);
+    if can_reauthenticate {
+        actions = actions.push(account_action_icon_button(
+            "view-refresh-symbolic",
+            fl!("copilot-account-reauth-tooltip"),
+            Some(Message::ReauthenticateCopilotAccount(account_id)),
+        ));
+    }
+    actions = actions.push(account_action_icon_button(
+        "edit-delete-symbolic",
+        fl!("account-delete-tooltip"),
+        delete_press,
+    ));
+
+    Element::from(account_row_container(
+        selector.into(),
+        actions.into(),
+        is_selected,
+        enabled,
+        requires_action,
+    ))
+}
+
 pub(super) fn account_selector_list<'a>(
     rows: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {

@@ -1,9 +1,10 @@
 use super::{
     AccountSelectionStatus, AppModel, ClaudeLoginEvent, ClaudeLoginStatus, CodexLoginEvent,
-    CodexLoginState, CodexLoginStatus, CursorScanResult, CursorScanState, GeminiLoginEvent,
-    GeminiLoginState, GeminiLoginStatus, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
-    ManagedCursorAccountConfig, Message, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
-    Task, claude, codex, cursor, gemini, refresh_provider_task, refresh_provider_tasks, runtime,
+    CodexLoginState, CodexLoginStatus, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus,
+    CursorScanResult, CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
+    ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
+    ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, copilot, cursor,
+    gemini, refresh_provider_task, refresh_provider_tasks, runtime,
 };
 
 impl AppModel {
@@ -605,6 +606,195 @@ impl AppModel {
                     }
                     Err(error) => {
                         login.status = GeminiLoginStatus::Failed;
+                        login.error = Some(error);
+                        Task::none()
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn reauthenticate_copilot_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .copilot_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        if self
+            .copilot_login
+            .as_ref()
+            .is_some_and(|login| login.status == CopilotLoginStatus::Running)
+        {
+            return Task::none();
+        }
+        self.copilot_login = None;
+        let (state, task) = match copilot::prepare_for_reauth(self.config.clone(), account_id) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.copilot_login = Some(CopilotLoginState {
+                    flow_id: "failed".to_string(),
+                    status: CopilotLoginStatus::Failed,
+                    user_code: None,
+                    verification_uri: None,
+                    output: Vec::new(),
+                    error: Some(error),
+                    code_copied: false,
+                    expected_github_user_id: None,
+                });
+                return Task::none();
+            }
+        };
+        self.start_copilot_login_task(state, task)
+    }
+
+    pub(super) fn start_copilot_login(&mut self) -> Task<Message> {
+        if self
+            .copilot_login
+            .as_ref()
+            .is_some_and(|login| login.status == CopilotLoginStatus::Running)
+        {
+            return Task::none();
+        }
+        self.copilot_login = None;
+        let (state, task) = match copilot::prepare(self.config.clone()) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.copilot_login = Some(CopilotLoginState {
+                    flow_id: "failed".to_string(),
+                    status: CopilotLoginStatus::Failed,
+                    user_code: None,
+                    verification_uri: None,
+                    output: Vec::new(),
+                    error: Some(error),
+                    code_copied: false,
+                    expected_github_user_id: None,
+                });
+                return Task::none();
+            }
+        };
+        self.start_copilot_login_task(state, task)
+    }
+
+    fn start_copilot_login_task(
+        &mut self,
+        state: CopilotLoginState,
+        task: cosmic::iced::Task<CopilotLoginEvent>,
+    ) -> Task<Message> {
+        self.copilot_login = Some(state);
+        let task =
+            task.map(|event| cosmic::Action::App(Message::CopilotLoginEvent(Box::new(event))));
+        let (task, handle) = task.abortable();
+        self.copilot_login_handle = Some(handle);
+        task
+    }
+
+    pub(super) fn cancel_copilot_login(&mut self) {
+        if let Some(handle) = self.copilot_login_handle.take() {
+            handle.abort();
+        }
+        self.copilot_login = None;
+    }
+
+    pub(super) fn copy_copilot_login_code(&mut self, code: String) -> Task<Message> {
+        let Some(login) = self.copilot_login.as_mut() else {
+            return Task::none();
+        };
+        login.code_copied = true;
+        let flow_id = login.flow_id.clone();
+        let write: Task<Message> = cosmic::iced::clipboard::write(code);
+        let clear: Task<Message> = Task::perform(
+            async move {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                flow_id
+            },
+            |flow_id| cosmic::Action::App(Message::ClearCopilotLoginCodeCopied(flow_id)),
+        );
+        write.chain(clear)
+    }
+
+    pub(super) fn clear_copilot_login_code_copied(&mut self, flow_id: &str) {
+        if let Some(login) = self.copilot_login.as_mut()
+            && login.flow_id == flow_id
+        {
+            login.code_copied = false;
+        }
+    }
+
+    pub(super) fn handle_copilot_login_event(&mut self, event: CopilotLoginEvent) -> Task<Message> {
+        match event {
+            CopilotLoginEvent::Code {
+                flow_id,
+                user_code,
+                verification_uri,
+            } => {
+                let Some(login) = self.copilot_login.as_mut() else {
+                    return Task::none();
+                };
+                if login.flow_id != flow_id {
+                    return Task::none();
+                }
+                login.user_code = Some(user_code);
+                login.verification_uri = Some(verification_uri);
+                Task::none()
+            }
+            CopilotLoginEvent::Output { flow_id, line } => {
+                let Some(login) = self.copilot_login.as_mut() else {
+                    return Task::none();
+                };
+                if login.flow_id != flow_id {
+                    return Task::none();
+                }
+                login.output.push(line);
+                if login.output.len() > 8 {
+                    login.output.remove(0);
+                }
+                Task::none()
+            }
+            CopilotLoginEvent::Finished { flow_id, result } => {
+                let Some(login) = self.copilot_login.as_mut() else {
+                    return Task::none();
+                };
+                if login.flow_id != flow_id {
+                    return Task::none();
+                }
+                self.copilot_login_handle = None;
+                match *result {
+                    Ok(success) => {
+                        login.status = CopilotLoginStatus::Succeeded;
+                        login.error = None;
+                        let account_id = success.account.id.clone();
+                        let account_label = success.account.label.clone();
+                        self.write_config(|new_config| {
+                            copilot::apply_login_account(new_config, success.account.clone());
+                        });
+                        runtime::reconcile_provider(
+                            &self.config,
+                            &mut self.state,
+                            ProviderId::Copilot,
+                        );
+                        let mut account = ProviderAccountRuntimeState::empty(
+                            ProviderId::Copilot,
+                            account_id.clone(),
+                            account_label,
+                        );
+                        account.auth_state = crate::model::AuthState::Ready;
+                        account.error = None;
+                        self.state.upsert_account(account);
+                        if let Some(provider) = self.state.provider_mut(ProviderId::Copilot) {
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id);
+                            }
+                            provider.account_status = AccountSelectionStatus::Ready;
+                            provider.error = None;
+                        }
+                        runtime::persist_state(&self.state);
+                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Copilot)
+                    }
+                    Err(error) => {
+                        login.status = CopilotLoginStatus::Failed;
                         login.error = Some(error);
                         Task::none()
                     }

@@ -1,8 +1,8 @@
 use super::{
     Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_SECTION_HEIGHT,
     PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT, PopupRoute, SettingsRoute,
-    account_label_text, badge_destructive, badge_neutral, badge_success, badge_warning,
-    badge_with_tooltip, card, info_block, plan_badge, provider_summary,
+    account_label_text, apply_alpha, badge_destructive, badge_neutral, badge_success,
+    badge_warning, badge_with_tooltip, card, info_block, plan_badge, provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
 use crate::currency_format;
@@ -108,6 +108,7 @@ fn account_column_body_items<'a>(
         for window in &snapshot.windows {
             items.push(usage_section(
                 window,
+                window_display_label(snapshot.provider, &window.label),
                 config.reset_time_format,
                 config.usage_amount_format,
             ));
@@ -377,20 +378,43 @@ fn active_snapshot_for_account<'a>(
 
 fn usage_section(
     window: &UsageWindow,
+    display_label: String,
     reset_time_format: ResetTimeFormat,
     usage_amount_format: UsageAmountFormat,
 ) -> Element<'static, Message> {
     let now = chrono::Utc::now();
     let pace = usage_display::pace(window, now);
     usage_block(
-        window.label.clone(),
+        display_label,
         usage_display::displayed_amount_percent(window, now, usage_amount_format),
         usage_display::usage_amount_label(window, now, usage_amount_format),
-        usage_display::reset_label(window, now, reset_time_format),
-        None,
-        pace,
-        pace_marker_percent(pace, usage_amount_format),
+        UsageBlockDetails {
+            secondary: usage_display::reset_label(window, now, reset_time_format),
+            secondary_tooltip: None,
+            pace,
+            pace_marker_percent: pace_marker_percent(pace, usage_amount_format),
+            overage: overage_text(window),
+        },
     )
+}
+
+fn window_display_label(provider: ProviderId, label: &str) -> String {
+    if provider == ProviderId::Copilot {
+        match label {
+            "chat" => return fl!("copilot-window-chat"),
+            "completions" => return fl!("copilot-window-completions"),
+            "premium_interactions" => return fl!("copilot-window-premium"),
+            _ => {}
+        }
+    }
+    label.to_string()
+}
+
+fn overage_text(window: &UsageWindow) -> Option<String> {
+    if window.label == "premium_interactions" {
+        return window.reset_description.clone();
+    }
+    None
 }
 
 fn extra_usage_detail_section(
@@ -437,10 +461,13 @@ fn extra_usage_cost_bar(
         fl!("extra-usage-label"),
         usage_display::displayed_amount_percent(&window, now, usage_amount_format),
         usage_display::usage_amount_label(&window, now, usage_amount_format),
-        Some(cost_line),
-        Some(cost_tip),
-        None,
-        None,
+        UsageBlockDetails {
+            secondary: Some(cost_line),
+            secondary_tooltip: Some(cost_tip),
+            pace: None,
+            pace_marker_percent: None,
+            overage: None,
+        },
     )
 }
 
@@ -477,30 +504,57 @@ fn usage_block(
     title: String,
     percent: f32,
     primary: String,
-    secondary: Option<String>,
-    secondary_tooltip: Option<String>,
-    pace: Option<usage_display::UsagePace>,
-    pace_marker_percent: Option<f32>,
+    details: UsageBlockDetails,
 ) -> Element<'static, Message> {
     let pct_row = row![
         widget::text(primary).size(14),
         cosmic::iced::widget::Space::new().width(Length::Fill),
-        secondary_cost_text(secondary.unwrap_or_default(), secondary_tooltip),
+        secondary_cost_text(
+            details.secondary.unwrap_or_default(),
+            details.secondary_tooltip
+        ),
     ]
     .align_y(Alignment::Center);
 
-    card(
-        column![
-            widget::text(title).size(18),
-            paced_progress_bar(
-                percent,
-                pace_marker_percent,
-                pace.map(usage_display::pace_label)
-            ),
-            pct_row,
-        ]
-        .spacing(6),
-    )
+    let mut content = column![
+        widget::text(title).size(18),
+        paced_progress_bar(
+            percent,
+            details.pace_marker_percent,
+            details.pace.map(usage_display::pace_label)
+        ),
+    ]
+    .spacing(6);
+
+    if let Some(overage) = details.overage {
+        content = content.push(overage_line(overage));
+    }
+
+    card(content.push(pct_row))
+}
+
+struct UsageBlockDetails {
+    secondary: Option<String>,
+    secondary_tooltip: Option<String>,
+    pace: Option<usage_display::UsagePace>,
+    pace_marker_percent: Option<f32>,
+    overage: Option<String>,
+}
+
+fn overage_line(text: String) -> Element<'static, Message> {
+    container(widget::text(text).size(13))
+        .style(|theme: &cosmic::Theme| {
+            let color = apply_alpha(theme.cosmic().warning.base.into(), 0.92);
+            widget::container::Style {
+                text_color: Some(color),
+                background: None,
+                border: cosmic::iced::Border::default(),
+                shadow: cosmic::iced::Shadow::default(),
+                icon_color: Some(color),
+                snap: true,
+            }
+        })
+        .into()
 }
 
 fn secondary_cost_text(text: String, tooltip: Option<String>) -> Element<'static, Message> {

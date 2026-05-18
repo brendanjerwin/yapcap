@@ -178,6 +178,91 @@ fn account_config_ref_contains_only_provider_and_account_id() {
 }
 
 #[test]
+fn create_account_creates_missing_provider_root() {
+    let root = test_dir("missing-root");
+    assert!(!root.exists());
+    let storage = ProviderAccountStorage::new(&root);
+
+    let stored = storage
+        .create_account(NewProviderAccount {
+            provider: ProviderId::Claude,
+            email: "person@example.com".to_string(),
+            provider_account_id: None,
+            organization_id: None,
+            organization_name: None,
+            tokens: tokens(),
+            snapshot: None,
+        })
+        .unwrap();
+
+    assert!(root.is_dir());
+    assert!(stored.account_dir.is_dir());
+    assert!(stored.account_dir.join(METADATA_FILE).exists());
+    assert!(stored.account_dir.join(TOKENS_FILE).exists());
+}
+
+#[test]
+fn save_snapshot_recreates_missing_account_directory() {
+    let storage = ProviderAccountStorage::new(test_dir("save-missing-dir"));
+    let stored = storage
+        .create_account(NewProviderAccount {
+            provider: ProviderId::Claude,
+            email: "person@example.com".to_string(),
+            provider_account_id: None,
+            organization_id: None,
+            organization_name: None,
+            tokens: tokens(),
+            snapshot: None,
+        })
+        .unwrap();
+
+    fs::remove_dir_all(&stored.account_dir).unwrap();
+    assert!(!stored.account_dir.exists());
+
+    storage
+        .save_snapshot(&stored.account_ref.account_id, &snapshot())
+        .unwrap();
+    storage
+        .save_tokens(&stored.account_ref.account_id, &tokens())
+        .unwrap();
+    storage
+        .save_metadata(&stored.account_ref.account_id, &stored.metadata)
+        .unwrap();
+
+    assert!(stored.account_dir.join(SNAPSHOT_FILE).exists());
+    assert!(stored.account_dir.join(TOKENS_FILE).exists());
+    assert!(stored.account_dir.join(METADATA_FILE).exists());
+}
+
+#[test]
+fn create_account_returns_clear_error_when_path_component_is_a_file() {
+    let parent = test_dir("file-in-path");
+    fs::create_dir_all(&parent).unwrap();
+    let blocker = parent.join("claude-accounts");
+    fs::write(&blocker, "not a dir").unwrap();
+    let storage = ProviderAccountStorage::new(&blocker);
+
+    let err = storage
+        .create_account(NewProviderAccount {
+            provider: ProviderId::Claude,
+            email: "person@example.com".to_string(),
+            provider_account_id: None,
+            organization_id: None,
+            organization_name: None,
+            tokens: tokens(),
+            snapshot: None,
+        })
+        .unwrap_err();
+
+    match err {
+        AccountStorageError::CreateDir { path, .. } => {
+            assert!(path.starts_with(&blocker));
+        }
+        other => panic!("expected CreateDir error, got {other:?}"),
+    }
+}
+
+#[test]
 fn delete_account_removes_account_directory() {
     let storage = ProviderAccountStorage::new(test_dir("delete"));
     let stored = storage

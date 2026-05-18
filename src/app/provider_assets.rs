@@ -29,6 +29,12 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Gemini, _) => {
             include_bytes!("../../resources/providers/gemini-color.svg")
         }
+        (ProviderId::Copilot, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/copilot.svg")
+        }
+        (ProviderId::Copilot, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/copilot-reversed.svg")
+        }
     };
 
     icon::from_svg_bytes(bytes)

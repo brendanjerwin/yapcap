@@ -42,6 +42,12 @@ impl From<GeminiError> for AppError {
     }
 }
 
+impl From<CopilotError> for AppError {
+    fn from(value: CopilotError) -> Self {
+        Self::Provider(ProviderError::Copilot(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -81,6 +87,7 @@ impl AppError {
         match self {
             Self::Provider(ProviderError::Claude(e)) => e.is_rate_limited(),
             Self::Provider(ProviderError::Gemini(e)) => e.is_rate_limited(),
+            Self::Provider(ProviderError::Copilot(e)) => e.is_rate_limited(),
             _ => false,
         }
     }
@@ -90,6 +97,7 @@ impl AppError {
         match self {
             Self::Provider(ProviderError::Claude(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Gemini(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Copilot(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -143,6 +151,8 @@ pub enum ProviderError {
     Cursor(#[from] CursorError),
     #[error(transparent)]
     Gemini(#[from] GeminiError),
+    #[error(transparent)]
+    Copilot(#[from] CopilotError),
 }
 
 impl ProviderError {
@@ -153,6 +163,7 @@ impl ProviderError {
             Self::Claude(error) => error.is_network_unavailable(),
             Self::Cursor(error) => error.is_network_unavailable(),
             Self::Gemini(error) => error.is_network_unavailable(),
+            Self::Copilot(error) => error.is_network_unavailable(),
         }
     }
 
@@ -163,6 +174,7 @@ impl ProviderError {
             Self::Claude(error) => error.requires_user_action(),
             Self::Cursor(error) => error.requires_user_action(),
             Self::Gemini(error) => error.requires_user_action(),
+            Self::Copilot(error) => error.requires_user_action(),
         }
     }
 
@@ -173,6 +185,7 @@ impl ProviderError {
             Self::Codex(error) => error.is_transient(),
             Self::Cursor(_) => false,
             Self::Gemini(error) => error.is_transient(),
+            Self::Copilot(error) => error.is_transient(),
         }
     }
 }
@@ -496,6 +509,73 @@ impl GeminiError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum CopilotError {
+    #[error("Copilot login required")]
+    LoginRequired,
+    #[error("failed to read Copilot account storage: {0}")]
+    AccountStorage(String),
+    #[error("Copilot usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Copilot usage endpoint returned HTTP {status}")]
+    UsageHttp { status: u16 },
+    #[error("Copilot usage endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode Copilot usage response")]
+    DecodeUsage(#[source] reqwest::Error),
+    #[error("failed to parse Copilot usage response")]
+    ParseUsage(#[source] serde_json::Error),
+    #[error("invalid Copilot reset date {value}")]
+    InvalidResetDate {
+        value: String,
+        #[source]
+        source: chrono::ParseError,
+    },
+    #[error("Rate limited by Copilot{} — will retry automatically",
+        .retry_after_secs.map_or(String::new(), |s| format!(" (retry in {})", format_retry_secs(s))))]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("Unrecognized Copilot response: {detail}")]
+    UnrecognizedResponse { detail: String },
+}
+
+impl CopilotError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::LoginRequired)
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            Self::UsageHttp { status } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -608,6 +688,24 @@ mod tests {
     #[test]
     fn gemini_rate_limited_routes_retry_after_through_app_error() {
         let err = AppError::Provider(ProviderError::Gemini(GeminiError::RateLimited {
+            retry_after_secs: Some(42),
+        }));
+        assert!(err.is_rate_limited());
+        assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
+        assert!(err.is_transient());
+        assert!(!err.requires_user_action());
+    }
+
+    #[test]
+    fn copilot_auth_failures_require_user_action() {
+        let err = AppError::Provider(ProviderError::Copilot(CopilotError::LoginRequired));
+        assert!(err.requires_user_action());
+        assert!(!err.is_transient());
+    }
+
+    #[test]
+    fn copilot_rate_limited_routes_retry_after_through_app_error() {
+        let err = AppError::Provider(ProviderError::Copilot(CopilotError::RateLimited {
             retry_after_secs: Some(42),
         }));
         assert!(err.is_rate_limited());

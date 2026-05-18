@@ -1,0 +1,30 @@
+{
+  "body_json": {
+    "device_code": "REDACTEDDEVICECODEPLACEHOLDER0000000000000",
+    "expires_in": 899,
+    "interval": 5,
+    "user_code": "XXXX-XXXX",
+    "verification_uri": "https://github.com/login/device"
+  },
+  "body_text": "{\"device_code\":\"REDACTEDDEVICECODEPLACEHOLDER0000000000000\",\"user_code\":\"XXXX-XXXX\",\"verification_uri\":\"https://github.com/login/device\",\"expires_in\":899,\"interval\":5}",
+  "endpoint": "device_code",
+  "method": "POST",
+  "requested_at": "2026-05-15T10:21:19.406521+00:00",
+  "response_headers": {
+    "Cache-Control": "max-age=0, private, must-revalidate",
+    "Content-Length": "165",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 15 May 2026 10:21:19 GMT",
+    "ETag": "W/\"REDACTED\"",
+    "Server": "github.com",
+    "Set-Cookie": "REDACTED",
+    "Strict-Transport-Security": "max-age=31536000; includeSubdomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "deny",
+    "X-GitHub-Request-Id": "REDACTED",
+    "X-XSS-Protection": "0",
+    "connection": "close"
+  },
+  "status_code": 200,
+  "url": "https://github.com/login/device/code"
+}

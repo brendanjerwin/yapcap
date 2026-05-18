@@ -12,6 +12,8 @@ pub const FAMILY_LITE: &str = "Lite";
 pub const UNIT_REQUESTS: &str = "Requests";
 pub const UNIT_TOKENS: &str = "Tokens";
 
+const GEMINI_WINDOW_SECONDS: i64 = 24 * 3600;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Family {
     Pro,
@@ -101,7 +103,7 @@ impl FamilyUsageWindow {
             label: self.family.label().to_string(),
             used_percent: self.used_percent,
             reset_at: self.reset_at,
-            window_seconds: None,
+            window_seconds: self.reset_at.map(|_| GEMINI_WINDOW_SECONDS),
             reset_description: None,
         }
     }
@@ -366,6 +368,29 @@ mod tests {
         let windows = classify_usage_windows(&response, "standard-tier", now());
         let labels: Vec<_> = windows.iter().map(|w| w.label.as_str()).collect();
         assert_eq!(labels, vec![FAMILY_PRO, FAMILY_FLASH, FAMILY_LITE]);
+    }
+
+    #[test]
+    fn visible_family_window_infers_twenty_four_hour_window_seconds() {
+        let future = now() + chrono::Duration::hours(6);
+        let response = RetrieveUserQuotaResponse {
+            buckets: vec![bucket("gemini-2.5-flash", 0.5, future, "REQUESTS")],
+        };
+        let windows = classify_usage_windows(&response, "standard-tier", now());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].window_seconds, Some(24 * 3600));
+    }
+
+    #[test]
+    fn epoch_reset_leaves_window_seconds_none() {
+        let epoch = Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap();
+        let response = RetrieveUserQuotaResponse {
+            buckets: vec![bucket("gemini-2.5-flash", 0.5, epoch, "REQUESTS")],
+        };
+        let windows = classify_usage_windows(&response, "standard-tier", now());
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0].reset_at, None);
+        assert_eq!(windows[0].window_seconds, None);
     }
 
     #[test]

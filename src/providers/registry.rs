@@ -6,7 +6,7 @@ use crate::providers::adapters::adapter;
 use crate::providers::interface::{
     ProviderAccountDescriptor, ProviderAccountHandle, ProviderCapabilities,
 };
-use crate::providers::{claude, codex, cursor, gemini};
+use crate::providers::{claude, codex, copilot, cursor, gemini};
 
 #[cfg(test)]
 mod tests;
@@ -20,7 +20,8 @@ pub fn startup_sync(config: &mut Config) -> bool {
     let cursor_changed = cursor::sync_managed_accounts(config);
     let claude_changed = claude::sync_managed_account_dirs(config);
     let gemini_changed = gemini::sync_managed_accounts(config);
-    codex_changed | cursor_changed | claude_changed | gemini_changed
+    let copilot_changed = copilot::sync_managed_accounts(config);
+    codex_changed | cursor_changed | claude_changed | gemini_changed | copilot_changed
 }
 
 pub fn initialize_provider_visibility(config: &mut Config, providers: &[ProviderId]) -> bool {
@@ -85,6 +86,7 @@ pub async fn fetch_handle(
         ProviderAccountHandle::Claude(_) => ProviderId::Claude,
         ProviderAccountHandle::Cursor(_) => ProviderId::Cursor,
         ProviderAccountHandle::Gemini(_) => ProviderId::Gemini,
+        ProviderAccountHandle::Copilot(_) => ProviderId::Copilot,
     };
     adapter(provider).fetch_account(handle, client).await
 }

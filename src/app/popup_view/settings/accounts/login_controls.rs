@@ -1,6 +1,7 @@
 use super::super::super::{
-    ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus, CursorScanState,
-    Element, GeminiLoginState, GeminiLoginStatus, Length, Message, fl, row, widget,
+    Alignment, ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus,
+    CopilotLoginState, CopilotLoginStatus, CursorScanState, Element, GeminiLoginState,
+    GeminiLoginStatus, Length, Message, fl, row, widget,
 };
 
 pub(super) fn codex_login_controls(
@@ -145,6 +146,102 @@ pub(super) fn gemini_login_controls(
     }
 
     Element::from(content)
+}
+
+pub(super) fn copilot_login_controls(
+    login: Option<&CopilotLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(enabled.then_some(Message::StartCopilotLogin))
+            .into();
+    };
+
+    let mut content =
+        cosmic::iced::widget::column![widget::text(copilot_login_status(login)).size(13)]
+            .spacing(10)
+            .width(Length::Fill);
+
+    if login.status == CopilotLoginStatus::Running {
+        content = content.push(widget::text(fl!("account-browser-login-hint")).size(12));
+    }
+
+    if login.status == CopilotLoginStatus::Running
+        && let Some(code) = &login.user_code
+    {
+        content = content.push(copilot_user_code_row(code, login.code_copied, enabled));
+    }
+    if login.status == CopilotLoginStatus::Running
+        && let Some(url) = &login.verification_uri
+    {
+        content = content.push(
+            widget::button::standard(fl!("open-browser"))
+                .on_press_maybe(enabled.then_some(Message::OpenUrl(url.clone()))),
+        );
+    }
+
+    if login.status == CopilotLoginStatus::Running {
+        content = content.push(
+            widget::button::text(fl!("account-cancel"))
+                .on_press_maybe(enabled.then_some(Message::CancelCopilotLogin)),
+        );
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another"))
+                    .on_press_maybe(enabled.then_some(Message::StartCopilotLogin)),
+                widget::button::text(fl!("account-dismiss"))
+                    .on_press_maybe(enabled.then_some(Message::CancelCopilotLogin)),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn copilot_user_code_row<'a>(code: &'a str, copied: bool, enabled: bool) -> Element<'a, Message> {
+    let code_text = widget::text(fl!("copilot-login-user-code", code = code)).size(13);
+
+    let copy_icon_handle = widget::icon::from_name("edit-copy-symbolic")
+        .icon()
+        .into_svg_handle()
+        .unwrap_or_else(|| widget::svg::Handle::from_memory(Vec::new()));
+    let copy_icon = widget::Svg::new(copy_icon_handle)
+        .symbolic(true)
+        .class(cosmic::theme::Svg::custom(|theme| widget::svg::Style {
+            color: Some(theme.cosmic().background.component.on.into()),
+        }))
+        .width(Length::Fixed(16.0))
+        .height(Length::Fixed(16.0));
+    let copy_message = enabled.then(|| Message::CopyCopilotLoginCode(code.to_string()));
+    let copy_button = widget::tooltip::tooltip(
+        widget::button::custom(copy_icon)
+            .padding(4)
+            .on_press_maybe(copy_message),
+        widget::text(fl!("copilot-login-copy-code-tooltip")).size(12),
+        widget::tooltip::Position::Top,
+    );
+
+    let mut content = row![code_text, copy_button]
+        .spacing(8)
+        .align_y(Alignment::Center);
+    if copied {
+        content = content.push(widget::text(fl!("copilot-login-code-copied")).size(12));
+    }
+    content.into()
+}
+
+fn copilot_login_status(login: &CopilotLoginState) -> String {
+    match login.status {
+        CopilotLoginStatus::Running => fl!("copilot-login-running"),
+        CopilotLoginStatus::Succeeded => fl!("copilot-login-succeeded"),
+        CopilotLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("copilot-login-failed")),
+    }
 }
 
 fn gemini_login_status(login: &GeminiLoginState) -> String {

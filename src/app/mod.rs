@@ -33,6 +33,7 @@ use crate::model::{
 };
 use crate::providers::claude::{self, ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{self, CodexLoginEvent, CodexLoginState, CodexLoginStatus};
+use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus};
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
 use crate::providers::registry;
@@ -83,6 +84,8 @@ pub struct AppModel {
     cursor_scan_result: Option<CursorScanResult>,
     gemini_login: Option<GeminiLoginState>,
     gemini_login_handle: Option<Handle>,
+    copilot_login: Option<CopilotLoginState>,
+    copilot_login_handle: Option<Handle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +135,13 @@ pub enum Message {
     StartGeminiLogin,
     CancelGeminiLogin,
     GeminiLoginEvent(Box<GeminiLoginEvent>),
+    DeleteCopilotAccount(String),
+    ReauthenticateCopilotAccount(String),
+    StartCopilotLogin,
+    CancelCopilotLogin,
+    CopilotLoginEvent(Box<CopilotLoginEvent>),
+    CopyCopilotLoginCode(String),
+    ClearCopilotLoginCodeCopied(String),
     DeleteCursorAccount(String),
     ReauthenticateCursorAccount(String),
     StartCursorScan,
@@ -159,11 +169,13 @@ pub(super) struct PopupBodyMeasurements {
     claude: Option<f32>,
     cursor: Option<f32>,
     gemini: Option<f32>,
+    copilot: Option<f32>,
     general_settings: Option<f32>,
     codex_settings: Option<f32>,
     claude_settings: Option<f32>,
     cursor_settings: Option<f32>,
     gemini_settings: Option<f32>,
+    copilot_settings: Option<f32>,
 }
 
 impl PopupBodyMeasurements {
@@ -173,6 +185,7 @@ impl PopupBodyMeasurements {
             ProviderId::Claude => self.claude,
             ProviderId::Cursor => self.cursor,
             ProviderId::Gemini => self.gemini,
+            ProviderId::Copilot => self.copilot,
         }
     }
 
@@ -182,6 +195,7 @@ impl PopupBodyMeasurements {
             ProviderId::Claude => self.claude = Some(height),
             ProviderId::Cursor => self.cursor = Some(height),
             ProviderId::Gemini => self.gemini = Some(height),
+            ProviderId::Copilot => self.copilot = Some(height),
         }
     }
 
@@ -192,6 +206,7 @@ impl PopupBodyMeasurements {
             SettingsRoute::Provider(ProviderId::Claude) => self.claude_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Cursor) => self.cursor_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Gemini) => self.gemini_settings = Some(height),
+            SettingsRoute::Provider(ProviderId::Copilot) => self.copilot_settings = Some(height),
         }
     }
 
@@ -201,7 +216,8 @@ impl PopupBodyMeasurements {
                 .max(self.codex_settings?)
                 .max(self.claude_settings?)
                 .max(self.cursor_settings?)
-                .max(self.gemini_settings?),
+                .max(self.gemini_settings?)
+                .max(self.copilot_settings?),
         )
     }
 
@@ -291,6 +307,8 @@ impl cosmic::Application for AppModel {
             cursor_scan_result: None,
             gemini_login: None,
             gemini_login_handle: None,
+            copilot_login: None,
+            copilot_login_handle: None,
         };
 
         let update_task = update_check_task(0);
@@ -346,6 +364,7 @@ impl cosmic::Application for AppModel {
                 claude: self.claude_login.as_ref(),
                 cursor_scan: &self.cursor_scan,
                 gemini: self.gemini_login.as_ref(),
+                copilot: self.copilot_login.as_ref(),
             },
             self.selected_provider,
             &self.popup_route,
@@ -502,6 +521,23 @@ impl AppModel {
             Message::GeminiLoginEvent(event) => {
                 return Some(self.handle_gemini_login_event(*event));
             }
+            Message::DeleteCopilotAccount(account_id) => {
+                return Some(self.delete_copilot_account(&account_id));
+            }
+            Message::ReauthenticateCopilotAccount(account_id) => {
+                return Some(self.reauthenticate_copilot_account(&account_id));
+            }
+            Message::StartCopilotLogin => return Some(self.start_copilot_login()),
+            Message::CancelCopilotLogin => self.cancel_copilot_login(),
+            Message::CopilotLoginEvent(event) => {
+                return Some(self.handle_copilot_login_event(*event));
+            }
+            Message::CopyCopilotLoginCode(code) => {
+                return Some(self.copy_copilot_login_code(code));
+            }
+            Message::ClearCopilotLoginCodeCopied(flow_id) => {
+                self.clear_copilot_login_code_copied(&flow_id);
+            }
             Message::StartClaudeLogin => return Some(self.start_claude_login()),
             Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
             Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
@@ -587,6 +623,9 @@ impl AppModel {
                     }
                     SettingsRoute::Provider(ProviderId::Gemini) => {
                         self.popup_body_measurements.gemini_settings
+                    }
+                    SettingsRoute::Provider(ProviderId::Copilot) => {
+                        self.popup_body_measurements.copilot_settings
                     }
                 };
                 self.popup_body_measurements.set_settings(route, height);

@@ -29,6 +29,11 @@ pub fn provider_show_all_account_selection(config: &Config, provider: ProviderId
             .iter()
             .map(|a| a.id.clone())
             .collect(),
+        ProviderId::Copilot => config
+            .copilot_managed_accounts
+            .iter()
+            .map(|a| a.id.clone())
+            .collect(),
     };
     let active_id = config
         .selected_account_ids(provider)

@@ -492,6 +492,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn copilot_auth_failure_requires_action_and_keeps_previous_snapshot() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Copilot);
+        let mut previous_account =
+            ProviderAccountRuntimeState::empty(ProviderId::Copilot, "copilot-1", "octocat");
+        previous_account.snapshot = Some(snapshot());
+        previous_account.last_success_at = Some(Utc::now());
+
+        let result = refresh_provider_account(
+            ProviderId::Copilot,
+            true,
+            Some(&previous),
+            Some(&previous_account),
+            "copilot-1".to_string(),
+            "octocat".to_string(),
+            async { Err(AppError::from(crate::error::CopilotError::LoginRequired)) },
+        )
+        .await;
+        let account = result.accounts.first().unwrap();
+
+        assert_eq!(account.health, ProviderHealth::Error);
+        assert_eq!(account.auth_state, AuthState::ActionRequired);
+        assert!(account.snapshot.is_some());
+        assert!(account.last_success_at.is_some());
+    }
+
+    #[tokio::test]
     async fn refresh_provider_transient_error_sets_error_state() {
         let result = refresh_provider_account(
             ProviderId::Claude,
@@ -511,6 +537,37 @@ mod tests {
 
         assert_eq!(account.health, ProviderHealth::Error);
         assert!(!result.provider.is_refreshing);
+    }
+
+    #[tokio::test]
+    async fn copilot_rate_limit_records_backoff_and_preserves_snapshot() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Copilot);
+        let mut previous_account =
+            ProviderAccountRuntimeState::empty(ProviderId::Copilot, "copilot-1", "octocat");
+        previous_account.snapshot = Some(snapshot());
+        previous_account.last_success_at = Some(Utc::now());
+
+        let result = refresh_provider_account(
+            ProviderId::Copilot,
+            true,
+            Some(&previous),
+            Some(&previous_account),
+            "copilot-1".to_string(),
+            "octocat".to_string(),
+            async {
+                Err(AppError::from(crate::error::CopilotError::RateLimited {
+                    retry_after_secs: Some(42),
+                }))
+            },
+        )
+        .await;
+        let account = result.accounts.first().unwrap();
+
+        assert_eq!(account.health, ProviderHealth::Error);
+        assert_eq!(account.auth_state, AuthState::Error);
+        assert_eq!(account.consecutive_rate_limits, 1);
+        assert!(account.rate_limit_until.is_some());
+        assert!(account.snapshot.is_some());
     }
 
     #[tokio::test]

@@ -13,10 +13,17 @@ pub enum ProviderId {
     Claude,
     Cursor,
     Gemini,
+    Copilot,
 }
 
 impl ProviderId {
-    pub const ALL: [Self; 4] = [Self::Codex, Self::Claude, Self::Cursor, Self::Gemini];
+    pub const ALL: [Self; 5] = [
+        Self::Codex,
+        Self::Claude,
+        Self::Cursor,
+        Self::Gemini,
+        Self::Copilot,
+    ];
 
     #[must_use]
     pub fn label(self) -> &'static str {
@@ -25,6 +32,7 @@ impl ProviderId {
             Self::Claude => "Claude",
             Self::Cursor => "Cursor",
             Self::Gemini => "Gemini",
+            Self::Copilot => "Copilot",
         }
     }
 }
@@ -89,6 +97,12 @@ pub struct UsageSnapshot {
     pub identity: ProviderIdentity,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AppletWindows<'a> {
+    pub primary: &'a UsageWindow,
+    pub secondary: Option<&'a UsageWindow>,
+}
+
 impl UsageSnapshot {
     #[must_use]
     pub fn headline_window(&self) -> Option<&UsageWindow> {
@@ -96,14 +110,17 @@ impl UsageSnapshot {
     }
 
     #[must_use]
-    pub fn applet_windows(&self) -> (Option<&UsageWindow>, Option<&UsageWindow>) {
+    pub fn applet_windows(&self) -> Option<AppletWindows<'_>> {
         if self.provider == ProviderId::Cursor {
-            return (
-                self.windows.first(),
-                self.windows.get(2).or_else(|| self.windows.get(1)),
-            );
+            return self.windows.first().map(|primary| AppletWindows {
+                primary,
+                secondary: self.windows.get(2).or_else(|| self.windows.get(1)),
+            });
         }
-        (self.windows.first(), self.windows.get(1))
+        self.windows.first().map(|primary| AppletWindows {
+            primary,
+            secondary: self.windows.get(1),
+        })
     }
 }
 
@@ -328,18 +345,27 @@ mod tests {
     #[test]
     fn applet_windows_returns_first_two() {
         let snapshot = snapshot(ProviderId::Codex);
-        let (first, second) = snapshot.applet_windows();
-        assert_eq!(first.map(|w| w.label.as_str()), Some("first"));
-        assert_eq!(second.map(|w| w.label.as_str()), Some("second"));
+        let windows = snapshot.applet_windows().unwrap();
+        assert_eq!(windows.primary.label, "first");
+        assert_eq!(windows.secondary.map(|w| w.label.as_str()), Some("second"));
+    }
+
+    #[test]
+    fn applet_windows_preserves_single_window_shape() {
+        let mut snapshot = snapshot(ProviderId::Copilot);
+        snapshot.windows = vec![window("premium_interactions")];
+        let windows = snapshot.applet_windows().unwrap();
+        assert_eq!(windows.primary.label, "premium_interactions");
+        assert_eq!(windows.secondary.map(|w| w.label.as_str()), None);
     }
 
     #[test]
     fn cursor_applet_windows_use_total_and_api() {
         let mut snap = snapshot(ProviderId::Cursor);
         snap.windows = vec![window("Total"), window("Auto + Composer"), window("API")];
-        let (first, second) = snap.applet_windows();
-        assert_eq!(first.map(|w| w.label.as_str()), Some("Total"));
-        assert_eq!(second.map(|w| w.label.as_str()), Some("API"));
+        let windows = snap.applet_windows().unwrap();
+        assert_eq!(windows.primary.label, "Total");
+        assert_eq!(windows.secondary.map(|w| w.label.as_str()), Some("API"));
     }
 
     #[test]

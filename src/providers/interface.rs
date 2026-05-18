@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-    ManagedGeminiAccountConfig,
+    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
+    ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
 };
 use crate::error::AppError;
 use crate::model::{AppState, ProviderAccountRuntimeState, ProviderId, UsageSnapshot};
@@ -59,6 +59,7 @@ pub enum ProviderAccountHandle {
     Claude(ManagedClaudeAccountConfig),
     Cursor(ManagedCursorAccountConfig),
     Gemini(ManagedGeminiAccountConfig),
+    Copilot(ManagedCopilotAccountConfig),
 }
 
 pub trait ProviderAdapter: Send + Sync {

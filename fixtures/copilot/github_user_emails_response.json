@@ -1,0 +1,41 @@
+{
+  "body_json": {
+    "documentation_url": "https://docs.github.com/rest/users/emails#list-email-addresses-for-the-authenticated-user",
+    "message": "Resource not accessible by integration",
+    "status": "403"
+  },
+  "body_text": "{\"message\":\"Resource not accessible by integration\",\"documentation_url\":\"https://docs.github.com/rest/users/emails#list-email-addresses-for-the-authenticated-user\",\"status\":\"403\"}",
+  "endpoint": "github_user_emails",
+  "method": "GET",
+  "requested_at": "2026-05-15T10:22:01.083666+00:00",
+  "response_headers": {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Expose-Headers": "ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset",
+    "Content-Length": "179",
+    "Content-Security-Policy": "default-src 'none'",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 15 May 2026 10:22:01 GMT",
+    "Referrer-Policy": "origin-when-cross-origin, strict-origin-when-cross-origin",
+    "Server": "github.com",
+    "Strict-Transport-Security": "max-age=31536000; includeSubdomains; preload",
+    "Vary": "Accept-Encoding, Accept, X-Requested-With",
+    "X-Accepted-OAuth-Scopes": "user, user:email",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "deny",
+    "X-GitHub-Media-Type": "github.v3; format=json",
+    "X-GitHub-Request-Id": "REDACTED",
+    "X-OAuth-Scopes": "",
+    "X-RateLimit-Limit": "15000",
+    "X-RateLimit-Remaining": "14992",
+    "X-RateLimit-Reset": "1778842141",
+    "X-RateLimit-Resource": "core",
+    "X-RateLimit-Used": "8",
+    "X-XSS-Protection": "0",
+    "connection": "close",
+    "x-accepted-github-permissions": "emails=read",
+    "x-github-api-version-selected": "2022-11-28",
+    "x-oauth-client-id": "Iv1.b507a08c87ecfe98"
+  },
+  "status_code": 403,
+  "url": "https://api.github.com/user/emails"
+}

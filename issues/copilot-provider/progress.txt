@@ -1,0 +1,76 @@
+# Ralph Progress
+
+Feature: copilot-provider
+Started: 2026-05-18T10:24:40+02:00
+
+
+## 2026-05-18T10:55:00+02:00 - 001-provider-scaffolding
+
+- Implemented: ProviderId::Copilot wired end-to-end as a placeholder fifth provider — registry/adapter, config schema v600 (copilot_enabled, copilot_managed_accounts, selected_copilot_account_ids), CopilotError + From impl, AppPaths/copilot-accounts dir, account storage prefix, panel icon picker (default + reversed SVGs), Settings tab with toggle and empty-state row, popup body measurements + route, refresh dispatcher, demo_env stub.
+- Files changed: src/model.rs, src/config.rs, src/error.rs, src/account_storage/mod.rs, src/providers/{mod.rs,interface.rs,registry.rs,adapters.rs,adapters/copilot_adapter.rs,copilot/mod.rs}, src/account_selection.rs, src/demo_env.rs, src/app/{mod.rs,provider_actions.rs,provider_assets.rs}, src/app/popup_view/settings/accounts.rs, i18n/en/yapcap.ftl.
+- Checks run: cargo fmt, cargo test (281 passed), just check (clippy clean).
+- Learnings: Resumed mid-way work from a prior limit-cutoff run. Core scaffolding files were already written; only the non-exhaustive match sites across account_selection, demo_env, provider_actions, provider_assets, app/mod.rs (PopupBodyMeasurements) and popup_view settings needed filling in plus a minimal copilot_accounts_section and ftl strings.
+
+
+## 2026-05-18T10:54:28+02:00 - 002-device-flow-login
+
+- Implemented: device-flow add-account end-to-end. device_code/poll/identity HTTP (with required Editor-Version/Plugin/UA/API headers), Token = `{access_token}` only, metadata = `{github_user_id, login, timestamps}`, account dir `copilot-<id>`, id-based dedupe, run via `Task::stream` with Code/Output/Finished events, cancel via `Task::abortable`. UI: user-code text + verification_uri Open-Browser button, Cancel, hint string, account row with `login` label + Loading badge (or Re-auth needed on ActionRequired).
+- Files changed: src/providers/copilot/{mod.rs,headers.rs,device_flow.rs,storage.rs,account.rs,login.rs}, src/app/mod.rs, src/app/login.rs, src/app/provider_actions.rs, src/app/popup_view.rs, src/app/popup_view/settings/accounts.rs, src/app/popup_view/settings/accounts/{login_controls.rs,rows.rs}, i18n/en/yapcap.ftl.
+- Checks run: cargo fmt, cargo test (297 passed), just check (clippy clean).
+- Learnings: Mirrored Gemini's Task::stream login pattern but with a separate Code event so the popup can show GitHub's user_code before any token arrives. Used per-file copilot-specific tokens.json/metadata.json instead of ProviderAccountStorage because the spec mandates the minimal `{access_token}` shape and additional github_user_id/login metadata fields.
+
+## 2026-05-18T11:03:35+02:00 - 003-free-tier-fetch-and-render.md
+
+- Implemented: Copilot usage fetch against `copilot_internal/user` with documented headers, no token-expiry preflight, Free-tier parser in `src/providers/copilot/parse.rs`, Free plan/display name/headline mapping, actionable unknown-shape errors, 401/403 user-action handling, and 429 retry-after backoff integration.
+- Files changed: src/providers/copilot/{mod.rs,headers.rs,parse.rs}, src/providers/adapters/copilot_adapter.rs, src/error.rs, docs/spec.md, issues/copilot-provider/issues/003-free-tier-fetch-and-render.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test (304 passed); cargo check; just check.
+- Learnings: Existing runtime stale-snapshot preservation already covers unrecognized Copilot responses because the parser error is non-actionable and non-transient; the adapter only needed to return the classified provider error. Manual live capture was not available in this AFK environment.
+
+## 2026-05-18T11:09:29+02:00 - 004-paid-tier-parsing.md
+
+- Implemented: Paid Copilot `quota_snapshots.premium_interactions` parsing, single premium usage window/headline, Pro+/Business plan badges, and unknown paid SKU fallback labels by entitlement.
+- Files changed: src/providers/copilot/parse.rs, src/providers/copilot/parse/tests.rs, docs/spec.md, issues/copilot-provider/issues/004-paid-tier-parsing.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test (307 passed); cargo check; just check.
+- Learnings: The Pro+ fixture is wrapped in a probe envelope while the Business fixture is raw body JSON, so parser tests normalize both fixture shapes before asserting the common paid snapshot.
+
+## 2026-05-18T11:17:26+02:00 - 005-single-bar-panel-layout.md
+
+- Implemented: Explicit applet window shape with primary plus optional secondary window; paid Copilot single-window snapshots now render a single vertically centered bar in the same bar stack height; mixed Copilot account selections preserve each account bar count; percent-only and logo-and-percent continue to use the primary percentage column.
+- Files changed: src/model.rs, src/app/applet.rs, src/app/tests.rs, docs/spec.md, issues/copilot-provider/issues/005-single-bar-panel-layout.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test; cargo check; just check.
+- Learnings: Keeping unloaded accounts as an explicit empty two-bar layout preserves existing panel dimensions, while real one-window snapshots can stay visually distinct without changing autosize width math.
+
+## 2026-05-18T11:23:03+02:00 - 006-overage-rendering.md
+
+- Implemented: Copilot paid overage payload parsing into `UsageWindow.reset_description`; popup detail rendering of `+<N> over plan` directly under the premium bar; localized overage text; spec and issue completion updates.
+- Files changed: src/providers/copilot/parse.rs, src/providers/copilot/parse/tests.rs, src/app/popup_view/detail.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/copilot-provider/issues/006-overage-rendering.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test; cargo check; just check.
+- Learnings: Fluent interpolation adds bidi isolation marks around numeric placeables, so the parser normalizes those marks out to keep the stored payload exactly `+<N> over plan` while still using the localizable message.
+
+## 2026-05-18T11:27:52+02:00 - 007-demo-seed.md
+
+- Implemented: `YAPCAP_DEMO` now seeds two selected Copilot managed accounts with show-all enabled: `casey-free` Free tier with chat/completions windows and `morgan-pro` Pro+ with one premium window plus `+42 over plan`.
+- Files changed: src/demo_env.rs, docs/spec.md, issues/copilot-provider/issues/007-demo-seed.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test; cargo check; just check.
+- Learnings: The Copilot parser shape already matched the demo data, so the seed can use direct synthetic `UsageSnapshot`s while tests lock down selected accounts, mixed bar counts, plan badges, and overage text.
+
+## 2026-05-18T11:33:06+02:00 - 008-reauth-flow.md
+
+- Implemented: Copilot re-auth completion path now immediately refreshes after a successful matching device-flow login; the GitHub id mismatch guard is extracted and tested; Copilot fetch classifications are covered for 401, 403, 429 with/without `Retry-After`, 500, network, and timeout; runtime tests cover ActionRequired stale preservation and rate-limit backoff state.
+- Files changed: src/app/login.rs, src/providers/copilot/mod.rs, src/providers/copilot/login.rs, src/runtime.rs, src/error.rs, docs/spec.md, issues/copilot-provider/issues/008-reauth-flow.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test; cargo check; just check.
+- Learnings: Most re-auth UI plumbing was already present from the device-flow slice; the missing behavior was the immediate refresh plus tests locking down the identity and error-classification contracts.
+
+## 2026-05-18T11:36:02+02:00 - 009-claude-browser-hint.md
+
+- Implemented: Reused the Copilot browser account guidance as a shared Fluent key and rendered it near both Claude and Copilot add-account controls in Settings.
+- Files changed: src/app/popup_view/settings/accounts.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/copilot-provider/issues/009-claude-browser-hint.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test; cargo check; just check.
+- Learnings: The existing Copilot hint lived in the provider settings section, so sharing it only required renaming the Fluent key and adding the same plain text row before Claude login controls.
+
+## 2026-05-18T11:41:45+02:00 - 010-documentation.md
+
+- Implemented: Final Copilot documentation pass for the architecture spec, README, QA plan, Copilot provider status document, and AppStream 0.6.0 release notes.
+- Files changed: docs/spec.md, README.md, docs/qa.md, docs/copilot-provider.md, resources/app.metainfo.xml, issues/copilot-provider/issues/010-documentation.md, issues/copilot-provider/progress.txt.
+- Checks run: cargo fmt; cargo test; cargo check; just check.
+- Learnings: Most Copilot spec content was already present from implementation slices; the final work was making the fifth-provider story coherent across user-facing docs, QA, storage/config paths, and store metadata.

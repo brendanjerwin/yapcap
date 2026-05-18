@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, and Gemini.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Gemini, and GitHub Copilot.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -23,20 +23,23 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 
 ## Highlights
 
-- **Four providers**
+- **Five providers**
     - **Codex** — 5h/weekly windows + credits
     - **Claude Code** — session/weekly/extra usage
     - **Cursor** — plan usage + billing cycle end
     - **Gemini** — Pro / Flash / Lite quota bars (OAuth accounts only)
+    - **GitHub Copilot** — Free chat/completions or paid premium interactions
 - **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
-- **Active badge** — YapCap reads your local Codex and Claude Code session state to mark which account is currently active in the host CLI.
-- **In-app login** — guided login flows for Codex, Claude, and Cursor without leaving YapCap or opening a terminal
+- **Active badge** — YapCap reads your local Codex, Claude Code, and Gemini session state to mark which account is currently active in the host CLI. Copilot has no Active badge because its host token is not stored in a stable readable file.
+- **In-app login** — guided login flows for Codex, Claude, Gemini, and Copilot without leaving YapCap or opening a terminal; Cursor scans the local Cursor IDE account state
 - **Explicit accounts** — credentials are added through YapCap and stored under YapCap-owned account directories
 - **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times
 - **COSMIC themes** — popup and panel respect your system theme, accent, and icon context
 - **Available in the COSMIC Store** — install the Flatpak from COSMIC Store and receive updates through the normal COSMIC update flow.
 
 ## Screenshots
+
+Copilot screenshots are pending capture; the current screenshots show the shared panel, popup, and settings surfaces used by all providers.
 
 <table>
 <tr>
@@ -130,7 +133,7 @@ just install
 
 1. After installing, got to COSMIC Settings app  Desktop → Panel → Configure panel applets
 2. Add **YapCap** from the panel applet picker.
-3. On first launch, add accounts explicitly from **Settings → [Provider] → Add account**. Codex and Claude use browser OAuth, and Cursor scans the local Cursor IDE account state.
+3. On first launch, add accounts explicitly from **Settings → [Provider] → Add account**. Codex, Claude, Gemini, and Copilot use browser login flows, and Cursor scans the local Cursor IDE account state.
 4. Click the panel button to open the popup.
 5. To add more accounts or switch between them, open the popup → **Settings → [Provider]**.
 
@@ -140,11 +143,11 @@ just install
 
 Each provider supports multiple accounts. Manage them from the popup under **Settings → [Provider]**.
 
-- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, or Cursor IDE account scanning, without leaving YapCap.
+- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, Gemini browser OAuth, GitHub Copilot browser device flow, or Cursor IDE account scanning, without leaving YapCap.
 - **Switch account** — tap any account row to make it active; the panel and popup update immediately.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 
-Each provider keeps at most one account per email address.
+Codex, Claude, Cursor, and Gemini keep at most one account per email address. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username.
 
 ## Panel styles
 
@@ -191,9 +194,9 @@ Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/` | Settings (provider toggles, accounts, display options) |
+| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v600/` | Settings (provider toggles, accounts, display options) |
 | `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
-| `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`}`-accounts/` | Managed credential copies |
+| `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`,`gemini`,`copilot`}`-accounts/` | Managed credential copies |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |
 
 **Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap cache and state live only under `~/.var/app/io.github.TopiCsarno.YapCap/` — use `cache/yapcap/` for snapshots and `data/yapcap/` for accounts and logs. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
@@ -202,7 +205,7 @@ Logs (native): `~/.local/state/yapcap/logs/yapcap.log`. Logs (Flatpak): `~/.var/
 
 - COSMIC only. No GNOME, KDE, or tray fallback.
 - No historical charts, notifications, or cost analytics.
-- Four providers only for now.
+- Five providers only for now.
 - **Gemini OAuth only.** YapCap meters Gemini accounts authenticated via Google OAuth.
   API-key (`selectedAuthType: gemini-api-key`) and Vertex AI (`selectedAuthType:
   vertex-ai`) gemini-cli configurations are not supported — switch the account to

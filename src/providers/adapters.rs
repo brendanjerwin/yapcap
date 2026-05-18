@@ -2,6 +2,7 @@
 
 mod claude_adapter;
 mod codex_adapter;
+mod copilot_adapter;
 mod cursor_adapter;
 mod gemini_adapter;
 
@@ -17,6 +18,7 @@ pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
         ProviderId::Claude => &CLAUDE_ADAPTER,
         ProviderId::Cursor => &CURSOR_ADAPTER,
         ProviderId::Gemini => &GEMINI_ADAPTER,
+        ProviderId::Copilot => &COPILOT_ADAPTER,
     }
 }
 
@@ -24,6 +26,7 @@ static CODEX_ADAPTER: codex_adapter::CodexAdapter = codex_adapter::CodexAdapter;
 static CLAUDE_ADAPTER: claude_adapter::ClaudeAdapter = claude_adapter::ClaudeAdapter;
 static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAdapter;
 static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
+static COPILOT_ADAPTER: copilot_adapter::CopilotAdapter = copilot_adapter::CopilotAdapter;
 
 pub(super) fn reconcile_provider_account_descriptors(
     provider: ProviderId,

@@ -1,0 +1,47 @@
+{
+  "access_type_sku": "copilot_standalone_seat_quota",
+  "analytics_tracking_id": "ba3512a3a67ed982fef702231ac88430",
+  "assigned_date": "2025-10-17T08:51:52+02:00",
+  "can_signup_for_limited": false,
+  "chat_enabled": true,
+  "copilot_plan": "business",
+  "organization_login_list": [],
+  "organization_list": [],
+  "quota_reset_date": "2026-01-01",
+  "quota_reset_date_utc": "2026-01-01T00:00:00.000Z",
+  "quota_snapshots": {
+    "chat": {
+      "entitlement": 0,
+      "overage_count": 0,
+      "overage_permitted": false,
+      "percent_remaining": 100.0,
+      "quota_id": "chat",
+      "quota_remaining": 0.0,
+      "remaining": 0,
+      "unlimited": true,
+      "timestamp_utc": "2025-12-19T10:48:12.942Z"
+    },
+    "completions": {
+      "entitlement": 0,
+      "overage_count": 0,
+      "overage_permitted": false,
+      "percent_remaining": 100.0,
+      "quota_id": "completions",
+      "quota_remaining": 0.0,
+      "remaining": 0,
+      "unlimited": true,
+      "timestamp_utc": "2025-12-19T10:48:12.942Z"
+    },
+    "premium_interactions": {
+      "entitlement": 300,
+      "overage_count": 0,
+      "overage_permitted": true,
+      "percent_remaining": 31.166666666666664,
+      "quota_id": "premium_interactions",
+      "quota_remaining": 93.5,
+      "remaining": 93,
+      "unlimited": false,
+      "timestamp_utc": "2025-12-19T10:48:12.942Z"
+    }
+  }
+}

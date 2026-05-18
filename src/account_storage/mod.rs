@@ -110,7 +110,7 @@ impl ProviderAccountStorage {
         account: NewProviderAccount,
         created_at: Option<DateTime<Utc>>,
     ) -> Result<StoredProviderAccount, AccountStorageError> {
-        let account_dir = self.account_dir(&account_id);
+        let account_dir = self.ensure_account_dir(&account_id)?;
         let now = Utc::now();
         let metadata = ProviderAccountMetadata {
             account_id: account_id.clone(),
@@ -125,10 +125,6 @@ impl ProviderAccountStorage {
             gemini_last_cloudaicompanion_project: None,
         };
 
-        fs::create_dir_all(&account_dir).map_err(|source| AccountStorageError::CreateDir {
-            path: account_dir.clone(),
-            source,
-        })?;
         write_json(&account_dir.join(METADATA_FILE), &metadata)?;
         write_json(&account_dir.join(TOKENS_FILE), &account.tokens)?;
         if let Some(snapshot) = account.snapshot {
@@ -143,6 +139,15 @@ impl ProviderAccountStorage {
             account_dir,
             metadata,
         })
+    }
+
+    fn ensure_account_dir(&self, account_id: &str) -> Result<PathBuf, AccountStorageError> {
+        let account_dir = self.account_dir(account_id);
+        fs::create_dir_all(&account_dir).map_err(|source| AccountStorageError::CreateDir {
+            path: account_dir.clone(),
+            source,
+        })?;
+        Ok(account_dir)
     }
 
     /// # Errors
@@ -188,7 +193,8 @@ impl ProviderAccountStorage {
         account_id: &str,
         metadata: &ProviderAccountMetadata,
     ) -> Result<(), AccountStorageError> {
-        write_json(&self.account_dir(account_id).join(METADATA_FILE), metadata)
+        let account_dir = self.ensure_account_dir(account_id)?;
+        write_json(&account_dir.join(METADATA_FILE), metadata)
     }
 
     /// # Errors
@@ -199,7 +205,8 @@ impl ProviderAccountStorage {
         account_id: &str,
         tokens: &ProviderAccountTokens,
     ) -> Result<(), AccountStorageError> {
-        write_json(&self.account_dir(account_id).join(TOKENS_FILE), tokens)
+        let account_dir = self.ensure_account_dir(account_id)?;
+        write_json(&account_dir.join(TOKENS_FILE), tokens)
     }
 
     /// # Errors
@@ -210,7 +217,8 @@ impl ProviderAccountStorage {
         account_id: &str,
         snapshot: &UsageSnapshot,
     ) -> Result<(), AccountStorageError> {
-        write_json(&self.account_dir(account_id).join(SNAPSHOT_FILE), snapshot)
+        let account_dir = self.ensure_account_dir(account_id)?;
+        write_json(&account_dir.join(SNAPSHOT_FILE), snapshot)
     }
 
     /// # Errors
@@ -242,6 +250,7 @@ impl ProviderAccountStorage {
             ProviderId::Claude => "claude",
             ProviderId::Cursor => "cursor",
             ProviderId::Gemini => "gemini",
+            ProviderId::Copilot => "copilot",
         };
         let millis = Utc::now().timestamp_millis();
         format!("{prefix}-{millis}-{}", std::process::id())

@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.5.0 · **Last updated:** 2026-05-15
+**Status:** As-built v0.6.0 · **Last updated:** 2026-05-18
 
 ## Document Metadata
 
@@ -18,7 +18,7 @@ read_when:
 | Target desktop | COSMIC |
 | Target language | Rust (edition 2024) |
 | Target runtime | libcosmic applet runtime |
-| Providers | Codex, Claude Code, Cursor, Gemini |
+| Providers | Codex, Claude Code, Cursor, Gemini, GitHub Copilot |
 
 ## Document Map
 
@@ -26,7 +26,7 @@ read_when:
 | --- | --- |
 | 1. Product Definition | 1.1 Scope and Non-Goals<br>1.2 Supported Sources |
 | 2. Architecture | 2.1 System Context<br>2.2 Crate Layout<br>2.3 Runtime and Message Flow |
-| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Gemini |
+| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Copilot<br>3.5 Gemini |
 | 4. Auth and Config | 4.1 OAuth Credential Files<br>4.2 Cursor Token Source<br>4.3 Configuration |
 | 5. Data Model | 5.1 UsageSnapshot<br>5.2 ProviderRuntimeState and Health<br>5.3 Stale/Fresh Rules |
 | 6. Persistence, Logging, Paths | |
@@ -39,7 +39,7 @@ read_when:
 
 ### 1.1 Scope and Non-Goals
 
-- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, and Gemini.
+- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, Gemini, and GitHub Copilot.
 - Ships only on COSMIC. No GNOME, KDE, tray, or generic indicator paths exist.
 - Reads locally available credentials and caches. No user account, no cloud sync, no telemetry.
 - Out of scope: additional providers, historical charts, notifications, plugin architecture, doctor command, secret vault, alternative DEs.
@@ -52,8 +52,9 @@ read_when:
 | Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://console.anthropic.com/v1/oauth/token` (`grant_type=refresh_token`) |
 | Cursor | Active Cursor account resolved from YapCap-owned `cursor-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | — |
 | Gemini | Active Gemini account resolved from YapCap-owned `gemini-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | OAuth refresh-token grant against `oauth2.googleapis.com/token` before expiry or once after a `loadCodeAssist` / `retrieveUserQuota` 401 |
+| Copilot | Active GitHub Copilot account resolved from YapCap-owned `copilot-accounts/<id>/` (`metadata.json`, `tokens.json`) | None; token is long-lived and re-auth is user-driven after revocation |
 
-Claude, Codex, Cursor, and Gemini all use YapCap-managed account storage. There
+Claude, Codex, Cursor, Gemini, and Copilot all use YapCap-managed account storage. There
 is no web-cookie path for Claude and no forced-source environment variable.
 Gemini supports only Google OAuth accounts; gemini-cli API-key and Vertex AI
 configurations are out of scope.
@@ -69,10 +70,14 @@ flowchart LR
     Panel --> Codex[Codex module]
     Panel --> Claude[Claude module]
     Panel --> Cursor[Cursor module]
+    Panel --> Gemini[Gemini module]
+    Panel --> Copilot[Copilot module]
     Codex --> OpenAI[chatgpt.com/backend-api]
     Codex -.refresh.-> OpenAIAuth[auth.openai.com]
     Claude --> Anthropic[api.anthropic.com]
     Cursor --> CursorAPI[cursor.com]
+    Gemini --> GeminiAPI[cloudcode-pa.googleapis.com]
+    Copilot --> GitHubCopilot[api.github.com/copilot_internal/user]
     Panel --> Local[Local config, cache, logs]
 ```
 
@@ -95,12 +100,13 @@ Library modules (`src/`, also usable from tests):
 | --- | --- |
 | `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
 | `providers::registry` | Provider-facing interface used by runtime and UI code. It exposes provider capabilities, account discovery, account deletion, account status refresh, and usage fetch through provider adapters. |
-| `providers::adapters` | Provider adapter implementations for Codex, Claude, and Cursor. Each adapter maps the shared provider interface onto provider-specific account and fetch modules. |
+| `providers::adapters` | Provider adapter implementations for Codex, Claude, Cursor, Gemini, and Copilot. Each adapter maps the shared provider interface onto provider-specific account and fetch modules. |
 | `providers::interface` | Shared provider adapter trait, capability flags, account descriptors, account handles, and async future alias. |
 | `providers::codex` | Codex managed login, YapCap-owned account listing, OAuth usage fetch, and refresh-on-401/403 under `src/providers/codex/`. |
 | `providers::claude` | Managed native OAuth login and YapCap-owned account listing under `src/providers/claude/`, OAuth usage fetch, token refresh against Anthropic’s OAuth token endpoint (no Claude CLI), and read-only host `~/.claude.json` matching for `system_active_account_id`. |
 | `providers::cursor` | Cursor web API via YapCap-owned tokens scanned from Cursor IDE's local SQLite state. |
-| `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. |
+| `providers::copilot` | GitHub device-flow login, id-based YapCap-owned account listing/dedupe, single-call usage fetch, and Free/paid Copilot schema parsing under `src/providers/copilot/`. |
+| `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. All write entry points (`create_account`, `replace_account`, `save_metadata`, `save_tokens`, `save_snapshot`) create the full account directory chain on demand, so callers do not need to pre-create the provider account root. |
 | `auth` | Parses JWT identity claims used by Codex OAuth compatibility paths. |
 | `config` | COSMIC config entry, provider toggles, and provider account preferences. |
 | `cache` | Load/save `snapshots.json`. |
@@ -412,7 +418,107 @@ Usage fetch:
 Account removal: deletes the managed directory. Cursor's own config files are
 never modified.
 
-### 3.4 Gemini
+### 3.4 Copilot
+
+Copilot account model:
+
+- Accounts are explicit entries in `Config.copilot_managed_accounts`. Each
+  entry stores stable account metadata; the YapCap-owned account directory is
+  derived at runtime as `<state-root>/yapcap/copilot-accounts/<id>/` and contains
+  `metadata.json` and `tokens.json`.
+- Copilot account identity is the GitHub numeric user id. Account directory
+  names use `copilot-<github-user-id>`, and duplicate logins by GitHub user id
+  update the same account directory instead of creating a second account.
+- `tokens.json` stores only `{ "access_token": "ghu_..." }`; Copilot has no
+  refresh token or expiry preflight. Revoked tokens are detected only by the
+  usage request.
+- `metadata.json` stores `github_user_id`, `login`, and account timestamps.
+  The mutable GitHub `login` is display metadata, not identity.
+- There is no host Active badge for Copilot because GitHub Copilot CLI token
+  storage is not a stable readable file across Linux distributions and
+  Flatpak.
+
+Managed login flow:
+
+- Settings exposes `Add account` under the Copilot accounts card.
+- YapCap starts GitHub OAuth device flow with the public client id
+  `Iv1.b507a08c87ecfe98` and scope `read:user`, opens
+  `https://github.com/login/device`, displays the returned user code with a
+  copy control that writes the raw code to the system clipboard via the
+  libcosmic/iced clipboard task and shows brief `Copied` feedback, and polls
+  `https://github.com/login/oauth/access_token` until an access token is
+  returned or the user cancels.
+- After receiving the token, YapCap calls `GET https://api.github.com/user` to
+  fetch `{ id, login }`, then writes the account storage and immediately selects
+  the account.
+
+Usage request:
+
+- `GET https://api.github.com/copilot_internal/user`
+- `Authorization: token <access_token>`
+- `Accept: application/json`
+- `Editor-Version: vscode/1.107.0`
+- `Editor-Plugin-Version: copilot-chat/0.35.0`
+- `User-Agent: GitHubCopilotChat/0.35.0`
+- `X-Github-Api-Version: 2026-03-10`
+
+Free response shape (`access_type_sku == "free_limited_copilot"`):
+
+- `monthly_quotas.chat` and `monthly_quotas.completions` are entitlements.
+- `limited_user_quotas.chat` and `limited_user_quotas.completions` are
+  remaining quota.
+- `limited_user_reset_date` is used as `reset_at` for both windows.
+- YapCap renders two usage windows in order: `chat`, then `completions`.
+  Headline usage points at `completions`, and the plan badge is **Free**.
+- Usage window titles render as user-facing labels: `chat` → **Chat**,
+  `completions` → **Completions**.
+- Free windows infer `window_seconds = 30 days` when
+  `limited_user_reset_date` is in the future. Expired resets leave
+  `window_seconds = None`, which skips the popup pace marker.
+- `UsageSnapshot.identity.email` stays empty; `identity.display_name` uses the
+  GitHub `login`.
+
+Paid response shape (`quota_snapshots` present):
+
+- `quota_snapshots.premium_interactions.entitlement`, `remaining`, and
+  `percent_remaining` are the paid interaction quota. `quota_remaining` is
+  accepted as informational response data and not surfaced.
+- `quota_reset_date` is used as `reset_at`.
+- YapCap renders one usage window, `premium_interactions`. Headline usage points
+  at that window. `chat` and `completions` snapshots are skipped because paid
+  tiers report them as unlimited. The popup labels this window **Premium**.
+- When `premium_interactions.overage_count > 0`, the popup renders
+  `+<count> over plan` directly under the premium usage bar. The panel applet
+  still renders only the usage percentage.
+- The premium window infers `window_seconds` from
+  `quota_reset_date - <previous UTC calendar-month boundary>`. The inferred
+  start is the first day of the same month when `quota_reset_date` falls after
+  the 1st; otherwise it is the first day of the prior month. Expired or
+  non-positive inferred windows leave `window_seconds = None`, which skips the
+  popup pace marker.
+- Plan badge mapping is: `free_limited_copilot` → **Free**,
+  `plus_monthly_subscriber_quota` → **Pro+**,
+  `copilot_standalone_seat_quota` → **Business**. Unknown paid SKUs fall back
+  by `premium_interactions.entitlement`: 300 → **Pro**, 1500 → **Pro+**,
+  anything else → **Plan**.
+
+Copilot HTTP 401 and 403 mark the account `ActionRequired` and preserve any
+stale snapshot. HTTP 429 is transient and uses the shared per-account
+rate-limit backoff. HTTP 5xx, timeouts, and network errors are transient. An
+unrecognized response shape returns "Unrecognized Copilot response: <detail>"
+with details such as `access_type_sku=no_access` or a missing quota field, and
+preserves any stale snapshot.
+
+Copilot accounts in `ActionRequired` show a `Re-auth needed` badge and the
+same per-account re-auth action as Gemini. Healthy Copilot accounts show no
+status badge — they keep the selected marker, delete action, and re-auth
+action only when applicable. Re-auth reruns GitHub device flow, fetches
+`/user`, rejects a different
+`github_user_id` without writing tokens, and on a matching id overwrites
+`tokens.json`, refreshes the stored `login`, clears the account error state, and
+immediately starts a usage refresh.
+
+### 3.5 Gemini
 
 Gemini account model:
 
@@ -504,6 +610,10 @@ Bucket family classification (`src/providers/gemini/buckets.rs`):
   first up to two windows feeding the panel bars via
   `UsageSnapshot::applet_windows()` (so paid users see Pro + Flash on the
   panel and free users see Flash + Lite).
+- Visible family windows with a future `resetTime` infer
+  `window_seconds = 24 hours`. Hidden/dropped families, epoch resets, expired
+  resets, and other non-future resets leave `window_seconds = None`, which
+  skips the popup pace marker.
 
 Plan label mapping (`src/providers/gemini/plan_label.rs`):
 
@@ -579,14 +689,19 @@ Claude OAuth material lives only under YapCap-owned account directories as
 `tokens.json` (see §3.2). YapCap does not read Claude Code `.credentials.json`.
 
 Gemini OAuth material lives only under YapCap-owned account directories as
-`tokens.json` (see §3.4). YapCap does not read host
+`tokens.json` (see §3.5). YapCap does not read host
 `~/.gemini/oauth_creds.json` for tokens. `~/.gemini/google_accounts.json` is
 read read-only as the host session hint (analog to `~/.claude.json` for Claude
 and `~/.codex/auth.json` for Codex) and drives only the **Active** badge.
 
-Codex, Claude, and Gemini OAuth material used by normal refresh all lives under
-YapCap-owned account directories as `tokens.json`. Provider errors bubble up
-as `requires_user_action = true` when user login is needed.
+Copilot OAuth material lives only under YapCap-owned
+`copilot-accounts/<id>/tokens.json` (see §3.4). YapCap does not read host
+GitHub or Copilot CLI config for Copilot, and Copilot has no host-session
+Active badge.
+
+Codex, Claude, Gemini, and Copilot OAuth material used by normal refresh all
+lives under YapCap-owned account directories as `tokens.json`. Provider errors
+bubble up as `requires_user_action = true` when user login is needed.
 
 ### 4.2 Cursor Token Source
 
@@ -603,8 +718,8 @@ that integration: settings live under `…/cosmic/io.github.TopiCsarno.YapCap/vN
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
 files manually if you need to salvage values after a version bump.
-The next patch release uses schema `v400` as a deliberate fresh-start boundary
-after the provider account model changes. Existing `v300` COSMIC settings may
+The Copilot release uses schema `v600` as a deliberate fresh-start boundary
+after the provider account model changes. Existing `v400` COSMIC settings may
 remain on disk, but YapCap starts from fresh defaults and users must re-add
 accounts. The schema bump does not delete YapCap-owned account directories,
 snapshot caches, or logs.
@@ -626,12 +741,18 @@ provider_visibility_mode = "auto_init_pending"
 codex_enabled = true
 claude_enabled = true
 cursor_enabled = true
+gemini_enabled = true
+copilot_enabled = true
 selected_codex_account_ids = []
 codex_managed_accounts = []
 selected_claude_account_ids = []
 claude_managed_accounts = []
 selected_cursor_account_ids = []
 cursor_managed_accounts = []
+selected_gemini_account_ids = []
+gemini_managed_accounts = []
+selected_copilot_account_ids = []
+copilot_managed_accounts = []
 log_level = "info"
 ```
 
@@ -663,6 +784,18 @@ log_level = "info"
 - `cursor_managed_accounts` stores non-secret metadata only: opaque `id`,
   canonical email, label, managed account root path, optional identity metadata,
   plan, and timestamps. There is at most one managed account per normalized email.
+- `selected_gemini_account_ids` and `selected_copilot_account_ids` follow the
+  same preference-list semantics as the other selected account fields.
+- `gemini_managed_accounts` stores non-secret metadata only: id, label,
+  YapCap-owned account directory path, normalized email, Google subject, hosted
+  domain, last tier/project metadata, and timestamps.
+- `copilot_enabled` controls Copilot provider visibility like the other provider
+  toggles.
+- `copilot_managed_accounts` stores non-secret metadata only: id,
+  GitHub numeric user id, mutable GitHub login label, and timestamps. The
+  account directory is derived from the id and current runtime paths so native
+  and Flatpak installs do not persist each other's absolute state directories.
+  There is at most one managed Copilot account per GitHub numeric user id.
 - Account add/remove, login that adds a managed account, active-account
   selection, and COSMIC `watch_config` updates all re-run the same merge from
   config into in-memory `AppState` and rewrite the snapshot cache, so the
@@ -734,7 +867,7 @@ drive the status line and headline percentage.
 
 ```rust
 struct UsageSnapshot {
-    provider: ProviderId,          // Codex | Claude | Cursor
+    provider: ProviderId,          // Codex | Claude | Cursor | Gemini | Copilot
     source: String,                // "OAuth" | "RPC" | "Brave" | ...
     updated_at: DateTime<Utc>,
     headline: UsageHeadline,       // index into windows for the panel badge
@@ -817,18 +950,22 @@ All paths come from `config::paths()`.
 
 **Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-- Config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v400`
+- Config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v600`
 - Snapshot cache: under the XDG cache root (typically `~/.cache/yapcap/snapshots.json`)
-- Managed accounts and logs: under the XDG state root (typically `~/.local/state/yapcap/`)
+- Managed accounts and logs: under the XDG state root (typically
+  `~/.local/state/yapcap/`), including `codex-accounts/`, `claude-accounts/`,
+  `cursor-accounts/`, `gemini-accounts/`, and `copilot-accounts/`
 
 **Flatpak** (`FLATPAK_ID` set): YapCap-owned cache and state **only** under the per-app tree on the host filesystem:
 
 - Snapshot cache: `~/.var/app/<app-id>/cache/yapcap/` (e.g. `snapshots.json`)
-- Managed accounts and logs: `~/.var/app/<app-id>/data/yapcap/`
+- Managed accounts and logs: `~/.var/app/<app-id>/data/yapcap/`, including
+  `codex-accounts/`, `claude-accounts/`, `cursor-accounts/`,
+  `gemini-accounts/`, and `copilot-accounts/`
 
 Flatpak does **not** read or write the native install’s `~/.local/state/yapcap/` or `~/.cache/yapcap/` for YapCap data. The `~` in the `.var` paths is the passwd home directory (`pw_dir`), not `dirs::home_dir()` / `$HOME`, so locations stay correct when the sandbox overrides `HOME`.
 
-Managed Claude and Codex accounts store `config_dir` / `codex_home` in COSMIC
+Managed Claude, Codex, and Copilot accounts store their account roots in COSMIC
 config; on startup those paths are rewritten to the current canonical
 `<state-root>/yapcap/.../<account-id>/` trees so installs that share COSMIC config
 (native vs Flatpak) do not continue using another build's absolute directories.
@@ -848,12 +985,12 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 
 ### 7.1 Panel
 
-- A single button using the configured panel icon style: selected provider icon plus two compact usage bars, bars only, selected provider icon plus the first applet usage window percentage, or only that percentage.
+- A single button using the configured panel icon style: selected provider icon plus compact usage bars, bars only, selected provider icon plus the first applet usage window percentage, or only that percentage.
 - Installed panel applets launch through `cosmic::applet::run` with `LaunchMode::Panel`; the panel view wraps the button in `core.applet.autosize_window` so COSMIC can size the applet surface around the rectangular icon-plus-bars content.
 - Local `cargo run` launches through `cosmic::app::run` with `LaunchMode::Standalone`; `applet_settings()` gives the standalone preview the same calculated button dimensions without using the applet autosize wrapper.
 - Both launch modes share the same button sizing helpers. The usage bar width is at least `suggested_height * APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER`.
-- The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_amount_percent`; in `left` mode, fully-elapsed windows render as 100% left after the reset.
-- When multiple accounts are selected for a provider, the panel icon expands horizontally: one two-bar group per account, separated by a fixed gap. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
+- The bars use `UsageSnapshot::applet_windows()` and `usage_display::displayed_amount_percent`; in `left` mode, fully-elapsed windows render as 100% left after the reset. A snapshot with one applet window renders one bar vertically centered in the same total height as the two-bar layout. Paid Copilot accounts use this single-bar variant for `premium_interactions`.
+- When multiple accounts are selected for a provider, the panel icon expands horizontally: one bar group per account, separated by a fixed gap. Each account renders its own one-bar or two-bar shape, so mixed Copilot Free + paid selections show two bars beside one vertically centered bar without homogenizing the bar count. All groups render at the same fixed container width (`bar_width`); the fill inside each bar reflects actual usage for that account. An account whose snapshot has not yet loaded shows 0% fill.
 - In `logo_and_percent` and `percent_only` styles with multiple accounts, each account gets a left-aligned label in a fixed-width column sized for `100.0%`; columns are separated by `APPLET_PERCENT_ACCOUNT_GAP`.
 - Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Codex and Cursor use themed monochrome pairs; Claude and Gemini use a single brand-colored SVG (`claude-color.svg`, `gemini-color.svg`) for both variants.
@@ -867,7 +1004,7 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
 - Header: "YapCap" + "Refresh now" button.
 - Navigation row:
   - provider detail: one tab per enabled provider with its icon and headline percent;
-  - settings: category tabs for General, Codex, Claude, and Cursor, using a theme-symbolic gear icon for General and provider icons for provider settings.
+  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, and Copilot, using a theme-symbolic gear icon for General and provider icons for provider settings.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
 - Provider view always starts with a provider title card (icon + name). Below it, each displayed selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one displayed selected account the column fills the full popup width. When a provider has two or more displayed selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to four columns and up to the widest provider across all tabs.
@@ -875,8 +1012,8 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
   - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means up to four selected accounts render as columns in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all four providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets one managed demo account with synthetic Session and Weekly usage windows; **Claude** gets one Max managed demo account with Session, Weekly, and Sonnet usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; **Gemini** gets one Pro-tier managed demo account with Pro/Flash/Lite usage windows and a "Pro" plan badge; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
-  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account scans Cursor IDE's local SQLite state database and imports the currently logged-in Cursor account tokens into YapCap-owned storage. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to log into that account in Cursor and rescan. Cursor `Active` reflects the account currently used by Cursor IDE and can appear alongside `Re-auth needed` when YapCap's copied session needs a fresh scan. Codex, Claude, and Cursor account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all five providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets two managed demo accounts with synthetic Session and Weekly usage windows and show-all enabled; **Claude** gets one Max managed demo account with Session and Weekly usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; **Gemini** gets one Pro-tier managed demo account with Pro/Flash/Lite usage windows and a "Pro" plan badge; **Copilot** gets two selected managed demo accounts with show-all enabled: `casey-free` on the Free plan with chat and completions windows, and `morgan-pro` on Pro+ with one premium-interactions window plus `+42 over plan`; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
+  - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings, shows the same browser account/private-window hint as Copilot, and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account scans Cursor IDE's local SQLite state database and imports the currently logged-in Cursor account tokens into YapCap-owned storage. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to log into that account in Cursor and rescan. Cursor `Active` reflects the account currently used by Cursor IDE and can appear alongside `Re-auth needed` when YapCap's copied session needs a fresh scan. Gemini add-account opens the Google OAuth browser flow and stores only YapCap-owned account storage. Copilot add-account starts GitHub device flow, shows the shared browser account/private-window hint near the Settings control, displays the user code and `Open Browser` fallback while polling, and stores accounts by GitHub numeric user id. Copilot account rows never show an Active badge; rows needing user action show `Re-auth needed` plus a refresh action that must complete with the same GitHub id. Codex, Claude, Cursor, Gemini, and Copilot account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. Copilot accounts are displayed with the GitHub login label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 
@@ -930,7 +1067,7 @@ Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail
 
 ## 10. Testing
 
-- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all four provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, Gemini id_token decoding, Gemini plan-label mapping, Gemini bucket-family classification (Pro/Flash/Lite, free-tier Pro hide, lowest-remaining aggregation), Gemini OAuth refresh-error classification (400/401/403/429/5xx) and rate-limit backoff, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
-- No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,cursor,gemini}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures; Gemini uses `oauth_token_response.json`, `load_code_assist_response.json`, and `retrieve_user_quota_response.json` plus optional error-path captures (`oauth_token_400_response.json` / `oauth_token_429_response.json`) recorded via `fixtures/gemini/probe.py` and its `--simulate-bad-refresh` flag.
+- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all five provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, Copilot device-flow parsing/storage, Copilot Free and paid parser branches, Copilot overage text, Copilot usage fetch/error classification, Gemini id_token decoding, Gemini plan-label mapping, Gemini bucket-family classification (Pro/Flash/Lite, free-tier Pro hide, lowest-remaining aggregation), Gemini OAuth refresh-error classification (400/401/403/429/5xx) and rate-limit backoff, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
+- No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,copilot,cursor,gemini}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Copilot uses device-code, OAuth-token, GitHub identity, and `copilot_internal/user` captures; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures; Gemini uses `oauth_token_response.json`, `load_code_assist_response.json`, and `retrieve_user_quota_response.json` plus optional error-path captures (`oauth_token_400_response.json` / `oauth_token_429_response.json`) recorded via `fixtures/gemini/probe.py` and its `--simulate-bad-refresh` flag.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.
 - Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale snapshot display on cold-start, settings persistence across restarts, update-check UI states, and dark/light theme icon variants.

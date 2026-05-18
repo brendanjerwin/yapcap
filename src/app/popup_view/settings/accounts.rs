@@ -2,16 +2,18 @@ mod login_controls;
 mod rows;
 
 use self::login_controls::{
-    claude_login_controls, codex_login_controls, cursor_scan_controls, gemini_login_controls,
+    claude_login_controls, codex_login_controls, copilot_login_controls, cursor_scan_controls,
+    gemini_login_controls,
 };
 use self::rows::{
     account_selector_list, claude_account_settings_row, codex_account_settings_row,
-    cursor_account_settings_row, gemini_account_settings_row, show_all_accounts_row,
+    copilot_account_settings_row, cursor_account_settings_row, gemini_account_settings_row,
+    show_all_accounts_row,
 };
 use super::super::{
-    AppState, ClaudeLoginState, CodexLoginState, Config, CursorScanState, Element,
-    GeminiLoginState, Length, Message, ProviderId, ProviderLoginStates, fl, settings_block,
-    settings_block_enabled, widget,
+    AppState, ClaudeLoginState, CodexLoginState, Config, CopilotLoginState, CursorScanState,
+    Element, GeminiLoginState, Length, Message, ProviderId, ProviderLoginStates, fl,
+    settings_block, settings_block_enabled, widget,
 };
 
 pub(super) fn provider_settings_view<'a>(
@@ -36,6 +38,7 @@ pub(super) fn provider_settings_view<'a>(
         ProviderId::Claude => claude_accounts_section(state, config, logins.claude, enabled),
         ProviderId::Cursor => cursor_accounts_section(state, config, logins.cursor_scan, enabled),
         ProviderId::Gemini => gemini_accounts_section(state, config, logins.gemini, enabled),
+        ProviderId::Copilot => copilot_accounts_section(state, config, logins.copilot, enabled),
     };
 
     Element::from(
@@ -158,6 +161,11 @@ fn claude_accounts_section<'a>(
         ));
     }
 
+    if let Some(login) = claude_login
+        && login.status == crate::providers::claude::ClaudeLoginStatus::Running
+    {
+        rows = rows.push(widget::text(fl!("account-browser-login-hint")).size(12));
+    }
     rows = rows.push(claude_login_controls(claude_login, enabled));
 
     settings_block_enabled(
@@ -280,6 +288,61 @@ fn cursor_accounts_section<'a>(
 
     settings_block_enabled(
         widget::text(fl!("cursor-accounts-title")).size(16).into(),
+        rows,
+        enabled,
+    )
+}
+
+fn copilot_accounts_section<'a>(
+    state: &'a AppState,
+    config: &'a Config,
+    copilot_login: Option<&'a CopilotLoginState>,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let selected_ids: Vec<&str> = state
+        .provider(ProviderId::Copilot)
+        .map(|provider| {
+            provider
+                .selected_account_ids
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let accounts = state.accounts_for(ProviderId::Copilot);
+    let mut rows = cosmic::iced::widget::column![]
+        .spacing(8)
+        .width(Length::Fill);
+
+    if accounts.is_empty() {
+        rows = rows.push(widget::text(fl!("copilot-accounts-empty")).size(13));
+    } else {
+        let mut account_rows = cosmic::iced::widget::column![]
+            .spacing(6)
+            .width(Length::Fill);
+        for account in &accounts {
+            account_rows = account_rows.push(copilot_account_settings_row(
+                account,
+                &selected_ids,
+                config,
+                enabled,
+            ));
+        }
+        rows = rows.push(account_selector_list(account_rows));
+    }
+
+    if accounts.len() > 1 {
+        rows = rows.push(show_all_accounts_row(
+            ProviderId::Copilot,
+            config.show_all_accounts(ProviderId::Copilot),
+            enabled,
+        ));
+    }
+
+    rows = rows.push(copilot_login_controls(copilot_login, enabled));
+
+    settings_block_enabled(
+        widget::text(fl!("copilot-accounts-title")).size(16).into(),
         rows,
         enabled,
     )

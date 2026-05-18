@@ -33,6 +33,19 @@ cursor-accounts-reauth-action = Log into the account in Cursor and use the resca
 claude-account-reauth-tooltip = Re-authenticate this Claude account
 gemini-accounts-title = Gemini Accounts
 gemini-accounts-empty = No Gemini accounts
+copilot-accounts-title = Copilot Accounts
+copilot-accounts-empty = No Copilot accounts
+account-browser-login-hint = Sign in to your browser as the account you want to add.
+copilot-login-running = Waiting for GitHub device sign-in...
+copilot-login-succeeded = Copilot account added
+copilot-login-failed = Copilot login failed
+copilot-login-user-code = Code: { $code }
+copilot-login-copy-code-tooltip = Copy code
+copilot-login-code-copied = Copied
+copilot-account-reauth-tooltip = Re-authenticate this Copilot account
+copilot-window-chat = Chat
+copilot-window-completions = Completions
+copilot-window-premium = Premium
 multi-account-coming-soon = Multi-account support coming soon
 account-add = Add account
 account-add-another = Add another
@@ -110,6 +123,7 @@ extra-usage-label = Extra usage
 extra-usage-disabled = Disabled
 credits-label = Credits
 credits-available = { $balance } available
+copilot-overage-over-plan = +{ $count } over plan
 
 ## Provider status badges
 badge-disabled = Disabled

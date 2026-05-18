@@ -22,6 +22,7 @@ use crate::model::{
 };
 use crate::providers::claude::{ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{CodexLoginState, CodexLoginStatus};
+use crate::providers::copilot::{CopilotLoginState, CopilotLoginStatus};
 use crate::providers::cursor::CursorScanState;
 use crate::providers::gemini::{GeminiLoginState, GeminiLoginStatus};
 use crate::providers::interface::ProviderAccountActionSupport;
@@ -50,6 +51,9 @@ const PROVIDER_SECTION_HEIGHT: f32 = 84.0;
 const PROVIDER_SECTION_WITH_ACTION_HEIGHT: f32 = 120.0;
 const SETTINGS_SECTION_HEIGHT: f32 = 104.0;
 const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
+const PROVIDER_TAB_ICON_SIZE: u16 = 16;
+const PROVIDER_TAB_ICON_LENGTH: f32 = 16.0;
+const PROVIDER_TAB_LABEL_SIZE: u16 = 11;
 const UPDATE_NOTIFICATION_DOT_COLOR: Color = Color::from_rgb(0.93, 0.11, 0.15);
 const ACCENT_SOFT_FILL_ALPHA: f32 = 0.14;
 
@@ -59,6 +63,7 @@ pub struct ProviderLoginStates<'a> {
     pub claude: Option<&'a ClaudeLoginState>,
     pub cursor_scan: &'a CursorScanState,
     pub gemini: Option<&'a GeminiLoginState>,
+    pub copilot: Option<&'a CopilotLoginState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -383,23 +388,39 @@ fn settings_category_tab(
     notify: bool,
 ) -> Element<'static, Message> {
     let icon = widget::icon::icon(icon)
-        .size(18)
-        .width(Length::Fixed(18.0))
-        .height(Length::Fixed(18.0));
-    let mut label = row![widget::text(label).size(12)]
-        .spacing(5)
-        .align_y(Alignment::Center);
-    if notify {
-        label = label.push(update_notification_dot(6.0));
-    }
+        .size(PROVIDER_TAB_ICON_SIZE)
+        .width(Length::Fixed(PROVIDER_TAB_ICON_LENGTH))
+        .height(Length::Fixed(PROVIDER_TAB_ICON_LENGTH));
+    let label: Element<'static, Message> = if notify {
+        container(
+            row![
+                widget::text(label)
+                    .size(PROVIDER_TAB_LABEL_SIZE)
+                    .width(Length::Shrink)
+                    .align_x(Alignment::Center),
+                update_notification_dot(6.0)
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::Center)
+        .into()
+    } else {
+        widget::text(label)
+            .size(PROVIDER_TAB_LABEL_SIZE)
+            .width(Length::Fill)
+            .align_x(Alignment::Center)
+            .into()
+    };
     let content = container(
         column![icon, label]
-            .spacing(5)
+            .spacing(3)
             .align_x(Alignment::Center)
             .width(Length::Fill),
     )
     .width(Length::Fill)
-    .padding([7, 9])
+    .padding([5, 9])
     .align_x(Alignment::Center);
 
     Element::from(
@@ -542,11 +563,14 @@ fn provider_tab(
     let percents = tab_percents(state, provider);
     let icon_variant = provider_icon_variant();
     let badge = widget::icon::icon(provider_icon_handle(provider.provider, icon_variant))
-        .size(18)
-        .width(Length::Fixed(18.0))
-        .height(Length::Fixed(18.0));
-    let label = widget::text(provider.provider.label()).size(12);
-    let bars = percents.into_iter().fold(column![].spacing(4), |col, pct| {
+        .size(PROVIDER_TAB_ICON_SIZE)
+        .width(Length::Fixed(PROVIDER_TAB_ICON_LENGTH))
+        .height(Length::Fixed(PROVIDER_TAB_ICON_LENGTH));
+    let label = widget::text(provider.provider.label())
+        .size(PROVIDER_TAB_LABEL_SIZE)
+        .width(Length::Fill)
+        .align_x(Alignment::Center);
+    let bars = percents.into_iter().fold(column![].spacing(3), |col, pct| {
         col.push(
             progress_bar(0.0..=100.0, pct)
                 .length(Length::Fill)
@@ -556,7 +580,7 @@ fn provider_tab(
 
     let content = container(
         column![badge, label, bars]
-            .spacing(5)
+            .spacing(3)
             .align_x(Alignment::Center)
             .width(Length::Fill),
     )

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-    ManagedGeminiAccountConfig, ProviderVisibilityMode, paths,
+    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
+    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -18,6 +18,8 @@ const CODEX_SECONDARY_ID: &str = "yapcap-demo:codex-secondary";
 const CLAUDE_PRIMARY_ID: &str = "yapcap-demo:claude-primary";
 const CURSOR_PRIMARY_ID: &str = "yapcap-demo:cursor-primary";
 const GEMINI_PRIMARY_ID: &str = "yapcap-demo:gemini-primary";
+const COPILOT_FREE_ID: &str = "yapcap-demo:copilot-casey-free";
+const COPILOT_PRO_ID: &str = "yapcap-demo:copilot-morgan-pro";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -45,11 +47,13 @@ pub fn apply_config(config: &mut Config) {
     config.claude_enabled = true;
     config.cursor_enabled = true;
     config.gemini_enabled = true;
+    config.copilot_enabled = true;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
     config.cursor_managed_accounts = demo_cursor_accounts();
     config.gemini_managed_accounts = demo_gemini_accounts();
+    config.copilot_managed_accounts = demo_copilot_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -58,11 +62,14 @@ pub fn apply_config(config: &mut Config) {
     config.selected_claude_account_ids = vec![CLAUDE_PRIMARY_ID.to_string()];
     config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
     config.selected_gemini_account_ids = vec![GEMINI_PRIMARY_ID.to_string()];
+    config.selected_copilot_account_ids =
+        vec![COPILOT_FREE_ID.to_string(), COPILOT_PRO_ID.to_string()];
 
     config.set_provider_show_all(ProviderId::Codex, true);
     config.set_provider_show_all(ProviderId::Claude, false);
     config.set_provider_show_all(ProviderId::Cursor, false);
     config.set_provider_show_all(ProviderId::Gemini, false);
+    config.set_provider_show_all(ProviderId::Copilot, true);
 }
 
 pub fn apply(config: &Config, state: &mut AppState) {
@@ -104,20 +111,21 @@ pub fn apply(config: &Config, state: &mut AppState) {
 }
 
 fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
-    Some(
-        match provider {
-            ProviderId::Codex => CODEX_PRIMARY_ID,
-            ProviderId::Claude => CLAUDE_PRIMARY_ID,
-            ProviderId::Cursor => CURSOR_PRIMARY_ID,
-            ProviderId::Gemini => GEMINI_PRIMARY_ID,
-        }
-        .to_string(),
-    )
+    let id = match provider {
+        ProviderId::Codex => CODEX_PRIMARY_ID,
+        ProviderId::Claude => CLAUDE_PRIMARY_ID,
+        ProviderId::Cursor => CURSOR_PRIMARY_ID,
+        ProviderId::Gemini => GEMINI_PRIMARY_ID,
+        ProviderId::Copilot => return None,
+    };
+    Some(id.to_string())
 }
 
 fn demo_source(provider: ProviderId) -> String {
     match provider {
-        ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini => "OAuth".to_string(),
+        ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini | ProviderId::Copilot => {
+            "OAuth".to_string()
+        }
         ProviderId::Cursor => "Managed Account".to_string(),
     }
 }
@@ -187,6 +195,32 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 snapshot: snapshot_cursor_primary(),
             },
         )],
+        ProviderId::Copilot => vec![
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: COPILOT_FREE_ID,
+                    label: "casey-free",
+                    last_success_at: now - Duration::minutes(5),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_copilot_free(),
+                },
+            ),
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: COPILOT_PRO_ID,
+                    label: "morgan-pro",
+                    last_success_at: now - Duration::minutes(5),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_copilot_pro(),
+                },
+            ),
+        ],
     }
 }
 
@@ -406,6 +440,68 @@ fn snapshot_cursor_primary() -> UsageSnapshot {
     }
 }
 
+fn snapshot_copilot_free() -> UsageSnapshot {
+    let now = Utc::now();
+    let reset = now + Duration::days(14);
+    let windows = vec![
+        UsageWindow {
+            label: "chat".to_string(),
+            used_percent: 30.0,
+            reset_at: Some(reset),
+            window_seconds: None,
+            reset_description: Some(reset.to_rfc3339()),
+        },
+        UsageWindow {
+            label: "completions".to_string(),
+            used_percent: 80.0,
+            reset_at: Some(reset),
+            window_seconds: None,
+            reset_description: Some(reset.to_rfc3339()),
+        },
+    ];
+    UsageSnapshot {
+        provider: ProviderId::Copilot,
+        source: "Managed Account".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(1),
+        windows,
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: Some("10101".to_string()),
+            plan: Some("Free".to_string()),
+            display_name: Some("casey-free".to_string()),
+        },
+    }
+}
+
+fn snapshot_copilot_pro() -> UsageSnapshot {
+    let now = Utc::now();
+    let reset = now + Duration::days(14);
+    UsageSnapshot {
+        provider: ProviderId::Copilot,
+        source: "Managed Account".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "premium_interactions".to_string(),
+            used_percent: 100.0,
+            reset_at: Some(reset),
+            window_seconds: None,
+            reset_description: Some("+42 over plan".to_string()),
+        }],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: Some("20202".to_string()),
+            plan: Some("Pro+".to_string()),
+            display_name: Some("morgan-pro".to_string()),
+        },
+    }
+}
+
 fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
     let now = Utc::now();
     vec![
@@ -479,6 +575,30 @@ fn demo_gemini_accounts() -> Vec<ManagedGeminiAccountConfig> {
     }]
 }
 
+fn demo_copilot_accounts() -> Vec<ManagedCopilotAccountConfig> {
+    let now = Utc::now();
+    vec![
+        ManagedCopilotAccountConfig {
+            id: COPILOT_FREE_ID.to_string(),
+            label: "casey-free".to_string(),
+            github_user_id: 10101,
+            login: "casey-free".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
+        ManagedCopilotAccountConfig {
+            id: COPILOT_PRO_ID.to_string(),
+            label: "morgan-pro".to_string(),
+            github_user_id: 20202,
+            login: "morgan-pro".to_string(),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
+    ]
+}
+
 fn demo_root() -> PathBuf {
     paths().cache_dir.join("demo")
 }
@@ -533,14 +653,18 @@ mod tests {
         assert_eq!(config.claude_managed_accounts.len(), 1);
         assert_eq!(config.cursor_managed_accounts.len(), 1);
         assert_eq!(config.gemini_managed_accounts.len(), 1);
+        assert_eq!(config.copilot_managed_accounts.len(), 2);
         assert_eq!(config.selected_codex_account_ids.len(), 2);
         assert_eq!(config.selected_claude_account_ids.len(), 1);
         assert_eq!(config.selected_cursor_account_ids.len(), 1);
         assert_eq!(config.selected_gemini_account_ids.len(), 1);
+        assert_eq!(config.selected_copilot_account_ids.len(), 2);
+        assert!(config.copilot_enabled);
         assert!(config.show_all_accounts(ProviderId::Codex));
         assert!(!config.show_all_accounts(ProviderId::Claude));
         assert!(!config.show_all_accounts(ProviderId::Cursor));
         assert!(!config.show_all_accounts(ProviderId::Gemini));
+        assert!(config.show_all_accounts(ProviderId::Copilot));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
@@ -585,6 +709,12 @@ mod tests {
                 .and_then(|provider| provider.system_active_account_id.as_deref()),
             Some(GEMINI_PRIMARY_ID)
         );
+        assert_eq!(
+            state
+                .provider(ProviderId::Copilot)
+                .and_then(|provider| provider.system_active_account_id.as_deref()),
+            None
+        );
         for account in &state.provider_accounts {
             assert_eq!(account.health, ProviderHealth::Ok);
             assert!(account.snapshot.is_some());
@@ -594,6 +724,73 @@ mod tests {
                     .is_some_and(|updated| { Utc::now() - updated < Duration::minutes(10) })
             );
         }
+    }
+
+    #[test]
+    fn copilot_demo_seeds_free_and_overage_pro_accounts() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let mut state = AppState::empty();
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        assert_eq!(
+            config.selected_copilot_account_ids,
+            vec![
+                "yapcap-demo:copilot-casey-free".to_string(),
+                "yapcap-demo:copilot-morgan-pro".to_string()
+            ]
+        );
+        assert_eq!(
+            state
+                .provider(ProviderId::Copilot)
+                .map(|provider| provider.selected_account_ids.clone()),
+            Some(config.selected_copilot_account_ids.clone())
+        );
+
+        let casey = state
+            .provider_accounts
+            .iter()
+            .find(|account| {
+                account.provider == ProviderId::Copilot
+                    && account.account_id == "yapcap-demo:copilot-casey-free"
+            })
+            .and_then(|account| account.snapshot.as_ref())
+            .expect("casey-free demo snapshot");
+        assert_eq!(casey.identity.display_name.as_deref(), Some("casey-free"));
+        assert_eq!(casey.identity.plan.as_deref(), Some("Free"));
+        assert_eq!(casey.headline, UsageHeadline(1));
+        assert_eq!(casey.windows.len(), 2);
+        assert_eq!(casey.windows[0].label, "chat");
+        assert!((casey.windows[0].used_percent - 30.0).abs() < 0.001);
+        assert_eq!(casey.windows[1].label, "completions");
+        assert!((casey.windows[1].used_percent - 80.0).abs() < 0.001);
+
+        let morgan = state
+            .provider_accounts
+            .iter()
+            .find(|account| {
+                account.provider == ProviderId::Copilot
+                    && account.account_id == "yapcap-demo:copilot-morgan-pro"
+            })
+            .and_then(|account| account.snapshot.as_ref())
+            .expect("morgan-pro demo snapshot");
+        assert_eq!(morgan.identity.display_name.as_deref(), Some("morgan-pro"));
+        assert_eq!(morgan.identity.plan.as_deref(), Some("Pro+"));
+        assert_eq!(morgan.headline, UsageHeadline(0));
+        assert_eq!(morgan.windows.len(), 1);
+        assert_eq!(morgan.windows[0].label, "premium_interactions");
+        assert!((morgan.windows[0].used_percent - 100.0).abs() < 0.001);
+        assert_eq!(
+            morgan.windows[0].reset_description.as_deref(),
+            Some("+42 over plan")
+        );
     }
 
     #[test]

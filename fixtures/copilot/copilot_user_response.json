@@ -1,0 +1,63 @@
+{
+  "body_json": {
+    "access_type_sku": "free_limited_copilot",
+    "analytics_tracking_id": "REDACTEDTRACKINGIDPLACEHOLDER0000",
+    "assigned_date": "2025-01-01T00:00:00+00:00",
+    "can_signup_for_limited": false,
+    "can_upgrade_plan": false,
+    "chat_enabled": true,
+    "cli_enabled": true,
+    "copilot_plan": "individual",
+    "copilotignore_enabled": false,
+    "editor_preview_features_enabled": true,
+    "endpoints": {
+      "api": "https://api.individual.githubcopilot.com",
+      "origin-tracker": "https://origin-tracker.individual.githubcopilot.com",
+      "proxy": "https://proxy.individual.githubcopilot.com",
+      "telemetry": "https://telemetry.individual.githubcopilot.com"
+    },
+    "is_mcp_enabled": true,
+    "limited_user_quotas": {
+      "chat": 480,
+      "completions": 4000
+    },
+    "limited_user_reset_date": "2026-06-03",
+    "limited_user_subscribed_day": 1,
+    "login": "exampleuser",
+    "monthly_quotas": {
+      "chat": 500,
+      "completions": 4000
+    },
+    "organization_list": [],
+    "organization_login_list": [],
+    "restricted_telemetry": false
+  },
+  "body_text": "{\"login\":\"exampleuser\",\"access_type_sku\":\"free_limited_copilot\",\"analytics_tracking_id\":\"REDACTEDTRACKINGIDPLACEHOLDER0000\",\"assigned_date\":\"2025-01-01T00:00:00+00:00\",\"can_signup_for_limited\":false,\"chat_enabled\":true,\"cli_enabled\":true,\"copilotignore_enabled\":false,\"copilot_plan\":\"individual\",\"editor_preview_features_enabled\":true,\"is_mcp_enabled\":true,\"organization_login_list\":[],\"organization_list\":[],\"restricted_telemetry\":false,\"endpoints\":{\"api\":\"https://api.individual.githubcopilot.com\",\"origin-tracker\":\"https://origin-tracker.individual.githubcopilot.com\",\"proxy\":\"https://proxy.individual.githubcopilot.com\",\"telemetry\":\"https://telemetry.individual.githubcopilot.com\"},\"can_upgrade_plan\":false,\"limited_user_quotas\":{\"chat\":480,\"completions\":4000},\"limited_user_subscribed_day\":1,\"limited_user_reset_date\":\"2026-06-03\",\"monthly_quotas\":{\"chat\":500,\"completions\":4000}}",
+  "endpoint": "copilot_user",
+  "method": "GET",
+  "requested_at": "2026-05-15T10:22:00.510756+00:00",
+  "response_headers": {
+    "Cache-Control": "private, max-age=60, s-maxage=60",
+    "Content-Length": "883",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 15 May 2026 10:22:00 GMT",
+    "ETag": "\"REDACTED\"",
+    "Server": "github.com",
+    "Strict-Transport-Security": "max-age=31536000; includeSubdomains; preload",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "deny",
+    "X-GitHub-Media-Type": "github.v3",
+    "X-GitHub-Request-Id": "REDACTED",
+    "X-OAuth-Scopes": "",
+    "X-RateLimit-Limit": "15000",
+    "X-RateLimit-Remaining": "14994",
+    "X-RateLimit-Reset": "1778842140",
+    "X-RateLimit-Resource": "core",
+    "X-RateLimit-Used": "6",
+    "X-XSS-Protection": "0",
+    "connection": "close",
+    "x-oauth-client-id": "Iv1.b507a08c87ecfe98"
+  },
+  "status_code": 200,
+  "url": "https://api.github.com/copilot_internal/user"
+}

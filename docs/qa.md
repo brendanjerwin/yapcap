@@ -1,18 +1,18 @@
 # YapCap QA Plan
 
-Manual test plan for v0.5.0. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
+Manual test plan for v0.6.0. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
 
 Paths used below:
 
 **Native** (default XDG layout on typical Linux installs):
 
-- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/`
+- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v600/`
 - Cache: `~/.cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.local/state/yapcap/` (e.g. `…/logs/yapcap.log`)
 
 **Flatpak** (app id `io.github.TopiCsarno.YapCap`; paths use passwd `pw_dir` as `~`):
 
-- Config: same COSMIC config schema `v400` dir (manifest mounts `~/.config/cosmic`)
+- Config: same COSMIC config schema `v600` dir (manifest mounts `~/.config/cosmic`)
 - Cache: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`
 
@@ -22,8 +22,8 @@ Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data�
 
 ## 1. Fresh install
 
-- `just clear-all-data` then install. All three provider tabs visible with "Login required" state (not hidden).
-- Existing `v300` COSMIC settings are not loaded after the `v400` schema boundary; users must re-add accounts.
+- `just clear-all-data` then install. All five provider tabs visible with "Login required" state (not hidden).
+- Existing `v400` COSMIC settings are not loaded after the `v600` schema boundary; users must re-add accounts.
 - Existing account directories, snapshot caches, and logs are not automatically deleted by the schema boundary and may remain orphaned.
 - Settings → General → About shows correct version and dist label ("Native" or "Flatpak").
 - Panel icon renders without clipping or overflow.
@@ -251,7 +251,85 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 10. Multi-account
+## 10. Copilot
+
+### 10.1 Add account
+
+- Settings -> Copilot -> Add account starts GitHub device flow.
+- Browser opens `https://github.com/login/device`; entering the displayed user code completes successfully.
+- Cancel during polling leaves account storage and selected accounts unchanged.
+- Adding the same GitHub account a second time refreshes the existing entry; no duplicate row appears.
+
+### 10.2 Login hint
+
+- The shared "Sign in to your browser as the account you want to add" private-window hint is visible at the add-account point.
+
+### 10.3 Multi-account add
+
+- Add a second GitHub account using private browsing or a different browser session.
+- The second account creates a separate `copilot-<github-user-id>/` directory.
+- Both accounts are visible in Settings.
+
+### 10.4 Free tier display
+
+- Free account popup renders chat and completions windows.
+- Completions is the headline percentage.
+- Panel shows two bars.
+- Reset time matches `limited_user_reset_date`.
+
+### 10.5 Paid tier display
+
+- Paid account popup renders one `premium_interactions` window.
+- Panel shows one bar vertically centered within the two-bar height.
+- Plan badge reads **Pro+** for `plus_monthly_subscriber_quota`.
+- Plan badge reads **Business** for `copilot_standalone_seat_quota`.
+- Reset time matches `quota_reset_date`.
+
+### 10.6 Mixed bar counts
+
+- Select a Free account and a paid account side by side.
+- Panel shows a two-bar Free group beside a one-bar paid group.
+- The one-bar paid group remains vertically centered; the Free group keeps two bars.
+
+### 10.7 Overage rendering
+
+- Run with `YAPCAP_DEMO=1`.
+- Verify the `morgan-pro` Copilot account shows `+42 over plan` under the premium bar.
+
+### 10.8 `YAPCAP_DEMO`
+
+- Run with `YAPCAP_DEMO=1`.
+- Verify `casey-free` and `morgan-pro` Copilot accounts are both present.
+- Verify both accounts are selected and Copilot `Show all accounts` is on.
+
+### 10.9 Re-auth flow
+
+- Revoke the YapCap GitHub App token at `github.com/settings/applications`.
+- Trigger refresh and verify account badges flip to `Re-auth needed`.
+- Verify the re-auth icon appears in Settings.
+- Re-auth with the same GitHub account and verify the account refreshes successfully.
+- Re-auth with a different GitHub account and verify YapCap rejects it with a different-account error without replacing the stored account.
+
+### 10.10 Transient errors
+
+- Disable network during refresh.
+- Verify stale snapshot remains visible with the "No internet connection" message.
+- Reconnect and click **Refresh now**; fresh data should restore.
+
+### 10.11 Account removal
+
+- Remove a Copilot account from Settings.
+- Verify only the matching `copilot-<github-user-id>/` directory is deleted.
+- Verify no host GitHub config is touched.
+
+### 10.12 Native + Flatpak parity
+
+- Repeat add, refresh, re-auth, and remove in Native and Flatpak builds.
+- Under Flatpak, verify device flow opens the browser via the OpenURI portal.
+
+---
+
+## 11. Multi-account
 
 - Add a second account for any provider.
 - `Show all accounts` toggle appears only when the provider has more than one account.
@@ -263,7 +341,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 11. Stale / error states
+## 12. Stale / error states
 
 - Kill network (`nmcli networking off`). Trigger a refresh. Verify "No internet connection. Showing cached data; information is not up to date." message. Cached usage data still visible. Re-enable network, verify Live badge returns.
 - Wait 11 minutes without refreshing (or set refresh interval to max and advance clock). Verify account badge switches from Live to Stale. Status line appends "(stale)".
@@ -272,7 +350,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 12. Provider enable/disable
+## 13. Provider enable/disable
 
 - Disable a provider via its settings toggle — provider tab disappears from popup nav.
 - All provider-specific settings below the toggle are dimmed and non-interactive when disabled.
@@ -281,7 +359,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 13. Popup sizing
+## 14. Popup sizing
 
 - Single-account provider: popup is 420 px wide.
 - Two-account provider: popup is 840 px wide.
@@ -292,23 +370,23 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 14. Accounts removed from filesystem
+## 15. Accounts removed from filesystem
 
 - Manually delete a provider account directory from the YapCap data tree (`~/.local/state/yapcap/<provider>-accounts/` native, or `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/<provider>-accounts/` Flatpak). Trigger a refresh. Verify the provider surfaces "Login required" or empty state rather than showing a stale snapshot indefinitely.
 
 ---
 
-## 15. Config state file manipulation
+## 16. Config state file manipulation
 
 - Delete cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify app starts with Loading state and fetches fresh data.
 - Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
-- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v300/` config in place. Restart the current build and verify `v400` defaults are used instead.
+- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/` config in place. Restart the current build and verify `v600` defaults are used instead.
 - Manually edit config to add a non-existent account id to `selected_codex_account_ids`. Restart. Verify graceful fallback to first valid account or Login Required — no crash.
 - Set `refresh_interval_seconds = 5` in config. Verify it is clamped to 10s at runtime (not 5s).
 
 ---
 
-## 16. Logging
+## 17. Logging
 
 - Native: verify `~/.local/state/yapcap/logs/yapcap.log`. Flatpak: verify `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/logs/yapcap.log`. Each is written during a normal session for that build.
 - Verify no bearer tokens, access tokens, cookie values, or refresh tokens appear in the log.
@@ -316,13 +394,13 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 17. Flatpak-specific
+## 18. Flatpak-specific
 
 - Install via `just flatpak-install`. YapCap appears in COSMIC applet list.
 - Install from the COSMIC Store. YapCap appears in the COSMIC panel applet picker after installation, uses the `io.github.TopiCsarno.YapCap` Flatpak id, appears under the applet category/filter, and shows "Place on desktop" rather than "Open".
-- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.5.0`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Settings.
+- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.6.0`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Settings.
 - About section shows "Flatpak" dist label.
-- OAuth flows (Codex, Claude) open the system browser correctly from inside the sandbox.
+- OAuth flows (Codex, Claude, Gemini, Copilot) open the system browser correctly from inside the sandbox.
 - COSMIC dark/light theme and accent colour updates are observed immediately through the settings config watcher.
 - Cursor add-account: Flatpak sandbox can read `~/.config/Cursor/User/globalStorage/state.vscdb` through the read-only home permission. Scan succeeds and account is stored.
 - Flatpak permissions include `--filesystem=home:ro`, not writable home or `--filesystem=host`.

@@ -1,0 +1,30 @@
+{
+  "body_json": {
+    "access_token": "ghu_REDACTEDOAUTHTOKENPLACEHOLDERREDACTED",
+    "scope": "",
+    "token_type": "bearer"
+  },
+  "body_text": "{\"access_token\":\"ghu_REDACTEDOAUTHTOKENPLACEHOLDERREDACTED\",\"token_type\":\"bearer\",\"scope\":\"\"}",
+  "endpoint": "access_token",
+  "method": "POST",
+  "requested_at": "2026-05-15T10:21:35.018033+00:00",
+  "response_headers": {
+    "Cache-Control": "max-age=0, private, must-revalidate",
+    "Content-Length": "92",
+    "Content-Type": "application/json; charset=utf-8",
+    "Date": "Fri, 15 May 2026 10:21:34 GMT",
+    "ETag": "W/\"REDACTED\"",
+    "Referrer-Policy": "origin-when-cross-origin, strict-origin-when-cross-origin",
+    "Server": "github.com",
+    "Set-Cookie": "REDACTED",
+    "Strict-Transport-Security": "max-age=31536000; includeSubdomains; preload",
+    "Vary": "X-PJAX, X-PJAX-Container, Turbo-Visit, Turbo-Frame, X-Requested-With,Accept-Encoding, Accept, X-Requested-With",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "deny",
+    "X-GitHub-Request-Id": "REDACTED",
+    "X-XSS-Protection": "0",
+    "connection": "close"
+  },
+  "status_code": 200,
+  "url": "https://github.com/login/oauth/access_token"
+}

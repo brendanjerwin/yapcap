@@ -9,15 +9,17 @@
   </developer>
   <developer_name>Tamás Csarnó</developer_name>
   <name>YapCap</name>
-  <summary>COSMIC panel applet for Codex, Claude Code, and Cursor usage</summary>
+  <summary>COSMIC panel applet for Codex, Claude Code, Cursor, Gemini, and Copilot usage</summary>
   <description>
-    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, and Cursor right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
+    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, Cursor, Gemini, and GitHub Copilot right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
     <p>Use the popup to compare multiple accounts, see which CLI account is active, switch panel styles, and follow your COSMIC light, dark, and accent color settings.</p>
     <p>Main features:</p>
     <ul>
       <li>Codex usage tracking and credits</li>
       <li>Claude usage tracking and extra usage meter</li>
       <li>Cursor usage tracking: API, Composer and Total</li>
+      <li>Gemini usage tracking: Pro, Flash and Lite quotas</li>
+      <li>GitHub Copilot usage tracking: Free and paid quota shapes</li>
       <li>Multiple accounts per provider</li>
       <li>Active account badge</li>
       <li>COSMIC theme integration</li>
@@ -75,10 +77,17 @@
     <keyword>Codex</keyword>
     <keyword>Claude</keyword>
     <keyword>Cursor</keyword>
+    <keyword>Gemini</keyword>
+    <keyword>Copilot</keyword>
     <keyword>Panel</keyword>
     <keyword>Applet</keyword>
   </keywords>
   <releases>
+    <release type="stable" version="0.6.0" date="2026-05-18">
+      <description>
+        <p>Adds GitHub Copilot as a fifth provider with browser device-flow login, Free and paid usage parsing, multi-account support, re-auth handling, and mixed one-bar/two-bar panel rendering.</p>
+      </description>
+    </release>
     <release type="stable" version="0.5.0" date="2026-05-15" />
     <release type="stable" version="0.4.0" date="2026-05-04" />
   </releases>
