@@ -89,7 +89,7 @@ pub fn reset_label(
     now: DateTime<Utc>,
     format: ResetTimeFormat,
 ) -> Option<String> {
-    if is_elapsed(window, now) || is_inactive_session(window) {
+    if is_elapsed(window, now) || is_inactive_window(window, now) {
         return Some(fl!("reset-now"));
     }
     if let Some(reset_at) = window.reset_at {
@@ -105,8 +105,22 @@ fn is_elapsed(window: &UsageWindow, now: DateTime<Utc>) -> bool {
     window.reset_at.is_some_and(|reset_at| reset_at <= now)
 }
 
-fn is_inactive_session(window: &UsageWindow) -> bool {
-    window.label == "Session" && window.used_percent <= 0.0
+const FRESH_WINDOW_FRACTION: i64 = 20;
+
+fn is_inactive_window(window: &UsageWindow, now: DateTime<Utc>) -> bool {
+    if window.used_percent > 0.0 {
+        return false;
+    }
+    let Some(window_seconds) = window.window_seconds.filter(|s| *s > 0) else {
+        return true;
+    };
+    let Some(reset_at) = window.reset_at else {
+        return true;
+    };
+    let window_start = reset_at - chrono::Duration::seconds(window_seconds);
+    let elapsed = now - window_start;
+    elapsed >= chrono::Duration::zero()
+        && elapsed < chrono::Duration::seconds(window_seconds / FRESH_WINDOW_FRACTION)
 }
 
 fn format_relative_reset_label(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> String {
@@ -301,26 +315,49 @@ mod tests {
     }
 
     #[test]
-    fn marks_zero_session_with_future_reset_as_reset() {
-        let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
-        let next_reset = Utc.with_ymd_and_hms(2026, 4, 12, 21, 51, 55).unwrap();
+    fn marks_zero_usage_window_inside_fresh_fraction_as_reset() {
+        let window_seconds = 24 * 60 * 60;
+        let window_start = Utc.with_ymd_and_hms(2026, 4, 12, 0, 0, 0).unwrap();
+        let next_reset = window_start + chrono::Duration::seconds(window_seconds);
+        let now = window_start + chrono::Duration::minutes(30);
+        let usage = paced_window(next_reset, window_seconds, 0.0);
         assert_eq!(
-            reset_label(
-                &window(Some(next_reset), 0.0),
-                now,
-                ResetTimeFormat::Relative
-            )
-            .as_deref(),
+            reset_label(&usage, now, ResetTimeFormat::Relative).as_deref(),
             Some("Reset")
         );
     }
 
     #[test]
-    fn leaves_non_session_without_reset_time_unlabeled() {
+    fn does_not_mark_zero_usage_window_past_fresh_fraction_as_reset() {
+        let window_seconds = 24 * 60 * 60;
+        let window_start = Utc.with_ymd_and_hms(2026, 4, 12, 0, 0, 0).unwrap();
+        let next_reset = window_start + chrono::Duration::seconds(window_seconds);
+        let now = window_start + chrono::Duration::hours(6);
+        let usage = paced_window(next_reset, window_seconds, 0.0);
+        let label = reset_label(&usage, now, ResetTimeFormat::Relative).unwrap();
+        assert_ne!(strip_isolation_marks(&label), "Reset");
+    }
+
+    #[test]
+    fn does_not_mark_nonzero_usage_window_as_reset() {
+        let window_seconds = 24 * 60 * 60;
+        let window_start = Utc.with_ymd_and_hms(2026, 4, 12, 0, 0, 0).unwrap();
+        let next_reset = window_start + chrono::Duration::seconds(window_seconds);
+        let now = window_start + chrono::Duration::minutes(10);
+        let usage = paced_window(next_reset, window_seconds, 12.5);
+        let label = reset_label(&usage, now, ResetTimeFormat::Relative).unwrap();
+        assert_ne!(strip_isolation_marks(&label), "Reset");
+    }
+
+    #[test]
+    fn marks_zero_weekly_without_reset_time_as_reset() {
         let now = Utc.with_ymd_and_hms(2026, 4, 12, 16, 51, 55).unwrap();
         let mut weekly = window(None, 0.0);
         weekly.label = "Weekly".to_string();
-        assert_eq!(reset_label(&weekly, now, ResetTimeFormat::Relative), None);
+        assert_eq!(
+            reset_label(&weekly, now, ResetTimeFormat::Relative).as_deref(),
+            Some("Reset")
+        );
     }
 
     #[test]

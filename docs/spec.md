@@ -318,7 +318,7 @@ Response shape:
 
 Claude does not populate `UsageSnapshot.provider_cost` (Codex retains `provider_cost` for credits-only display).
 
-Claude usage windows are partially tolerant because the endpoint can return null fields for inactive or account-specific windows. A window with no `utilization` is skipped. A window with `utilization` but no `resets_at` is kept without reset metadata. For the `five_hour` session window, `utilization = 0` with `resets_at = null` is treated in display code as a reset/inactive session and labeled `Reset`. If both primary windows are absent after normalization, the provider returns `NoUsageData`.
+Claude usage windows are partially tolerant because the endpoint can return null fields for inactive or account-specific windows. A window with no `utilization` is skipped. A window with `utilization` but no `resets_at` is kept without reset metadata. If both primary windows are absent after normalization, the provider returns `NoUsageData`. See §5.3 for how zero-usage windows with missing `resets_at` are rendered.
 
 Usage fallback: none. Claude usage is fetched only through the OAuth usage endpoint.
 
@@ -943,6 +943,13 @@ struct ProviderAccountRuntimeState {
 In single-account view the badge appears in the account header. In multi-account view each column shows its own badge independently, and the shared provider title row carries no badge.
 
 `ProviderRuntimeState::status_line` applies the same rule at the provider level (using the first selected account) and appends `(stale)` when appropriate. This prevents "Live · Updated 21 hours ago" on cold-start from the cache.
+
+**Usage window reset label.** `usage_display::reset_label` decides what each window's secondary text says. It returns `Reset` when either:
+
+- `reset_at` is present and `≤ now` (elapsed), or
+- `used_percent ≤ 0` and the window is in its **fresh fraction** — `now - (reset_at - window_seconds) < window_seconds / 20` (the first 5 % of the window since it last reset). When `window_seconds` or `reset_at` are missing, the fresh-fraction check degrades to "used_percent ≤ 0" so providers like Claude that can omit `resets_at` after a reset still surface the label.
+
+Otherwise it formats `reset_at` per `ResetTimeFormat`. The rule is provider-agnostic and applies uniformly to every `UsageWindow` rendered in the popup (Codex Session/Weekly, Claude Session/Weekly/Sonnet/Opus/Cowork, Cursor Total/Auto+Composer/API, Gemini Pro/Flash/Lite, Copilot Free Chat/Completions, Copilot Paid Premium).
 
 ## 6. Persistence, Logging, Paths
 
