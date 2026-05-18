@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::account_selection::select_account_after_login;
 use crate::config::{Config, ManagedGeminiAccountConfig, managed_gemini_account_dir};
+use crate::model::ProviderId;
 use chrono::Utc;
 use std::fs;
 use std::path::Path;
@@ -34,14 +36,12 @@ pub(crate) fn find_matching_account<'a>(
 
 pub fn apply_login_account(config: &mut Config, account: ManagedGeminiAccountConfig) {
     let account_id = account.id.clone();
-    if !config.selected_gemini_account_ids.contains(&account_id) {
-        config.selected_gemini_account_ids.push(account_id.clone());
-    }
     config
         .gemini_managed_accounts
         .retain(|existing| existing.id != account_id);
     config.gemini_managed_accounts.push(account);
     dedupe_managed_accounts(config);
+    select_account_after_login(config, ProviderId::Gemini, account_id);
 }
 
 pub fn sync_managed_accounts(config: &mut Config) -> bool {

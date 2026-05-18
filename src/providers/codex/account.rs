@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::account_selection::select_account_after_login;
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, ManagedCodexAccountConfig, managed_codex_account_dir, paths};
+use crate::model::ProviderId;
 use chrono::Utc;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -81,14 +83,12 @@ fn resync_managed_codex_dirs(config: &mut Config) -> bool {
 
 pub fn apply_login_account(config: &mut Config, account: ManagedCodexAccountConfig) {
     let account_id = account.id.clone();
-    if !config.selected_codex_account_ids.contains(&account_id) {
-        config.selected_codex_account_ids.push(account_id.clone());
-    }
     config
         .codex_managed_accounts
         .retain(|existing| existing.id != account_id);
     config.codex_managed_accounts.push(account);
     dedupe_managed_accounts(config);
+    select_account_after_login(config, ProviderId::Codex, account_id);
 }
 
 pub fn normalized_email(email: &str) -> String {

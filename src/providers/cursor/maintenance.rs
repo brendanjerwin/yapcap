@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::account_selection::select_account_after_login;
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, ManagedCursorAccountConfig, paths};
+use crate::model::ProviderId;
 use crate::providers::cursor::identity::{managed_account_id, managed_config_id, normalized_email};
 use crate::providers::cursor::storage::{
     managed_account_dir, new_account_id, stable_storage_id_from_normalized_email,
@@ -33,9 +35,6 @@ pub fn upsert_managed_account(
         account.account_root = managed_account_dir(&account.id);
     }
     let new_managed_id = managed_account_id(&account.id);
-    if !config.selected_cursor_account_ids.contains(&new_managed_id) {
-        config.selected_cursor_account_ids.push(new_managed_id);
-    }
     config
         .cursor_managed_accounts
         .retain(|existing| existing.email != account.email);
@@ -43,6 +42,7 @@ pub fn upsert_managed_account(
     config
         .cursor_managed_accounts
         .sort_by(|left, right| left.email.cmp(&right.email));
+    select_account_after_login(config, ProviderId::Cursor, new_managed_id);
     account
 }
 

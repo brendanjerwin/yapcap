@@ -125,9 +125,6 @@ impl AppModel {
                             account.health == ProviderHealth::Ok && account.snapshot.is_some();
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Codex) {
-                            if !provider.selected_account_ids.contains(&account_id) {
-                                provider.selected_account_ids.push(account_id);
-                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                             if refresh_succeeded {
@@ -367,9 +364,6 @@ impl AppModel {
                             account.health == ProviderHealth::Ok && account.snapshot.is_some();
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Claude) {
-                            if !provider.selected_account_ids.contains(&account_id) {
-                                provider.selected_account_ids.push(account_id);
-                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                             if refresh_succeeded {
@@ -445,9 +439,6 @@ impl AppModel {
                 account.error = None;
                 self.state.upsert_account(account);
                 if let Some(provider) = self.state.provider_mut(ProviderId::Cursor) {
-                    if !provider.selected_account_ids.contains(&account_id) {
-                        provider.selected_account_ids.push(account_id);
-                    }
                     provider.account_status = AccountSelectionStatus::Ready;
                     provider.error = None;
                 }
@@ -595,9 +586,6 @@ impl AppModel {
                         account.error = None;
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Gemini) {
-                            if !provider.selected_account_ids.contains(&account_id) {
-                                provider.selected_account_ids.push(account_id);
-                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                         }
@@ -784,9 +772,6 @@ impl AppModel {
                         account.error = None;
                         self.state.upsert_account(account);
                         if let Some(provider) = self.state.provider_mut(ProviderId::Copilot) {
-                            if !provider.selected_account_ids.contains(&account_id) {
-                                provider.selected_account_ids.push(account_id);
-                            }
                             provider.account_status = AccountSelectionStatus::Ready;
                             provider.error = None;
                         }

@@ -6,6 +6,21 @@ use crate::providers::cursor;
 
 pub const MAX_MULTI_ACCOUNT_SELECTION: usize = 4;
 
+pub fn select_account_after_login(config: &mut Config, provider: ProviderId, account_id: String) {
+    let show_all = config.show_all_accounts(provider);
+    let ids = config.selected_account_ids_mut(provider);
+    if !show_all {
+        ids.clear();
+        ids.push(account_id);
+        return;
+    }
+
+    if !ids.contains(&account_id) && ids.len() < MAX_MULTI_ACCOUNT_SELECTION {
+        ids.push(account_id);
+    }
+    ids.truncate(MAX_MULTI_ACCOUNT_SELECTION);
+}
+
 #[must_use]
 pub fn provider_show_all_account_selection(config: &Config, provider: ProviderId) -> Vec<String> {
     let available_ids: Vec<String> = match provider {
@@ -116,6 +131,52 @@ mod tests {
 
         assert_eq!(selected, ["codex-5", "codex-1", "codex-2", "codex-3"]);
         assert_eq!(config.codex_managed_accounts.len(), 5);
+    }
+
+    #[test]
+    fn login_selection_replaces_selection_when_show_all_is_off() {
+        let mut config = Config {
+            selected_copilot_account_ids: vec!["copilot-1".to_string()],
+            ..Config::default()
+        };
+
+        select_account_after_login(&mut config, ProviderId::Copilot, "copilot-2".to_string());
+
+        assert_eq!(config.selected_copilot_account_ids, ["copilot-2"]);
+    }
+
+    #[test]
+    fn login_selection_appends_when_show_all_is_on() {
+        let mut config = Config {
+            selected_copilot_account_ids: vec!["copilot-1".to_string()],
+            ..Config::default()
+        };
+        config.set_provider_show_all(ProviderId::Copilot, true);
+
+        select_account_after_login(&mut config, ProviderId::Copilot, "copilot-2".to_string());
+
+        assert_eq!(
+            config.selected_copilot_account_ids,
+            ["copilot-1", "copilot-2"]
+        );
+    }
+
+    #[test]
+    fn login_selection_caps_show_all_selection() {
+        let mut config = Config {
+            selected_copilot_account_ids: ["copilot-1", "copilot-2", "copilot-3", "copilot-4"]
+                .map(str::to_string)
+                .to_vec(),
+            ..Config::default()
+        };
+        config.set_provider_show_all(ProviderId::Copilot, true);
+
+        select_account_after_login(&mut config, ProviderId::Copilot, "copilot-5".to_string());
+
+        assert_eq!(
+            config.selected_copilot_account_ids,
+            ["copilot-1", "copilot-2", "copilot-3", "copilot-4"]
+        );
     }
 
     fn codex_account(index: usize) -> ManagedCodexAccountConfig {

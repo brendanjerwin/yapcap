@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::account_selection::select_account_after_login;
 use crate::config::{Config, ManagedCopilotAccountConfig, managed_copilot_account_dir};
+use crate::model::ProviderId;
 use chrono::{DateTime, Utc};
 use std::path::PathBuf;
 
@@ -17,13 +19,11 @@ pub fn find_matching_account(
 pub fn apply_login_account(config: &mut Config, account: ManagedCopilotAccountConfig) {
     let account_id = account.id.clone();
     let github_user_id = account.github_user_id;
-    if !config.selected_copilot_account_ids.contains(&account_id) {
-        config.selected_copilot_account_ids.push(account_id.clone());
-    }
     config
         .copilot_managed_accounts
         .retain(|existing| existing.id != account_id && existing.github_user_id != github_user_id);
     config.copilot_managed_accounts.push(account);
+    select_account_after_login(config, ProviderId::Copilot, account_id);
 }
 
 pub struct ResolvedAccount {
@@ -90,13 +90,31 @@ mod tests {
     }
 
     #[test]
-    fn apply_login_appends_new_account() {
+    fn apply_login_selects_new_account_when_show_all_is_off() {
         let mut config = Config {
             copilot_managed_accounts: vec![sample("copilot-1", 1, "alice")],
             selected_copilot_account_ids: vec!["copilot-1".to_string()],
             ..Config::default()
         };
         apply_login_account(&mut config, sample("copilot-2", 2, "bob"));
+        assert_eq!(config.copilot_managed_accounts.len(), 2);
+        assert_eq!(
+            config.selected_copilot_account_ids,
+            vec!["copilot-2".to_string()]
+        );
+    }
+
+    #[test]
+    fn apply_login_appends_new_account_when_show_all_is_on() {
+        let mut config = Config {
+            copilot_managed_accounts: vec![sample("copilot-1", 1, "alice")],
+            selected_copilot_account_ids: vec!["copilot-1".to_string()],
+            ..Config::default()
+        };
+        config.set_provider_show_all(ProviderId::Copilot, true);
+
+        apply_login_account(&mut config, sample("copilot-2", 2, "bob"));
+
         assert_eq!(config.copilot_managed_accounts.len(), 2);
         assert_eq!(
             config.selected_copilot_account_ids,
