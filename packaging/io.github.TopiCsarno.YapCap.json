@@ -43,7 +43,7 @@
         {
           "type": "git",
           "url": "https://github.com/TopiCsarno/yapcap.git",
-          "commit": "aa032d6519145262e4b5941a43a82f7ed7fe5598"
+          "commit": "6b7e3b9cc259637afa37782268778be8c81b630a"
         },
         "cargo-sources.json"
       ]
