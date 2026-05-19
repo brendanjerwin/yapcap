@@ -518,6 +518,77 @@ action only when applicable. Re-auth reruns GitHub device flow, fetches
 `tokens.json`, refreshes the stored `login`, clears the account error state, and
 immediately starts a usage refresh.
 
+Token format:
+
+- `ghu_…` — user-to-server token from the public `Iv1.b507a08c87ecfe98`
+  GitHub App. Long-lived, no expiry, no refresh token; revocation is the only
+  failure mode.
+- `Iv1.…` is a GitHub App client id. The `read:user` scope on the device flow
+  is an OAuth App convention that GitHub accepts for this App, but the App's
+  permissions are fixed at registration time and are *not* expanded by the
+  requested scope. Consequence: `/user/emails` returns 403 ("Resource not
+  accessible by integration") for this token, and `/user` typically returns a
+  null `email` for users with private emails. That is why Copilot identity is
+  the numeric `id`, not email, and `UsageSnapshot.identity.email` stays empty
+  for Copilot.
+
+Reference response shapes:
+
+Free tier (`access_type_sku == "free_limited_copilot"`):
+
+```json
+{
+  "access_type_sku": "free_limited_copilot",
+  "copilot_plan": "individual",
+  "limited_user_quotas":     { "chat": 480, "completions": 4000 },
+  "monthly_quotas":          { "chat": 500, "completions": 4000 },
+  "limited_user_reset_date": "2026-06-03",
+  "login": "TopiCsarno"
+}
+```
+
+`monthly_quotas.<field>` is the entitlement, `limited_user_quotas.<field>` is
+remaining; used percent is `1 - remaining / entitlement`. Entitlement values
+vary across captures (GitHub adjusts Free limits over time); field names are
+stable.
+
+Paid tiers (`quota_snapshots` present):
+
+```json
+{
+  "access_type_sku": "copilot_standalone_seat_quota",
+  "copilot_plan": "business",
+  "quota_reset_date": "2026-01-01",
+  "quota_snapshots": {
+    "chat":        { "unlimited": true,  "percent_remaining": 100.0 },
+    "completions": { "unlimited": true,  "percent_remaining": 100.0 },
+    "premium_interactions": {
+      "entitlement": 300,
+      "remaining": 93,
+      "percent_remaining": 31.166666666666664,
+      "quota_remaining": 93.5,
+      "overage_count": 0,
+      "overage_permitted": true,
+      "unlimited": false
+    }
+  },
+  "login": "TopiCsarno"
+}
+```
+
+`remaining` is the floored integer; `quota_remaining` is the fractional
+equivalent reflecting per-model multipliers and is accepted but not surfaced.
+The parser tolerates extra top-level fields (`analytics_tracking_id`,
+`assigned_date`, `can_signup_for_limited`, `chat_enabled`,
+`organization_login_list`, `organization_list`, `quota_reset_date_utc`) and
+extra per-quota fields (`quota_id`, `timestamp_utc`, `overage_permitted`)
+without failing.
+
+No real fixture exists for Pro (GitHub paused Pro upgrades in May 2026) or
+Enterprise. Unknown paid SKUs fall back to entitlement-based plan-badge
+disambiguation (see §3.4 plan badge mapping above). `YAPCAP_DEMO` seeds an
+`overage_count > 0` Pro+ account because no real overage capture exists.
+
 ### 3.5 Gemini
 
 Gemini account model:
@@ -1046,7 +1117,7 @@ Settings writes go through a `cosmic_config::Config` context acquired with the a
   (for example `0.4.0`) so software centers and validators can show version history.
   Remote `<screenshot>` images and `<url type="bugtracker">` point at GitHub `raw/main`
   and Issues for store listings. The default store screenshot is the provider-detail
-  popup, followed by Codex, Claude Code, Cursor, and Settings screenshots.
+  popup, followed by Codex, Claude Code, Cursor, Gemini, and Copilot zoom screenshots.
 - Runtime permissions avoid host-wide and writable home access: network, IPC,
   Wayland, fallback X11, DRI, D-Bus access to
   `com.system76.CosmicSettingsDaemon` and its
