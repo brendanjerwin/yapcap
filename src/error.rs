@@ -48,6 +48,12 @@ impl From<CopilotError> for AppError {
     }
 }
 
+impl From<MinimaxError> for AppError {
+    fn from(value: MinimaxError) -> Self {
+        Self::Provider(ProviderError::Minimax(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -153,6 +159,8 @@ pub enum ProviderError {
     Gemini(#[from] GeminiError),
     #[error(transparent)]
     Copilot(#[from] CopilotError),
+    #[error(transparent)]
+    Minimax(#[from] MinimaxError),
 }
 
 impl ProviderError {
@@ -164,6 +172,7 @@ impl ProviderError {
             Self::Cursor(error) => error.is_network_unavailable(),
             Self::Gemini(error) => error.is_network_unavailable(),
             Self::Copilot(error) => error.is_network_unavailable(),
+            Self::Minimax(error) => error.is_network_unavailable(),
         }
     }
 
@@ -175,6 +184,7 @@ impl ProviderError {
             Self::Cursor(error) => error.requires_user_action(),
             Self::Gemini(error) => error.requires_user_action(),
             Self::Copilot(error) => error.requires_user_action(),
+            Self::Minimax(error) => error.requires_user_action(),
         }
     }
 
@@ -186,6 +196,7 @@ impl ProviderError {
             Self::Cursor(_) => false,
             Self::Gemini(error) => error.is_transient(),
             Self::Copilot(error) => error.is_transient(),
+            Self::Minimax(error) => error.is_transient(),
         }
     }
 }
@@ -539,6 +550,64 @@ pub enum CopilotError {
 }
 
 impl CopilotError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::LoginRequired)
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::UsageRequest(source) => request_could_not_reach_network(source),
+            Self::UsageHttp { status } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum MinimaxError {
+    #[error("Minimax login required")]
+    LoginRequired,
+    #[error("Minimax usage request failed")]
+    UsageRequest(#[source] reqwest::Error),
+    #[error("Minimax usage endpoint returned HTTP {status}")]
+    UsageHttp { status: u16 },
+    #[error("Minimax usage endpoint returned error")]
+    UsageEndpoint(#[source] reqwest::Error),
+    #[error("failed to decode Minimax usage response")]
+    DecodeUsage(#[source] serde_json::Error),
+    #[error("failed to parse Minimax token plan response")]
+    ParseTokenPlan,
+    #[error("invalid Minimax bearer header")]
+    InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
+    #[error("Rate limited by Minimax — will retry automatically")]
+    RateLimited { retry_after_secs: Option<u64> },
+}
+
+impl MinimaxError {
     #[must_use]
     pub fn is_network_unavailable(&self) -> bool {
         match self {

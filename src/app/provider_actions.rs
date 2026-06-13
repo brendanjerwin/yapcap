@@ -2,7 +2,7 @@ use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
     PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, Size, Task, UpdateStatus,
     UsageAmountFormat, app_popup, applet_button_size, claude, cosmic_config, cursor, demo_env,
-    destroy_popup, format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple,
+    destroy_popup, format_retry_delay, minimax, popup_size_limits_with_max_width, popup_size_tuple,
     popup_view, refresh_provider_account_statuses_task, refresh_provider_task,
     refresh_provider_tasks, registry, resize_popup, runtime, select_provider, update_retry_delay,
     update_retry_task,
@@ -182,7 +182,9 @@ impl AppModel {
         {
             let mut new_config = self.config.clone();
             f(&mut new_config);
-            let _ = new_config.write_entry(&ctx);
+            if let Err(error) = new_config.write_entry(&ctx) {
+                tracing::error!(error = %error, "failed to write config");
+            }
             self.config = new_config;
         }
     }
@@ -202,6 +204,7 @@ impl AppModel {
             ProviderId::Cursor => new_config.cursor_enabled = enabled,
             ProviderId::Gemini => new_config.gemini_enabled = enabled,
             ProviderId::Copilot => new_config.copilot_enabled = enabled,
+            ProviderId::Minimax => new_config.minimax_enabled = enabled,
         });
         if enabled {
             runtime::reconcile_provider(&self.config, &mut self.state, provider);
@@ -428,6 +431,35 @@ impl AppModel {
         });
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         runtime::persist_state(&self.state);
+        Task::none()
+    }
+
+    pub(super) fn delete_minimax_account(&mut self, account_id: &str) -> Task<Message> {
+        let provider = ProviderId::Minimax;
+        if !self
+            .config
+            .minimax_managed_accounts
+            .iter()
+            .any(|account| account.id == account_id)
+        {
+            return Task::none();
+        }
+
+        minimax::remove_managed_config_dir(&crate::config::managed_minimax_account_dir(account_id));
+        self.write_config(|new_config| {
+            let _ = registry::delete_account(provider, account_id, new_config);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
+        });
+        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::persist_state(&self.state);
+
+        if self
+            .state
+            .provider(ProviderId::Minimax)
+            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
+        {
+            return refresh_provider_task(&self.config, &mut self.state, ProviderId::Minimax);
+        }
         Task::none()
     }
 }

@@ -5,6 +5,7 @@ mod codex_adapter;
 mod copilot_adapter;
 mod cursor_adapter;
 mod gemini_adapter;
+mod minimax_adapter;
 
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, host_user_home_dir, paths};
@@ -19,6 +20,7 @@ pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
         ProviderId::Cursor => &CURSOR_ADAPTER,
         ProviderId::Gemini => &GEMINI_ADAPTER,
         ProviderId::Copilot => &COPILOT_ADAPTER,
+        ProviderId::Minimax => &MINIMAX_ADAPTER,
     }
 }
 
@@ -27,6 +29,7 @@ static CLAUDE_ADAPTER: claude_adapter::ClaudeAdapter = claude_adapter::ClaudeAda
 static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAdapter;
 static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
 static COPILOT_ADAPTER: copilot_adapter::CopilotAdapter = copilot_adapter::CopilotAdapter;
+static MINIMAX_ADAPTER: minimax_adapter::MinimaxAdapter = minimax_adapter::MinimaxAdapter;
 
 pub(super) fn reconcile_provider_account_descriptors(
     provider: ProviderId,
@@ -149,4 +152,21 @@ pub(super) fn gemini_system_active_account_id(
         .join(".gemini")
         .join("google_accounts.json");
     gemini::system_active_account_id(managed_accounts, &path)
+}
+
+pub(super) fn minimax_system_active_account_id(
+    managed_accounts: &[crate::config::ManagedMinimaxAccountConfig],
+) -> Option<String> {
+    std::env::var("MINIMAX_API_KEY")
+        .ok()
+        .and_then(|api_key| {
+            if api_key.is_empty() {
+                None
+            } else {
+                managed_accounts
+                    .iter()
+                    .find(|acc| acc.api_key_source == "env:MINIMAX_API_KEY")
+                    .map(|acc| acc.id.clone())
+            }
+        })
 }

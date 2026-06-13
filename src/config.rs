@@ -24,6 +24,8 @@ pub struct Config {
     pub gemini_enabled: bool,
     #[serde(default = "default_copilot_enabled")]
     pub copilot_enabled: bool,
+    #[serde(default = "default_minimax_enabled")]
+    pub minimax_enabled: bool,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -40,6 +42,10 @@ pub struct Config {
     pub selected_copilot_account_ids: Vec<String>,
     #[serde(default)]
     pub copilot_managed_accounts: Vec<ManagedCopilotAccountConfig>,
+    #[serde(default)]
+    pub selected_minimax_account_ids: Vec<String>,
+    #[serde(default)]
+    pub minimax_managed_accounts: Vec<ManagedMinimaxAccountConfig>,
     pub log_level: String,
 }
 
@@ -48,6 +54,10 @@ fn default_gemini_enabled() -> bool {
 }
 
 fn default_copilot_enabled() -> bool {
+    true
+}
+
+fn default_minimax_enabled() -> bool {
     true
 }
 
@@ -64,6 +74,7 @@ impl Default for Config {
             cursor_enabled: true,
             gemini_enabled: true,
             copilot_enabled: true,
+            minimax_enabled: true,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -75,6 +86,8 @@ impl Default for Config {
             gemini_managed_accounts: Vec::new(),
             selected_copilot_account_ids: Vec::new(),
             copilot_managed_accounts: Vec::new(),
+            selected_minimax_account_ids: Vec::new(),
+            minimax_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -93,6 +106,7 @@ impl Config {
             ProviderId::Cursor => self.cursor_enabled,
             ProviderId::Gemini => self.gemini_enabled,
             ProviderId::Copilot => self.copilot_enabled,
+            ProviderId::Minimax => self.minimax_enabled,
         }
     }
 
@@ -104,6 +118,7 @@ impl Config {
             ProviderId::Cursor => &self.selected_cursor_account_ids,
             ProviderId::Gemini => &self.selected_gemini_account_ids,
             ProviderId::Copilot => &self.selected_copilot_account_ids,
+            ProviderId::Minimax => &self.selected_minimax_account_ids,
         }
     }
 
@@ -114,6 +129,7 @@ impl Config {
             ProviderId::Cursor => &mut self.selected_cursor_account_ids,
             ProviderId::Gemini => &mut self.selected_gemini_account_ids,
             ProviderId::Copilot => &mut self.selected_copilot_account_ids,
+            ProviderId::Minimax => &mut self.selected_minimax_account_ids,
         }
     }
 
@@ -137,6 +153,7 @@ impl Config {
             ProviderId::Cursor => &mut self.cursor_enabled,
             ProviderId::Gemini => &mut self.gemini_enabled,
             ProviderId::Copilot => &mut self.copilot_enabled,
+            ProviderId::Minimax => &mut self.minimax_enabled,
         };
         let changed = *target != enabled;
         *target = enabled;
@@ -248,6 +265,16 @@ pub struct ManagedCursorAccountConfig {
     pub last_authenticated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedMinimaxAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub api_key_source: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
 fn deserialize_cursor_email<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -273,6 +300,7 @@ pub struct AppPaths {
     pub cursor_accounts_dir: PathBuf,
     pub gemini_accounts_dir: PathBuf,
     pub copilot_accounts_dir: PathBuf,
+    pub minimax_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -377,6 +405,11 @@ pub fn managed_copilot_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn managed_minimax_account_dir(account_id: &str) -> PathBuf {
+    paths().minimax_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn paths() -> AppPaths {
     let cache_root = cache_root_dir();
     let state_root = state_parent_dir();
@@ -387,6 +420,7 @@ pub fn paths() -> AppPaths {
     let cursor_accounts_dir = state_dir.join("cursor-accounts");
     let gemini_accounts_dir = state_dir.join("gemini-accounts");
     let copilot_accounts_dir = state_dir.join("copilot-accounts");
+    let minimax_accounts_dir = state_dir.join("minimax-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         snapshot_file: cache_dir.join("snapshots.json"),
@@ -396,6 +430,7 @@ pub fn paths() -> AppPaths {
         cursor_accounts_dir,
         gemini_accounts_dir,
         copilot_accounts_dir,
+        minimax_accounts_dir,
         log_dir,
     }
 }
@@ -412,6 +447,7 @@ mod tests {
         assert!(config.provider_enabled(ProviderId::Cursor));
         assert!(config.provider_enabled(ProviderId::Gemini));
         assert!(config.provider_enabled(ProviderId::Copilot));
+        assert!(config.provider_enabled(ProviderId::Minimax));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::AutoInitPending
@@ -431,6 +467,7 @@ mod tests {
         assert!(config.cursor_managed_accounts.is_empty());
         assert!(config.gemini_managed_accounts.is_empty());
         assert!(config.copilot_managed_accounts.is_empty());
+        assert!(config.minimax_managed_accounts.is_empty());
     }
 
     #[test]
