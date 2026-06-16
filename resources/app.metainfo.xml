@@ -87,6 +87,11 @@
     <keyword>Applet</keyword>
   </keywords>
   <releases>
+    <release type="stable" version="0.5.1" date="2026-06-16">
+      <description>
+        <p>Fixes the Claude OAuth token endpoint.</p>
+      </description>
+    </release>
     <release type="stable" version="0.5.0" date="2026-05-18">
       <description>
         <p>Adds GitHub Copilot as a fifth provider with browser device-flow login, Free and paid usage parsing, multi-account support, re-auth handling, and mixed one-bar/two-bar panel rendering.</p>

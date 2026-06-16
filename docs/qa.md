@@ -1,6 +1,6 @@
 # YapCap QA Plan
 
-Manual test plan for v0.5.0. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
+Manual test plan for v0.5.1. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
 
 Paths used below:
 
@@ -398,7 +398,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 - Install via `just flatpak-install`. YapCap appears in COSMIC applet list.
 - Install from the COSMIC Store. YapCap appears in the COSMIC panel applet picker after installation, uses the `io.github.TopiCsarno.YapCap` Flatpak id, appears under the applet category/filter, and shows "Place on desktop" rather than "Open".
-- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.5.0`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Gemini zoom, Copilot zoom.
+- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.5.1`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Gemini zoom, Copilot zoom.
 - About section shows "Flatpak" dist label.
 - OAuth flows (Codex, Claude, Gemini, Copilot) open the system browser correctly from inside the sandbox.
 - COSMIC dark/light theme and accent colour updates are observed immediately through the settings config watcher.

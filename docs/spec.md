@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.5.0 · **Last updated:** 2026-05-18
+**Status:** As-built v0.5.1 · **Last updated:** 2026-06-16
 
 ## Document Metadata
 
