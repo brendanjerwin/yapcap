@@ -6,13 +6,13 @@ Paths used below:
 
 **Native** (default XDG layout on typical Linux installs):
 
-- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v500/`
+- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v501/`
 - Former snapshot cache, no longer active runtime state: `~/.cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.local/state/yapcap/` (e.g. `…/logs/yapcap.log`)
 
 **Flatpak** (app id `io.github.TopiCsarno.YapCap`; paths use passwd `pw_dir` as `~`):
 
-- Config: same COSMIC config schema `v500` dir (manifest mounts `~/.config/cosmic`)
+- Config: same COSMIC config schema `v501` dir (manifest mounts `~/.config/cosmic`)
 - Former snapshot cache, no longer active runtime state: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`
 
@@ -23,7 +23,7 @@ Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data�
 ## 1. Fresh install
 
 - `just clear-all-data` then install. All five provider tabs visible with "Login required" state (not hidden).
-- Existing `v400` COSMIC settings are not loaded after the `v500` schema boundary; users must re-add accounts.
+- Existing `v500` COSMIC settings are not loaded after the `v501` schema boundary; users must re-add accounts.
 - Existing account directories, old snapshot caches, and logs are not automatically deleted by the schema boundary and may remain orphaned.
 - Settings → General → About shows correct version and dist label ("Native" or "Flatpak").
 - Panel icon renders without clipping or overflow.
@@ -381,7 +381,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 - Delete old cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify runtime comes from shared COSMIC runtime state, not the old file.
 - Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
-- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/` config in place. Restart the current build and verify `v500` defaults are used instead.
+- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v500/` config in place. Restart the current build and verify `v501` defaults are used instead.
 - Manually edit config to add a non-existent account id to `selected_codex_account_ids`. Restart. Verify graceful fallback to first valid account or Login Required — no crash.
 - Set `refresh_interval_seconds = 5` in config. Verify it is clamped to 10s at runtime (not 5s).
 
@@ -396,19 +396,21 @@ at the same time. For native builds, watch
 
 - Startup: launch YapCap on both displays. Verify one process logs `refresh ownership acquired at startup` and another logs `refresh ownership held by another process; waiting for takeover`. Startup entries should include `process_id`, `pid`, `panel_output`, `lock_path`, `flatpak`, config version, shared runtime version/generation, and shared control version/generation.
 - Provider selection sync: select a different provider tab on one display. Verify the other display switches to the same selected provider without sharing popup route/open state. If that provider is enabled and stale or missing data, verify a `provider_selected` shared refresh request is written and the owner observes it.
-- Refresh now from owner display: click **Refresh now** on the display whose process is owner. Verify `shared refresh requests written`, `shared control observed`, `owner observed shared refresh request`, provider/account refresh start logs, `provider refresh finished`, `shared runtime written`, and `shared refresh request consumed`.
-- Refresh now from non-owner display: click **Refresh now** on the other display. Verify the non-owner writes shared refresh requests but does not write shared runtime; the owner observes and executes the requests, then both displays show the final runtime update.
+- Refresh now from owner display: click **Refresh now** on the display whose process is owner. Verify `manual refresh requested` includes its process id and control generation, and `owner evaluated shared refresh requests` includes the same generation and requester. Verify provider/account refresh start logs, `provider refresh finished`, `shared runtime written`, and `shared refresh request consumed`.
+- Refresh now from non-owner display: click **Refresh now** on the other display. Verify its process id appears as the requester in the owner's compact evaluation, the non-owner does not write shared runtime, and both displays observe the final runtime generation.
 - Automatic refresh: set a short refresh interval and wait for a stale or missing enabled provider. Verify only the owner logs provider refresh start/finish and `shared runtime written`; the non-owner does not run timer refresh work.
+- After a successful refresh, verify shared runtime generations settle. A short burst for refreshing/final state is expected; continuous `shared runtime written` lines without provider refresh, config, account, or host-session changes are a bug.
 - Owner takeover: identify the owner process from logs and terminate it, or remove the output that owns it. Verify a waiting process logs `refresh ownership acquired after waiting`, clears shared refresh requests, and resumes owner refresh behavior.
 - Login, re-auth, account deletion: from the non-owner display, add or re-authenticate an account, then delete it. Verify account rows/settings update across displays through config/account storage immediately, while shared runtime refresh or cleanup is written only by the owner.
-- Disabled provider: disable a provider, then click **Refresh now** from either display. Verify the disabled provider is absent from user refresh requests or logs `manual refresh request skipped because provider is disabled` / `shared refresh request skipped because provider is disabled`; no provider refresh starts for it.
+- UI attribution: alternate popup, navigation, provider-tab, and settings actions between displays. Verify every user-action event includes the initiating `process_id` and no inference from adjacent watcher events is required.
+- Disabled provider: disable a provider, then click **Refresh now** from either display. Verify the disabled provider is absent from the compact evaluation outcomes and no provider refresh starts for it.
 - Missing shared runtime: clear the shared runtime COSMIC config entry or make it invalid, then restart both displays. Verify logs include `shared runtime missing; using empty runtime fallback` or `shared runtime invalid; using empty runtime fallback`, credentials/account config remain intact, and the owner repopulates shared runtime on the next successful refresh.
 - Old snapshot cache: create or corrupt native/Flatpak `snapshots.json` files and restart. Verify no active runtime data is loaded from those files and existing files remain on disk.
 
 Expected diagnostic log patterns for this section:
 
 - Ownership: `refresh ownership acquired at startup`, `refresh ownership held by another process; waiting for takeover`, `refresh ownership acquired after waiting`, `failed to acquire refresh ownership lock`.
-- Shared control: `shared refresh requests written`, `shared control observed`, `owner observed shared refresh request`, `shared refresh request consumed`, skipped disabled/duplicate/not-ready request logs.
+- Shared control: `manual refresh requested`, `shared control observed`, `owner evaluated shared refresh requests`, `shared refresh request consumed`.
 - Shared runtime: `shared runtime loaded`, `shared runtime missing; using empty runtime fallback`, `shared runtime invalid; using empty runtime fallback`, `shared runtime written`, `shared runtime observed`.
 - Refresh lifecycle: `provider account refresh started`, `provider refresh finished`, provider refresh error logs.
 

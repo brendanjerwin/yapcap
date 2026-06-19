@@ -169,12 +169,15 @@ sequenceDiagram
   that opens that provider’s Settings page so the user can add an account. The
   auto-init mode is then marked complete so later launches preserve the user’s
   explicit provider toggles.
-- `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
-  Only the refresh owner handles timer refresh. Non-owner ticks do not refresh
-  providers and do not create refresh requests.
+- `Message::Tick` polls automatic-refresh eligibility every 10 seconds. Provider
+  data remains eligible only after `refresh_interval_seconds` has elapsed since
+  its last successful refresh, so a due refresh can begin up to 10 seconds after
+  the configured interval. Only the refresh owner handles timer refresh. Non-owner
+  ticks do not refresh providers and do not create refresh requests.
 - `Message::RefreshNow` is the popup’s "Refresh now" button. Any applet process
   handles it by writing shared control requests for enabled providers. The
-  refresh owner observes those requests, ignores providers already refreshing,
+  refresh owner observes those requests, evaluates each provider's refresh
+  eligibility, ignores disabled, already-refreshing, and not-ready providers,
   publishes shared runtime with the existing refreshing state before provider
   work, and consumes a provider request after publishing that provider's final
   runtime result. Non-owners never execute provider refresh directly.
@@ -273,7 +276,9 @@ Codex account model:
 - Host Codex CLI session hint: YapCap read-only reads `~/.codex/auth.json` to set
   `system_active_account_id` (JWT user id vs stored `provider_account_id`) for the
   **Active** badge. An inotify-backed subscription (via the `notify` crate on Linux)
-  reapplies Codex reconciliation when that file changes; when the file is missing
+  reapplies Codex reconciliation when that file is created, modified, removed,
+  or atomically replaced; read/access events are ignored so rereading the file
+  cannot trigger a self-sustaining reconciliation loop. When the file is missing
   but `~/.codex` exists, the directory is watched for `auth.json` events. Under
   Flatpak, the `~/.codex` / auth path uses the passwd home directory so it stays
   aligned with `finish-args` mounts when `HOME` points at `~/.var/app/...`.
@@ -870,8 +875,8 @@ that integration: settings live under `…/cosmic/io.github.TopiCsarno.YapCap/vN
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
 files manually if you need to salvage values after a version bump.
-The Copilot release uses schema `v500` as a deliberate fresh-start boundary
-after the provider account model changes. Existing `v400` COSMIC settings may
+The 0.5.1 release uses schema `v501` as a deliberate fresh-start boundary
+after the multi-process runtime sync and provider account model changes. Existing `v500` COSMIC settings may
 remain on disk, but YapCap starts from fresh defaults and users must re-add
 accounts. The schema bump does not delete YapCap-owned account directories,
 snapshot caches, or logs.
@@ -1110,7 +1115,7 @@ All paths come from `config::paths()`.
 
 **Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-- Durable config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v500`
+- Durable config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v501`
 - Shared runtime config: versioned COSMIC config entry containing `document_version`, `generation`, `written_at`, and an `AppState` payload.
 - Shared control config: versioned COSMIC config entry containing `document_version`, `generation`, `updated_at`, and per-provider refresh requests.
 - Refresh owner lock: `refresh-owner.lock` under the YapCap state directory.
@@ -1138,19 +1143,69 @@ Existing files are left untouched on disk. Shared runtime serializes `AppState`
 (providers + account states + `updated_at`) through COSMIC config instead, and
 shared control provides a separate document for explicit refresh requests from
 any applet process. Shared runtime writes advance a generation counter so logs
-can correlate observed state changes across applet processes.
+can correlate observed state changes across applet processes. Runtime write logs
+include a stable reason label such as `account_status_refresh`,
+`automatic_refresh_started`, `shared_refresh_started`,
+`provider_refresh_finished`, `provider_setting_changed`,
+`show_all_accounts_changed`, `host_cli_auth_changed`, `external_config_update`,
+`account_selection_changed`, or `account_deleted`.
+Live shared-runtime reconciliation preserves provider refresh flags so every
+display observes the owner's in-progress refresh state. Startup reconciliation
+clears those flags because a persisted in-progress operation cannot survive the
+process that owned it.
+Provider and account runtime upserts are idempotent: replacing an entry with
+identical data does not change `AppState.updated_at`, which keeps no-op
+reconciliation from producing redundant shared-runtime generations.
+
+Host CLI auth file watching is path- and event-kind-filtered. YapCap reacts to
+create, modify, remove, and atomic-replacement style events on the Codex,
+Claude, and Gemini host-session hint files, but ignores access/read events
+emitted by some Linux file watchers when YapCap rereads those files.
+
+COSMIC config watchers report the keys associated with each filesystem event.
+YapCap merges only those keys into its current config so notifications from a
+multi-key local write cannot temporarily restore stale values for keys whose
+notifications have not arrived yet. Shared runtime and control watcher updates
+are handled only when their `app_state` and `requests` payload keys arrive;
+metadata-only notifications do not replay an incomplete document.
 
 Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. The default release filter is `warn,yapcap=info`, which keeps YapCap diagnostics and dependency warnings/errors while suppressing routine dependency `info` output. File logs are plain text without ANSI terminal styling. No credentials, bearer tokens, or cookie values are logged.
 
-Refresh ownership logs include PID, generated process id, `COSMIC_PANEL_OUTPUT`
-when present, owner status, Flatpak/native status, and lock path. Startup logs
-record whether the process acquired ownership, is waiting as a non-owner, or
-fell back to read-only behavior after a lock error, along with config, shared
-runtime, and shared control document versions and generations. Takeover logs
-record when a waiting process becomes owner. Shared runtime/control logs cover
-load fallbacks, invalid document fallbacks, writes, watched observations, request
-creation, owner request observation, skipped disabled or duplicate refresh
-requests, provider refresh start/finish, and refresh errors.
+Support logs are an INFO-level audit trail for reconstructing what happened from
+a user-provided log file. A clean `YapCap started` line is the first routine
+startup entry and includes PID, process id, owner status, Flatpak/native status,
+launch mode, selected provider, enabled-provider count, effective runtime account
+count, and refresh interval. Lock errors and ownership takeovers are logged
+separately; routine successful owner acquisition is summarized by the startup
+line. Shared runtime/control logs cover missing or invalid document fallbacks,
+reason-labeled runtime writes, watched runtime observations after reconciliation
+against durable config, request creation and consumption, refresh eligibility
+decisions, provider refresh start/finish, and refresh errors. After evaluating
+shared refresh requests, the owner logs requested, scheduled, skipped, and
+unresolved provider counts, the control generation, unique requester process
+ids, compact request-reason counts, and per-provider outcomes such as
+`login_required` or `already_refreshing`. Shared runtime write and observation
+logs use the same compact provider-status buckets and refreshing-provider names
+so each generation can be compared at publication and observation without
+diffing the runtime document. Duplicate metadata notifications and unchanged
+effective runtime states are not logged. External config update logs include the
+observing process, changed keys, selected provider, enabled-provider count,
+selected-account count, and managed-account count. Raw shared runtime loads are
+not logged at INFO because they can contain stale account state before startup
+reconciliation.
+
+User actions are logged at INFO: popup open/close, route navigation, provider tab
+selection, manual refresh, settings changes, account selection/deletion,
+login/reauthentication lifecycle, Cursor scan lifecycle, manual update checks,
+host CLI auth changes, and user quit. User-action logs contain the fields that
+describe the action plus the stable process id so simultaneous applet instances
+can be distinguished. Routine operational events use process id and owner status;
+OS PID is reserved for startup, ownership, and error diagnostics. Logs include
+stable identifiers such as provider, account id, reason, selected count, request
+generation, and runtime generation where those fields help reconstruct ordering.
+Successful local config writes do not produce a second generic event after their
+semantic user-action event. Logs do not include auth URLs, pasted OAuth codes,
+bearer tokens, cookies, or raw provider response bodies.
 
 Log level is hardcoded in `main` because config is not available before the applet loop starts. `RUST_LOG` still overrides this at runtime. A `config.log_level` field exists but currently has no effect until a future restart-aware approach is added.
 

@@ -90,6 +90,7 @@
     <release type="stable" version="0.5.1" date="2026-06-16">
       <description>
         <p>Fixes the Claude OAuth token endpoint.</p>
+        <p>Adds shared runtime state for multi-process panel sync, owner-only refresh execution, refresh request coordination, selected-provider sync, and expanded diagnostics.</p>
       </description>
     </release>
     <release type="stable" version="0.5.0" date="2026-05-18">

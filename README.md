@@ -201,12 +201,12 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v500/` | Settings (provider toggles, accounts, display options) |
-| `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
+| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v501/` | Settings (provider toggles, accounts, display options) |
+| `~/.cache/yapcap/snapshots.json` | Former cached usage state; current builds leave it on disk but do not load it |
 | `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`,`gemini`,`copilot`}`-accounts/` | Managed credential copies |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |
 
-**Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap cache and state live only under `~/.var/app/io.github.TopiCsarno.YapCap/` — use `cache/yapcap/` for snapshots and `data/yapcap/` for accounts and logs. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
+**Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap account state and logs live only under `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`. Old Flatpak snapshot caches under `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/` may remain on disk but are no longer active runtime state. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
 
 ## Limitations
 

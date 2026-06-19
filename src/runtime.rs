@@ -8,7 +8,7 @@ use crate::model::{
     ProviderId, ProviderRuntimeState, UsageSnapshot,
 };
 use crate::providers;
-use crate::shared_state::SharedRuntimeState;
+use crate::shared_state::{SharedRuntimeState, SharedStateWriter};
 use chrono::Utc;
 use std::time::Duration;
 
@@ -25,6 +25,12 @@ pub struct ProviderRefreshResult {
     pub accounts: Vec<ProviderAccountRuntimeState>,
 }
 
+#[derive(Clone)]
+pub struct RefreshProcessContext {
+    pub process_id: String,
+    pub owner_status: &'static str,
+}
+
 pub fn load_initial_state(config: &Config, shared_runtime: Option<SharedRuntimeState>) -> AppState {
     let mut state = match shared_runtime {
         Some(shared) => shared.app_state,
@@ -37,11 +43,15 @@ pub fn load_initial_state(config: &Config, shared_runtime: Option<SharedRuntimeS
     state
 }
 
-pub fn persist_state(state: &AppState) {
+pub fn persist_state_as(
+    state: &AppState,
+    reason: &'static str,
+    writer: Option<SharedStateWriter<'_>>,
+) {
     if demo_env::is_active() {
         return;
     }
-    if let Err(error) = crate::shared_state::save_runtime(APP_ID, state) {
+    if let Err(error) = crate::shared_state::save_runtime_as(APP_ID, state, reason, writer) {
         tracing::error!(error = ?error, "failed to save shared runtime state");
     }
 }
@@ -117,8 +127,17 @@ pub async fn refresh_account(
     account_id: String,
     previous: Option<ProviderRuntimeState>,
     previous_accounts: Vec<ProviderAccountRuntimeState>,
+    process: Option<RefreshProcessContext>,
 ) -> ProviderRefreshResult {
     tracing::info!(
+        process_id = process
+            .as_ref()
+            .map(|process| process.process_id.as_str())
+            .unwrap_or("unknown"),
+        owner_status = process
+            .as_ref()
+            .map(|process| process.owner_status)
+            .unwrap_or("unknown"),
         provider = provider.label(),
         account_id = %account_id,
         "provider account refresh started"
@@ -305,16 +324,27 @@ where
 }
 
 pub fn reconcile_state(config: &Config, state: &mut AppState) {
+    reconcile_state_with_refresh(config, state, false);
+}
+
+pub fn reconcile_shared_state(config: &Config, state: &mut AppState) {
+    reconcile_state_with_refresh(config, state, true);
+}
+
+fn reconcile_state_with_refresh(config: &Config, state: &mut AppState, preserve_refreshing: bool) {
     ensure_provider_states(state);
     for provider in ProviderId::ALL {
         providers::registry::reconcile_provider_accounts(provider, config, state);
     }
     for provider in &mut state.providers {
         provider.enabled = config.provider_enabled(provider.provider);
-        provider.is_refreshing = false;
+        if !preserve_refreshing {
+            provider.is_refreshing = false;
+        }
         if !provider.enabled {
             provider.account_status = AccountSelectionStatus::Unavailable;
             provider.selected_account_ids = Vec::new();
+            provider.is_refreshing = false;
         }
     }
 }
@@ -409,10 +439,26 @@ mod tests {
         let config = Config::default();
         let mut shared_state = AppState::empty();
         shared_state.upsert_provider(ProviderRuntimeState::disabled(ProviderId::Cursor));
+        shared_state
+            .provider_mut(ProviderId::Codex)
+            .unwrap()
+            .is_refreshing = true;
         let state = load_initial_state(&config, Some(SharedRuntimeState::new(shared_state, 1)));
 
         assert_eq!(state.providers.len(), ProviderId::ALL.len());
         assert!(state.provider(ProviderId::Cursor).is_some());
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn reconcile_shared_state_preserves_refreshing_provider() {
+        let config = Config::default();
+        let mut state = AppState::empty();
+        state.provider_mut(ProviderId::Codex).unwrap().is_refreshing = true;
+
+        reconcile_shared_state(&config, &mut state);
+
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
     #[tokio::test]

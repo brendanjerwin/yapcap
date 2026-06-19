@@ -86,6 +86,9 @@ impl AppState {
             .iter_mut()
             .find(|entry| entry.provider == provider_state.provider)
         {
+            if *existing == provider_state {
+                return;
+            }
             *existing = provider_state;
         } else {
             self.providers.push(provider_state);
@@ -112,6 +115,9 @@ impl AppState {
         if let Some(existing) = self.provider_accounts.iter_mut().find(|entry| {
             entry.provider == account_state.provider && entry.account_id == account_state.account_id
         }) {
+            if *existing == account_state {
+                return;
+            }
             *existing = account_state;
         } else {
             self.provider_accounts.push(account_state);
@@ -158,6 +164,29 @@ mod tests {
                 .and_then(|provider| provider.error.as_deref()),
             Some("Not refreshed yet")
         );
+    }
+
+    #[test]
+    fn upsert_provider_does_not_touch_updated_at_when_unchanged() {
+        let mut state = AppState::empty();
+        let provider = state.provider(ProviderId::Codex).unwrap().clone();
+        let updated_at = state.updated_at;
+
+        state.upsert_provider(provider);
+
+        assert_eq!(state.updated_at, updated_at);
+    }
+
+    #[test]
+    fn upsert_account_does_not_touch_updated_at_when_unchanged() {
+        let mut state = AppState::empty();
+        let account = ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex");
+        state.upsert_account(account.clone());
+        let updated_at = state.updated_at;
+
+        state.upsert_account(account);
+
+        assert_eq!(state.updated_at, updated_at);
     }
 
     #[test]

@@ -1,10 +1,10 @@
 use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
-    PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, Size, Task, UpdateStatus,
-    UsageAmountFormat, app_popup, applet_button_size, claude, cosmic_config, cursor, demo_env,
-    destroy_popup, format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple,
-    popup_view, refresh_provider_account_statuses_task, registry, resize_popup, runtime,
-    select_provider, update_retry_delay, update_retry_task,
+    PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, SettingsRoute, Size, Task,
+    UpdateStatus, UsageAmountFormat, app_popup, applet_button_size, claude, cosmic_config, cursor,
+    demo_env, destroy_popup, format_retry_delay, popup_size_limits_with_max_width,
+    popup_size_tuple, popup_view, refresh_provider_account_statuses_task, registry, resize_popup,
+    runtime, select_provider, update_retry_delay, update_retry_task,
 };
 use crate::account_selection::provider_show_all_account_selection;
 use crate::config::APP_ID;
@@ -20,6 +20,8 @@ impl AppModel {
         let refreshed_provider = provider.provider;
         let refreshed_selected_ids = provider.selected_account_ids.clone();
         tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = self.owner_status(),
             provider = refreshed_provider.label(),
             account_count = accounts.len(),
             "provider refresh finished"
@@ -48,7 +50,7 @@ impl AppModel {
                     .clone_from(&refreshed_selected_ids);
             });
         }
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("provider_refresh_finished");
         self.consume_shared_refresh_request(refreshed_provider);
         self.selected_provider = select_provider(self.selected_provider, &self.state);
         self.sync_panel_suggested_bounds();
@@ -62,29 +64,52 @@ impl AppModel {
         Task::none()
     }
 
-    fn consume_shared_refresh_request(&mut self, provider: ProviderId) {
+    pub(super) fn consume_shared_refresh_request(&mut self, provider: ProviderId) {
+        self.consume_shared_refresh_requests(&[provider]);
+    }
+
+    pub(super) fn consume_shared_refresh_requests(&mut self, providers: &[ProviderId]) {
         if self.refresh_owner.is_none() {
             return;
         }
-        match shared_state::remove_control_requests_for_provider(
+        match shared_state::remove_control_requests_for_providers(
             APP_ID,
             &self.shared_control,
-            provider,
+            providers,
         ) {
             Ok(shared_control) => {
+                if shared_control == self.shared_control {
+                    return;
+                }
                 self.shared_control = shared_control;
-                tracing::info!(
-                    provider = provider.label(),
-                    generation = self.shared_control.generation,
-                    request_count = self.shared_control.requests.len(),
-                    "shared refresh request consumed"
-                );
+                if let [provider] = providers {
+                    tracing::info!(
+                        process_id = %self.process_info.id,
+                        owner_status = self.owner_status(),
+                        provider = provider.label(),
+                        generation = self.shared_control.generation,
+                        request_count = self.shared_control.requests.len(),
+                        "shared refresh request consumed"
+                    );
+                } else {
+                    tracing::info!(
+                        process_id = %self.process_info.id,
+                        owner_status = self.owner_status(),
+                        provider_count = providers.len(),
+                        generation = self.shared_control.generation,
+                        request_count = self.shared_control.requests.len(),
+                        "shared refresh requests consumed"
+                    );
+                }
             }
             Err(error) => {
                 tracing::error!(
-                    provider = provider.label(),
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    owner_status = self.owner_status(),
+                    provider_count = providers.len(),
                     error = ?error,
-                    "failed to consume shared refresh request"
+                    "failed to consume shared refresh requests"
                 );
             }
         }
@@ -109,6 +134,14 @@ impl AppModel {
     }
 
     pub(super) fn navigate_to(&mut self, route: PopupRoute) -> Option<Task<Message>> {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            from = popup_route_label(self.popup_route),
+            from_provider = popup_route_provider_label(self.popup_route, self.selected_provider),
+            to = popup_route_label(route),
+            to_provider = popup_route_provider_label(route, self.selected_provider),
+            "popup navigation requested"
+        );
         let resize = self.resize_popup_to_route(&route);
         self.popup_route = route;
         resize
@@ -154,7 +187,14 @@ impl AppModel {
     }
 
     pub(super) fn select_provider_tab(&mut self, provider: ProviderId) -> Task<Message> {
+        let previous = self.selected_provider;
         self.selected_provider = provider;
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous_provider = previous.label(),
+            selected_provider = provider.label(),
+            "provider tab selected"
+        );
         self.write_config(|new_config| {
             new_config.selected_provider = provider;
         });
@@ -179,31 +219,36 @@ impl AppModel {
         provider: ProviderId,
         reason: RefreshRequestReason,
     ) -> Task<Message> {
-        self.shared_control.upsert_request(ProviderRefreshRequest {
+        let mut shared_control = self.shared_control.clone();
+        shared_control.upsert_request(ProviderRefreshRequest {
             provider,
             reason,
             requested_at: Utc::now(),
             requesting_process_id: self.process_info.id.clone(),
         });
-        match shared_state::save_control(APP_ID, &self.shared_control) {
+        match shared_state::save_control(APP_ID, &shared_control) {
             Ok(()) => {
                 tracing::info!(
                     provider = provider.label(),
                     process_id = %self.process_info.id,
+                    owner_status = self.owner_status(),
                     reason = ?reason,
-                    generation = self.shared_control.generation,
+                    generation = shared_control.generation,
                     "provider refresh request written"
                 );
             }
             Err(error) => {
                 tracing::error!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    owner_status = self.owner_status(),
                     provider = provider.label(),
                     error = ?error,
                     "failed to save provider refresh request"
                 );
             }
         }
-        self.handle_shared_control_update(self.shared_control.clone())
+        self.handle_shared_control_update(shared_control)
     }
 
     pub(super) fn resize_popup_to_provider(
@@ -229,6 +274,12 @@ impl AppModel {
     pub(super) fn toggle_popup(&mut self) -> Task<Message> {
         if let Some(p) = self.popup.take() {
             self.popup_size = None;
+            tracing::info!(
+                process_id = %self.process_info.id,
+                route = popup_route_label(self.popup_route),
+                provider = popup_route_provider_label(self.popup_route, self.selected_provider),
+                "popup closed by panel toggle"
+            );
             return cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(
                 destroy_popup(p),
             )));
@@ -237,6 +288,12 @@ impl AppModel {
         let popup_size = self.popup_size_for_route(&self.popup_route.clone());
         let max_width = popup_view::popup_max_width(&self.state);
         self.popup_size = Some(popup_size);
+        tracing::info!(
+            process_id = %self.process_info.id,
+            route = popup_route_label(self.popup_route),
+            provider = popup_route_provider_label(self.popup_route, self.selected_provider),
+            "popup opened"
+        );
         cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(
             app_popup::<Self>(
                 move |state| {
@@ -260,14 +317,35 @@ impl AppModel {
     }
 
     pub(super) fn write_config(&mut self, f: impl FnOnce(&mut Config)) {
-        if let Ok(ctx) =
-            cosmic_config::Config::new(<Self as cosmic::Application>::APP_ID, Config::VERSION)
-        {
-            let mut new_config = self.config.clone();
-            f(&mut new_config);
-            let _ = new_config.write_entry(&ctx);
-            self.config = new_config;
+        let ctx = match cosmic_config::Config::new(
+            <Self as cosmic::Application>::APP_ID,
+            Config::VERSION,
+        ) {
+            Ok(ctx) => ctx,
+            Err(error) => {
+                tracing::error!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    owner_status = self.owner_status(),
+                    error = ?error,
+                    "failed to open config for writing"
+                );
+                return;
+            }
+        };
+        let mut new_config = self.config.clone();
+        f(&mut new_config);
+        if let Err(error) = new_config.write_entry(&ctx) {
+            tracing::error!(
+                pid = self.process_info.pid,
+                process_id = %self.process_info.id,
+                owner_status = self.owner_status(),
+                error = ?error,
+                "failed to write config"
+            );
+            return;
         }
+        self.config = new_config;
     }
 
     pub(super) fn set_provider_enabled(
@@ -275,6 +353,7 @@ impl AppModel {
         provider: ProviderId,
         enabled: bool,
     ) -> Task<Message> {
+        let previous = self.config.provider_enabled(provider);
         if let Some(entry) = self.state.provider_mut(provider) {
             entry.enabled = enabled;
         }
@@ -284,6 +363,14 @@ impl AppModel {
             new_config.set_provider_enabled(provider, enabled);
             new_config.selected_provider = selected_provider;
         });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = provider.label(),
+            previous,
+            enabled,
+            selected_provider = self.selected_provider.label(),
+            "provider enabled setting changed"
+        );
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         self.sync_panel_suggested_bounds();
         if enabled
@@ -294,35 +381,63 @@ impl AppModel {
         {
             return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
         }
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("provider_setting_changed");
         Task::none()
     }
 
     pub(super) fn set_refresh_interval(&mut self, interval_seconds: u64) -> Task<Message> {
+        let previous = self.config.refresh_interval_seconds;
         self.write_config(|new_config| {
             new_config.refresh_interval_seconds = interval_seconds;
         });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous_seconds = previous,
+            interval_seconds,
+            "refresh interval setting changed"
+        );
         Task::none()
     }
 
     pub(super) fn set_reset_time_format(&mut self, format: ResetTimeFormat) -> Task<Message> {
+        let previous = self.config.reset_time_format;
         self.write_config(|new_config| {
             new_config.reset_time_format = format;
         });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous = ?previous,
+            format = ?format,
+            "reset time format setting changed"
+        );
         Task::none()
     }
 
     pub(super) fn set_usage_amount_format(&mut self, format: UsageAmountFormat) -> Task<Message> {
+        let previous = self.config.usage_amount_format;
         self.write_config(|new_config| {
             new_config.usage_amount_format = format;
         });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous = ?previous,
+            format = ?format,
+            "usage amount format setting changed"
+        );
         Task::none()
     }
 
     pub(super) fn set_panel_icon_style(&mut self, style: PanelIconStyle) -> Task<Message> {
+        let previous = self.config.panel_icon_style;
         self.write_config(|new_config| {
             new_config.panel_icon_style = style;
         });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            previous = ?previous,
+            style = ?style,
+            "panel icon style setting changed"
+        );
         self.sync_panel_suggested_bounds();
         Task::none()
     }
@@ -332,6 +447,7 @@ impl AppModel {
         provider: ProviderId,
         show_all: bool,
     ) -> Task<Message> {
+        let previous = self.config.show_all_accounts(provider);
         self.write_config(|c| {
             c.set_provider_show_all(provider, show_all);
             if show_all {
@@ -339,6 +455,14 @@ impl AppModel {
                     provider_show_all_account_selection(c, provider);
             }
         });
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = provider.label(),
+            previous,
+            show_all,
+            selected_account_count = self.config.selected_account_ids(provider).len(),
+            "show all accounts setting changed"
+        );
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
         if self
             .state
@@ -347,7 +471,7 @@ impl AppModel {
         {
             return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
         }
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("show_all_accounts_changed");
         Task::none()
     }
 
@@ -355,21 +479,54 @@ impl AppModel {
         if demo_env::is_active() {
             return;
         }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = self.owner_status(),
+            "host CLI auth change detected"
+        );
+        let previous_state = self.state.clone();
         runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
         runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Claude);
         runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Gemini);
-        self.persist_runtime_if_owner();
+        if self.state == previous_state {
+            tracing::info!(
+                process_id = %self.process_info.id,
+                owner_status = self.owner_status(),
+                "host CLI auth change did not affect provider state"
+            );
+            return;
+        }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = self.owner_status(),
+            "host CLI auth change updated provider state"
+        );
+        self.persist_runtime_if_owner("host_cli_auth_changed");
         self.sync_panel_suggested_bounds();
     }
 
-    pub(super) fn on_config_update(&mut self, config: Config) {
-        let mut config = config;
+    pub(super) fn on_config_update(&mut self, update: Config, keys: &[&str]) {
+        let mut config = self.config.clone();
+        config.apply_watcher_update(update, keys);
         demo_env::apply_config(&mut config);
+        if config == self.config {
+            return;
+        }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = self.owner_status(),
+            changed_keys = %keys.join(","),
+            selected_provider = config.selected_provider.label(),
+            enabled_provider_count = enabled_provider_count(&config),
+            selected_account_count = selected_account_count(&config),
+            managed_account_count = managed_account_count(&config),
+            "config watcher update applied"
+        );
         self.config = config;
         runtime::reconcile_state(&self.config, &mut self.state);
         demo_env::apply(&self.config, &mut self.state);
         self.selected_provider = select_provider(self.config.selected_provider, &self.state);
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("external_config_update");
         self.sync_panel_suggested_bounds();
     }
 
@@ -377,17 +534,24 @@ impl AppModel {
         &mut self,
         shared_runtime: crate::shared_state::SharedRuntimeState,
     ) {
+        let mut next_state = shared_runtime.app_state;
+        runtime::reconcile_shared_state(&self.config, &mut next_state);
+        demo_env::apply(&self.config, &mut next_state);
+        if self.state == next_state {
+            return;
+        }
+        let provider_statuses = shared_state::runtime_provider_status_summary(&next_state);
+        let refreshing_providers = shared_state::refreshing_provider_labels(&next_state);
         tracing::info!(
             process_id = %self.process_info.id,
+            owner_status = self.owner_status(),
             generation = shared_runtime.generation,
-            document_version = shared_runtime.document_version,
-            provider_count = shared_runtime.app_state.providers.len(),
-            account_count = shared_runtime.app_state.provider_accounts.len(),
+            account_count = next_state.provider_accounts.len(),
+            provider_statuses = %provider_statuses,
+            refreshing_providers = refreshing_providers.as_str(),
             "shared runtime observed"
         );
-        self.state = shared_runtime.app_state;
-        runtime::reconcile_state(&self.config, &mut self.state);
-        demo_env::apply(&self.config, &mut self.state);
+        self.state = next_state;
         self.selected_provider = select_provider(self.config.selected_provider, &self.state);
         self.sync_panel_suggested_bounds();
     }
@@ -397,6 +561,11 @@ impl AppModel {
         provider: ProviderId,
         account_id: &str,
     ) -> Task<Message> {
+        let was_selected = self
+            .config
+            .selected_account_ids(provider)
+            .iter()
+            .any(|id| id == account_id);
         self.write_config(|new_config| {
             registry::toggle_account_selection(provider, new_config, account_id);
         });
@@ -414,11 +583,20 @@ impl AppModel {
         {
             account.error = None;
         }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = provider.label(),
+            account_id,
+            previous_selected = was_selected,
+            selected = is_selected,
+            selected_account_count = self.config.selected_account_ids(provider).len(),
+            "account selection changed"
+        );
         self.sync_panel_suggested_bounds();
         if is_selected {
             self.request_provider_refresh(provider, RefreshRequestReason::AccountAction)
         } else {
-            self.persist_runtime_if_owner();
+            self.persist_runtime_if_owner("account_selection_changed");
             Task::none()
         }
     }
@@ -431,6 +609,7 @@ impl AppModel {
             .iter()
             .any(|account| account.id == account_id)
         {
+            log_account_delete_ignored(&self.process_info.id, provider, account_id);
             return Task::none();
         }
 
@@ -438,8 +617,9 @@ impl AppModel {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
+        log_account_deleted(&self.process_info.id, provider, account_id);
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("account_deleted");
 
         if self
             .state
@@ -459,6 +639,7 @@ impl AppModel {
             .iter()
             .any(|account| account.id == account_id)
         {
+            log_account_delete_ignored(&self.process_info.id, provider, account_id);
             return Task::none();
         }
 
@@ -467,8 +648,9 @@ impl AppModel {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
+        log_account_deleted(&self.process_info.id, provider, account_id);
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("account_deleted");
 
         if self
             .state
@@ -484,6 +666,7 @@ impl AppModel {
         let provider = ProviderId::Cursor;
         if cursor::find_managed_account(&self.config.cursor_managed_accounts, account_id).is_none()
         {
+            log_account_delete_ignored(&self.process_info.id, provider, account_id);
             return Task::none();
         }
 
@@ -491,8 +674,9 @@ impl AppModel {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
+        log_account_deleted(&self.process_info.id, provider, account_id);
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("account_deleted");
 
         if self
             .state
@@ -512,6 +696,7 @@ impl AppModel {
             .iter()
             .any(|account| account.id == account_id)
         {
+            log_account_delete_ignored(&self.process_info.id, provider, account_id);
             return Task::none();
         }
 
@@ -519,8 +704,9 @@ impl AppModel {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
+        log_account_deleted(&self.process_info.id, provider, account_id);
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("account_deleted");
 
         if self
             .state
@@ -540,6 +726,7 @@ impl AppModel {
             .iter()
             .any(|account| account.id == account_id)
         {
+            log_account_delete_ignored(&self.process_info.id, provider, account_id);
             return Task::none();
         }
 
@@ -547,14 +734,78 @@ impl AppModel {
             let _ = registry::delete_account(provider, account_id, new_config);
             registry::sync_selected_ids_with_discoveries(new_config, provider);
         });
+        log_account_deleted(&self.process_info.id, provider, account_id);
         runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner();
+        self.persist_runtime_if_owner("account_deleted");
         Task::none()
     }
 
-    pub(super) fn persist_runtime_if_owner(&self) {
+    pub(super) fn persist_runtime_if_owner(&self, reason: &'static str) {
         if self.refresh_owner.is_some() {
-            runtime::persist_state(&self.state);
+            runtime::persist_state_as(&self.state, reason, Some(self.shared_state_writer()));
         }
     }
+}
+
+pub(super) fn popup_route_label(route: PopupRoute) -> &'static str {
+    match route {
+        PopupRoute::ProviderDetail => "provider_detail",
+        PopupRoute::Settings(SettingsRoute::General) => "settings_general",
+        PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Codex)) => "settings_codex",
+        PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Claude)) => "settings_claude",
+        PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Cursor)) => "settings_cursor",
+        PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Gemini)) => "settings_gemini",
+        PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Copilot)) => "settings_copilot",
+    }
+}
+
+pub(super) fn popup_route_provider_label(
+    route: PopupRoute,
+    selected_provider: ProviderId,
+) -> &'static str {
+    match route {
+        PopupRoute::ProviderDetail => selected_provider.label(),
+        PopupRoute::Settings(SettingsRoute::General) => "none",
+        PopupRoute::Settings(SettingsRoute::Provider(provider)) => provider.label(),
+    }
+}
+
+fn enabled_provider_count(config: &Config) -> usize {
+    ProviderId::ALL
+        .into_iter()
+        .filter(|provider| config.provider_enabled(*provider))
+        .count()
+}
+
+fn selected_account_count(config: &Config) -> usize {
+    ProviderId::ALL
+        .into_iter()
+        .map(|provider| config.selected_account_ids(provider).len())
+        .sum()
+}
+
+fn managed_account_count(config: &Config) -> usize {
+    config.codex_managed_accounts.len()
+        + config.claude_managed_accounts.len()
+        + config.cursor_managed_accounts.len()
+        + config.gemini_managed_accounts.len()
+        + config.copilot_managed_accounts.len()
+}
+
+fn log_account_delete_ignored(process_id: &str, provider: ProviderId, account_id: &str) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        account_id,
+        "account deletion ignored because account was not configured"
+    );
+}
+
+fn log_account_deleted(process_id: &str, provider: ProviderId, account_id: &str) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        account_id,
+        "account deleted"
+    );
 }
