@@ -1,11 +1,12 @@
 use super::{
-    AccountSelectionStatus, AppModel, ClaudeLoginEvent, ClaudeLoginStatus, CodexLoginEvent,
-    CodexLoginState, CodexLoginStatus, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus,
-    CursorScanResult, CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
+    AppModel, ClaudeLoginEvent, ClaudeLoginStatus, CodexLoginEvent, CodexLoginState,
+    CodexLoginStatus, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus, CursorScanResult,
+    CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
     ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
     ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, copilot, cursor,
-    gemini, refresh_provider_task, refresh_provider_tasks, runtime,
+    gemini, runtime,
 };
+use crate::shared_state::RefreshRequestReason;
 
 impl AppModel {
     pub(super) fn reauthenticate_codex_account(&mut self, account_id: &str) -> Task<Message> {
@@ -98,8 +99,6 @@ impl AppModel {
                     Ok(success) => {
                         login.status = CodexLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
                         self.write_config(|new_config| {
                             codex::apply_login_account(new_config, success.account.clone());
                         });
@@ -108,31 +107,11 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Codex,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Codex,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        if let Some(snapshot) = success.snapshot {
-                            account.source_label = Some(snapshot.source.clone());
-                            account.last_success_at = Some(chrono::Utc::now());
-                            account.health = crate::model::ProviderHealth::Ok;
-                            account.snapshot = Some(snapshot);
-                        }
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        let refresh_succeeded =
-                            account.health == ProviderHealth::Ok && account.snapshot.is_some();
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Codex) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                            if refresh_succeeded {
-                                provider.legacy_display_snapshot = None;
-                            }
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_tasks(&self.config, &mut self.state)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = CodexLoginStatus::Failed;
@@ -337,8 +316,6 @@ impl AppModel {
                     Ok(success) => {
                         login.status = ClaudeLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
                         self.write_config(|new_config| {
                             claude::apply_login_account(new_config, success.account.clone());
                         });
@@ -347,31 +324,11 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Claude,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Claude,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        if let Some(snapshot) = success.snapshot {
-                            account.source_label = Some(snapshot.source.clone());
-                            account.last_success_at = Some(chrono::Utc::now());
-                            account.health = crate::model::ProviderHealth::Ok;
-                            account.snapshot = Some(snapshot);
-                        }
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        let refresh_succeeded =
-                            account.health == ProviderHealth::Ok && account.snapshot.is_some();
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Claude) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                            if refresh_succeeded {
-                                provider.legacy_display_snapshot = None;
-                            }
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Claude)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = ClaudeLoginStatus::Failed;
@@ -428,23 +385,12 @@ impl AppModel {
                     applied_account = cursor::upsert_managed_account(new_config, new_account);
                 });
                 runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Cursor);
-                let account_id = cursor::managed_account_id(&applied_account.id);
-                let account_label = applied_account.email.clone();
-                let mut account = ProviderAccountRuntimeState::empty(
-                    ProviderId::Cursor,
-                    account_id.clone(),
-                    account_label,
-                );
-                account.auth_state = crate::model::AuthState::Ready;
-                account.error = None;
-                self.state.upsert_account(account);
-                if let Some(provider) = self.state.provider_mut(ProviderId::Cursor) {
-                    provider.account_status = AccountSelectionStatus::Ready;
-                    provider.error = None;
-                }
-                runtime::persist_state(&self.state);
                 self.cursor_scan = CursorScanState::Idle;
-                refresh_provider_task(&self.config, &mut self.state, ProviderId::Cursor)
+                self.sync_panel_suggested_bounds();
+                self.request_provider_refresh(
+                    ProviderId::Cursor,
+                    RefreshRequestReason::AccountAction,
+                )
             }
             Err(error) => {
                 self.cursor_scan = CursorScanState::Error(error);
@@ -567,8 +513,6 @@ impl AppModel {
                     Ok(success) => {
                         login.status = GeminiLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
                         self.write_config(|new_config| {
                             gemini::apply_login_account(new_config, success.account.clone());
                         });
@@ -577,20 +521,11 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Gemini,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Gemini,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Gemini) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Gemini)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = GeminiLoginStatus::Failed;
@@ -753,8 +688,6 @@ impl AppModel {
                     Ok(success) => {
                         login.status = CopilotLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
                         self.write_config(|new_config| {
                             copilot::apply_login_account(new_config, success.account.clone());
                         });
@@ -763,20 +696,11 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Copilot,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Copilot,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Copilot) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Copilot)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = CopilotLoginStatus::Failed;

@@ -54,7 +54,6 @@ pub enum CodexLoginEvent {
 #[derive(Debug, Clone)]
 pub struct CodexLoginSuccess {
     pub account: ManagedCodexAccountConfig,
-    pub snapshot: Option<UsageSnapshot>,
 }
 
 pub fn prepare(config: Config) -> Result<(CodexLoginState, Task<CodexLoginEvent>), String> {
@@ -140,7 +139,7 @@ fn commit_login(
 
     let account = managed_account_from_stored(existing.as_ref(), stored);
 
-    Ok(CodexLoginSuccess { account, snapshot })
+    Ok(CodexLoginSuccess { account })
 }
 
 async fn run_oauth_flow(

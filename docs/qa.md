@@ -7,13 +7,13 @@ Paths used below:
 **Native** (default XDG layout on typical Linux installs):
 
 - Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v500/`
-- Cache: `~/.cache/yapcap/snapshots.json`
+- Former snapshot cache, no longer active runtime state: `~/.cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.local/state/yapcap/` (e.g. `…/logs/yapcap.log`)
 
 **Flatpak** (app id `io.github.TopiCsarno.YapCap`; paths use passwd `pw_dir` as `~`):
 
 - Config: same COSMIC config schema `v500` dir (manifest mounts `~/.config/cosmic`)
-- Cache: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
+- Former snapshot cache, no longer active runtime state: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`
 
 Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data—that is native-only.
@@ -24,7 +24,7 @@ Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data�
 
 - `just clear-all-data` then install. All five provider tabs visible with "Login required" state (not hidden).
 - Existing `v400` COSMIC settings are not loaded after the `v500` schema boundary; users must re-add accounts.
-- Existing account directories, snapshot caches, and logs are not automatically deleted by the schema boundary and may remain orphaned.
+- Existing account directories, old snapshot caches, and logs are not automatically deleted by the schema boundary and may remain orphaned.
 - Settings → General → About shows correct version and dist label ("Native" or "Flatpak").
 - Panel icon renders without clipping or overflow.
 
@@ -48,6 +48,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 - Reset time format `absolute` — windows show "Resets tomorrow at …" or day + time.
 - Usage amount format `used` — bars and labels show consumed quota.
 - Usage amount format `left` — bars and labels flip to remaining quota.
+- Select a non-Codex provider tab, restart, and confirm YapCap opens on the same provider.
 - Settings survive an app restart (kill and re-open).
 
 ---
@@ -345,8 +346,8 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 - Kill network (`nmcli networking off`). Trigger a refresh. Verify "No internet connection. Showing cached data; information is not up to date." message. Cached usage data still visible. Re-enable network, verify Live badge returns.
 - Wait 11 minutes without refreshing (or set refresh interval to max and advance clock). Verify account badge switches from Live to Stale. Status line appends "(stale)".
-- Cold start with a cache from >10 minutes ago. Verify Stale badge on startup, not "Live · Updated 21 hours ago".
-- Corrupt `~/.cache/yapcap/snapshots.json` (truncate or write invalid JSON). Verify app starts cleanly with Loading state.
+- Cold start with shared runtime state older than 10 minutes. Verify Stale badge on startup, not "Live · Updated 21 hours ago".
+- Corrupt or delete the old `~/.cache/yapcap/snapshots.json` file. Verify current builds ignore it and continue from shared runtime/config without crashing.
 
 ---
 
@@ -378,7 +379,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ## 16. Config state file manipulation
 
-- Delete cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify app starts with Loading state and fetches fresh data.
+- Delete old cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify runtime comes from shared COSMIC runtime state, not the old file.
 - Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
 - Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v400/` config in place. Restart the current build and verify `v500` defaults are used instead.
 - Manually edit config to add a non-existent account id to `selected_codex_account_ids`. Restart. Verify graceful fallback to first valid account or Login Required — no crash.
@@ -386,7 +387,34 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 17. Logging
+## 17. Multi-process runtime sync
+
+Use a COSMIC panel configured on two displays so two YapCap applet processes run
+at the same time. For native builds, watch
+`~/.local/state/yapcap/logs/yapcap.log`; for Flatpak builds, watch
+`~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/logs/yapcap.log`.
+
+- Startup: launch YapCap on both displays. Verify one process logs `refresh ownership acquired at startup` and another logs `refresh ownership held by another process; waiting for takeover`. Startup entries should include `process_id`, `pid`, `panel_output`, `lock_path`, `flatpak`, config version, shared runtime version/generation, and shared control version/generation.
+- Provider selection sync: select a different provider tab on one display. Verify the other display switches to the same selected provider without sharing popup route/open state. If that provider is enabled and stale or missing data, verify a `provider_selected` shared refresh request is written and the owner observes it.
+- Refresh now from owner display: click **Refresh now** on the display whose process is owner. Verify `shared refresh requests written`, `shared control observed`, `owner observed shared refresh request`, provider/account refresh start logs, `provider refresh finished`, `shared runtime written`, and `shared refresh request consumed`.
+- Refresh now from non-owner display: click **Refresh now** on the other display. Verify the non-owner writes shared refresh requests but does not write shared runtime; the owner observes and executes the requests, then both displays show the final runtime update.
+- Automatic refresh: set a short refresh interval and wait for a stale or missing enabled provider. Verify only the owner logs provider refresh start/finish and `shared runtime written`; the non-owner does not run timer refresh work.
+- Owner takeover: identify the owner process from logs and terminate it, or remove the output that owns it. Verify a waiting process logs `refresh ownership acquired after waiting`, clears shared refresh requests, and resumes owner refresh behavior.
+- Login, re-auth, account deletion: from the non-owner display, add or re-authenticate an account, then delete it. Verify account rows/settings update across displays through config/account storage immediately, while shared runtime refresh or cleanup is written only by the owner.
+- Disabled provider: disable a provider, then click **Refresh now** from either display. Verify the disabled provider is absent from user refresh requests or logs `manual refresh request skipped because provider is disabled` / `shared refresh request skipped because provider is disabled`; no provider refresh starts for it.
+- Missing shared runtime: clear the shared runtime COSMIC config entry or make it invalid, then restart both displays. Verify logs include `shared runtime missing; using empty runtime fallback` or `shared runtime invalid; using empty runtime fallback`, credentials/account config remain intact, and the owner repopulates shared runtime on the next successful refresh.
+- Old snapshot cache: create or corrupt native/Flatpak `snapshots.json` files and restart. Verify no active runtime data is loaded from those files and existing files remain on disk.
+
+Expected diagnostic log patterns for this section:
+
+- Ownership: `refresh ownership acquired at startup`, `refresh ownership held by another process; waiting for takeover`, `refresh ownership acquired after waiting`, `failed to acquire refresh ownership lock`.
+- Shared control: `shared refresh requests written`, `shared control observed`, `owner observed shared refresh request`, `shared refresh request consumed`, skipped disabled/duplicate/not-ready request logs.
+- Shared runtime: `shared runtime loaded`, `shared runtime missing; using empty runtime fallback`, `shared runtime invalid; using empty runtime fallback`, `shared runtime written`, `shared runtime observed`.
+- Refresh lifecycle: `provider account refresh started`, `provider refresh finished`, provider refresh error logs.
+
+---
+
+## 18. Logging
 
 - Native: verify `~/.local/state/yapcap/logs/yapcap.log`. Flatpak: verify `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/logs/yapcap.log`. Each is written during a normal session for that build.
 - Verify no bearer tokens, access tokens, cookie values, or refresh tokens appear in the log.
@@ -394,7 +422,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ---
 
-## 18. Flatpak-specific
+## 19. Flatpak-specific
 
 - Install via `just flatpak-install`. YapCap appears in COSMIC applet list.
 - Install from the COSMIC Store. YapCap appears in the COSMIC panel applet picker after installation, uses the `io.github.TopiCsarno.YapCap` Flatpak id, appears under the applet category/filter, and shows "Place on desktop" rather than "Open".

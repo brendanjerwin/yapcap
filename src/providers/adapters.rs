@@ -8,7 +8,9 @@ mod gemini_adapter;
 
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, host_user_home_dir, paths};
-use crate::model::{AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderId};
+use crate::model::{
+    AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderId,
+};
 use crate::providers::interface::{ProviderAccountDescriptor, ProviderAdapter};
 use crate::providers::{claude, codex, cursor, gemini};
 
@@ -69,6 +71,12 @@ pub(super) fn reconcile_provider_account_descriptors(
                 )
             });
         entry.label.clone_from(&account.label);
+        if entry.snapshot.is_none()
+            && entry.auth_state == AuthState::ActionRequired
+            && entry.error.as_deref() == Some("Not refreshed yet")
+        {
+            entry.auth_state = AuthState::Ready;
+        }
 
         if entry.snapshot.is_none()
             && selected_ids.contains(&account.account_id)

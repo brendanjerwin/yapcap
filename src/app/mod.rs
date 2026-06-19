@@ -17,15 +17,16 @@ use self::applet::{applet_button, applet_button_size, applet_indicator, select_p
 use self::popup_view::{PopupBodyMeasureTarget, ProviderLoginStates};
 use self::provider_assets::{provider_icon_handle, provider_icon_variant};
 use self::refresh::{
-    refresh_provider_account_statuses_task, refresh_provider_task, refresh_provider_tasks,
+    automatic_refresh_provider_tasks, refresh_provider_account_statuses_task,
+    refresh_provider_task, selected_account_refresh_due,
 };
 use self::window::{
     format_retry_delay, open_url, popup_size_limits_with_max_width, popup_size_tuple, resize_popup,
     update_check_task, update_retry_delay, update_retry_task,
 };
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-    PanelIconStyle, ResetTimeFormat, UsageAmountFormat,
+    APP_ID, Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
+    ManagedCursorAccountConfig, PanelIconStyle, ResetTimeFormat, UsageAmountFormat,
 };
 use crate::demo_env;
 use crate::model::{
@@ -37,10 +38,18 @@ use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, Copi
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
 use crate::providers::registry;
+use crate::refresh_owner::{
+    self, ProcessInfo, RefreshOwner, RefreshOwnerAttempt, RefreshOwnerWaiter,
+};
 use crate::runtime;
 use crate::runtime::ProviderRefreshResult;
+use crate::shared_state::{
+    self, CONTROL_DOCUMENT_VERSION, ProviderRefreshRequest, RUNTIME_DOCUMENT_VERSION,
+    RefreshRequestReason, SharedControlState, SharedRuntimeState,
+};
 use crate::updates::UpdateStatus;
 use crate::usage_display;
+use chrono::Utc;
 use cosmic::app::Task;
 use cosmic::cosmic_config::{self, CosmicConfigEntry};
 use cosmic::iced::task::Handle;
@@ -76,6 +85,9 @@ pub struct AppModel {
     launch_mode: LaunchMode,
     popup_size: Option<Size>,
     popup_body_measurements: PopupBodyMeasurements,
+    shared_control: SharedControlState,
+    process_info: ProcessInfo,
+    refresh_owner: Option<RefreshOwner>,
     codex_login: Option<CodexLoginState>,
     codex_login_handle: Option<Handle>,
     claude_login: Option<ClaudeLoginState>,
@@ -111,6 +123,9 @@ pub enum Message {
     TogglePopup,
     PopupClosed(Id),
     UpdateConfig(Box<Config>),
+    UpdateSharedRuntime(Box<SharedRuntimeState>),
+    UpdateSharedControl(Box<SharedControlState>),
+    RefreshOwnershipAcquired(Result<RefreshOwner, String>),
     Tick,
     RefreshNow,
     ProviderRefreshed(Box<ProviderRefreshResult>),
@@ -241,7 +256,7 @@ impl cosmic::Application for AppModel {
     type Flags = LaunchMode;
     type Message = Message;
 
-    const APP_ID: &'static str = "io.github.TopiCsarno.YapCap";
+    const APP_ID: &'static str = APP_ID;
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -276,14 +291,28 @@ impl cosmic::Application for AppModel {
             .unwrap_or_default();
 
         let initial_config = config.clone();
-        let mut state = runtime::load_initial_state(&initial_config);
+        let shared_runtime = shared_state::load_runtime(Self::APP_ID);
+        let mut shared_control = shared_state::load_control(Self::APP_ID);
+        let shared_runtime_generation = shared_runtime.as_ref().map(|state| state.generation);
+        let shared_control_generation = shared_control.generation;
+        let lock_path = refresh_owner::lock_path(&crate::config::paths());
+        let process_info = ProcessInfo::current(lock_path.clone());
+        let startup_diagnostics =
+            StartupDiagnostics::new(shared_runtime_generation, shared_control_generation);
+        let (refresh_owner, ownership_task) =
+            initialize_refresh_ownership(&process_info, &startup_diagnostics, &mut shared_control);
+        let mut state = runtime::load_initial_state(&initial_config, shared_runtime);
         #[cfg(debug_assertions)]
         crate::debug_env::apply(&mut state);
         demo_env::apply(&initial_config, &mut state);
-        let selected_provider = select_provider(ProviderId::Codex, &state);
-        let refresh_task = refresh_provider_tasks(&initial_config, &mut state);
-        let cursor_status_task =
-            refresh_provider_account_statuses_task(&initial_config, &state, ProviderId::Cursor);
+        let selected_provider = select_provider(initial_config.selected_provider, &state);
+        let refresh_task =
+            owner_automatic_refresh_task(refresh_owner.as_ref(), &initial_config, &mut state);
+        let cursor_status_task = if refresh_owner.is_some() {
+            refresh_provider_account_statuses_task(&initial_config, &state, ProviderId::Cursor)
+        } else {
+            Task::none()
+        };
         let n_accounts_init = state.display_selected_account_count(selected_provider);
         let (applet_width, applet_height) =
             applet_button_size(&core, initial_config.panel_icon_style, n_accounts_init);
@@ -299,6 +328,9 @@ impl cosmic::Application for AppModel {
             launch_mode,
             popup_size: None,
             popup_body_measurements: PopupBodyMeasurements::default(),
+            shared_control,
+            process_info,
+            refresh_owner,
             codex_login: None,
             codex_login_handle: None,
             claude_login: None,
@@ -315,7 +347,12 @@ impl cosmic::Application for AppModel {
         let startup = if demo_env::is_active() {
             Task::none()
         } else {
-            Task::batch([refresh_task, update_task, cursor_status_task])
+            Task::batch([
+                refresh_task,
+                update_task,
+                cursor_status_task,
+                ownership_task,
+            ])
         };
 
         (app, startup)
@@ -402,6 +439,12 @@ impl cosmic::Application for AppModel {
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
                 .map(|update| Message::UpdateConfig(Box::new(update.config))),
+            self.core()
+                .watch_config::<SharedRuntimeState>(Self::APP_ID)
+                .map(|update| Message::UpdateSharedRuntime(Box::new(update.config))),
+            self.core()
+                .watch_config::<SharedControlState>(Self::APP_ID)
+                .map(|update| Message::UpdateSharedControl(Box::new(update.config))),
             time::every(Duration::from_secs(interval_secs)).map(|_| Message::Tick),
             host_auth_watch::subscription(),
         ])
@@ -432,6 +475,15 @@ impl AppModel {
             Message::UpdateConfig(config) => {
                 self.on_config_update(*config);
             }
+            Message::UpdateSharedRuntime(shared_runtime) => {
+                self.on_shared_runtime_update(*shared_runtime);
+            }
+            Message::UpdateSharedControl(shared_control) => {
+                return Some(self.handle_shared_control_update(*shared_control));
+            }
+            Message::RefreshOwnershipAcquired(result) => {
+                return Some(self.handle_refresh_ownership_acquired(result));
+            }
             Message::TogglePopup => {
                 return Some(self.toggle_popup());
             }
@@ -441,8 +493,11 @@ impl AppModel {
                     self.popup_size = None;
                 }
             }
-            Message::Tick | Message::RefreshNow => {
-                return Some(refresh_provider_tasks(&self.config, &mut self.state));
+            Message::Tick => {
+                return Some(self.automatic_refresh_task());
+            }
+            Message::RefreshNow => {
+                return Some(self.handle_refresh_now());
             }
             Message::ProviderRefreshed(refresh_result) => {
                 return Some(self.handle_provider_refreshed(*refresh_result));
@@ -454,7 +509,7 @@ impl AppModel {
                 return self.handle_popup_body_measured(target, size);
             }
             Message::SelectProvider(provider) => {
-                return self.select_provider_tab(provider);
+                return Some(self.select_provider_tab(provider));
             }
             Message::NavigateTo(route) => {
                 return self.navigate_to(route);
@@ -555,6 +610,107 @@ impl AppModel {
         None
     }
 
+    fn handle_refresh_ownership_acquired(
+        &mut self,
+        result: Result<RefreshOwner, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(owner) => {
+                tracing::info!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    panel_output = ?self.process_info.panel_output,
+                    owner_status = "owner",
+                    flatpak_status = self.process_info.flatpak_status(),
+                    lock_path = %owner.lock_path().display(),
+                    config_version = Config::VERSION,
+                    shared_runtime_version = RUNTIME_DOCUMENT_VERSION,
+                    shared_control_version = CONTROL_DOCUMENT_VERSION,
+                    shared_control_generation = self.shared_control.generation,
+                    "refresh ownership acquired after waiting"
+                );
+                self.refresh_owner = Some(owner);
+                clear_shared_refresh_requests(&mut self.shared_control);
+                self.automatic_refresh_task()
+            }
+            Err(error) => {
+                tracing::error!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    panel_output = ?self.process_info.panel_output,
+                    owner_status = "read_only",
+                    flatpak_status = self.process_info.flatpak_status(),
+                    lock_path = %self.process_info.lock_path.display(),
+                    config_version = Config::VERSION,
+                    shared_runtime_version = RUNTIME_DOCUMENT_VERSION,
+                    shared_control_version = CONTROL_DOCUMENT_VERSION,
+                    shared_control_generation = self.shared_control.generation,
+                    error = %error,
+                    "failed while waiting for refresh ownership"
+                );
+                Task::none()
+            }
+        }
+    }
+
+    fn automatic_refresh_task(&mut self) -> Task<Message> {
+        owner_automatic_refresh_task(self.refresh_owner.as_ref(), &self.config, &mut self.state)
+    }
+
+    fn handle_refresh_now(&mut self) -> Task<Message> {
+        self.shared_control = shared_control_with_user_refresh_requests(
+            &self.config,
+            &self.shared_control,
+            &self.process_info.id,
+        );
+        match shared_state::save_control(APP_ID, &self.shared_control) {
+            Ok(()) => {
+                tracing::info!(
+                    process_id = %self.process_info.id,
+                    generation = self.shared_control.generation,
+                    request_count = self.shared_control.requests.len(),
+                    "shared refresh requests written"
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = ?error, "failed to save shared refresh requests");
+            }
+        }
+        self.handle_shared_control_update(self.shared_control.clone())
+    }
+
+    fn handle_shared_control_update(
+        &mut self,
+        shared_control: SharedControlState,
+    ) -> Task<Message> {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = if self.refresh_owner.is_some() { "owner" } else { "non_owner" },
+            generation = shared_control.generation,
+            document_version = shared_control.document_version,
+            request_count = shared_control.requests.len(),
+            "shared control observed"
+        );
+        if self.refresh_owner.is_some() {
+            for request in &shared_control.requests {
+                tracing::info!(
+                    process_id = %self.process_info.id,
+                    requesting_process_id = %request.requesting_process_id,
+                    provider = request.provider.label(),
+                    reason = ?request.reason,
+                    "owner observed shared refresh request"
+                );
+            }
+        }
+        self.shared_control = shared_control;
+        owner_shared_control_refresh_task(
+            self.refresh_owner.as_ref(),
+            &self.config,
+            &mut self.state,
+            &self.shared_control,
+        )
+    }
+
     fn handle_cursor_message(&mut self, message: &Message) -> CursorMessageResult {
         match message {
             Message::DeleteCursorAccount(account_id) => {
@@ -594,7 +750,7 @@ impl AppModel {
             self.update_cursor_active_account();
         }
         self.sync_panel_suggested_bounds();
-        runtime::persist_state(&self.state);
+        self.persist_runtime_if_owner();
     }
 
     fn handle_popup_body_measured(
@@ -642,6 +798,108 @@ impl AppModel {
     }
 }
 
+fn owner_automatic_refresh_task(
+    refresh_owner: Option<&RefreshOwner>,
+    config: &Config,
+    state: &mut AppState,
+) -> Task<Message> {
+    if refresh_owner.is_none() {
+        return Task::none();
+    }
+    let task = automatic_refresh_provider_tasks(config, state);
+    if task.units() > 0 {
+        runtime::persist_state(state);
+    }
+    task
+}
+
+fn owner_shared_control_refresh_task(
+    refresh_owner: Option<&RefreshOwner>,
+    config: &Config,
+    state: &mut AppState,
+    shared_control: &SharedControlState,
+) -> Task<Message> {
+    if refresh_owner.is_none() {
+        return Task::none();
+    }
+
+    let providers = shared_control
+        .requests
+        .iter()
+        .filter_map(|request| {
+            if !config.provider_enabled(request.provider) {
+                tracing::info!(
+                    provider = request.provider.label(),
+                    requesting_process_id = %request.requesting_process_id,
+                    reason = ?request.reason,
+                    "shared refresh request skipped because provider is disabled"
+                );
+                return None;
+            }
+            let Some(provider_state) = state.provider(request.provider) else {
+                return Some(request.provider);
+            };
+            if provider_state.is_refreshing {
+                tracing::info!(
+                    provider = request.provider.label(),
+                    requesting_process_id = %request.requesting_process_id,
+                    reason = ?request.reason,
+                    "shared refresh request skipped because provider is already refreshing"
+                );
+                return None;
+            }
+            if provider_state.account_status != AccountSelectionStatus::Ready {
+                tracing::info!(
+                    provider = request.provider.label(),
+                    requesting_process_id = %request.requesting_process_id,
+                    reason = ?request.reason,
+                    "shared refresh request skipped because provider is not ready"
+                );
+                return None;
+            }
+            Some(request.provider)
+        })
+        .collect::<Vec<_>>();
+
+    let tasks = providers
+        .into_iter()
+        .map(|provider| refresh_provider_task(config, state, provider))
+        .filter(|task| task.units() > 0)
+        .collect::<Vec<_>>();
+
+    if tasks.is_empty() {
+        Task::none()
+    } else {
+        runtime::persist_state(state);
+        Task::batch(tasks)
+    }
+}
+
+fn shared_control_with_user_refresh_requests(
+    config: &Config,
+    shared_control: &SharedControlState,
+    process_id: &str,
+) -> SharedControlState {
+    let mut next = shared_control.clone();
+    for provider in ProviderId::ALL {
+        if !config.provider_enabled(provider) {
+            tracing::info!(
+                provider = provider.label(),
+                process_id = %process_id,
+                "manual refresh request skipped because provider is disabled"
+            );
+            continue;
+        }
+        next.upsert_request(ProviderRefreshRequest {
+            provider,
+            reason: RefreshRequestReason::User,
+            requested_at: Utc::now(),
+            requesting_process_id: process_id.to_string(),
+        });
+    }
+    next
+}
+
 enum CursorMessageResult {
     Handled(Option<Task<Message>>),
     Unhandled,
@@ -650,5 +908,112 @@ enum CursorMessageResult {
 impl CursorMessageResult {
     fn handled(task: Option<Task<Message>>) -> Self {
         Self::Handled(task)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StartupDiagnostics {
+    shared_runtime_generation: Option<u64>,
+    shared_control_generation: u64,
+}
+
+impl StartupDiagnostics {
+    fn new(shared_runtime_generation: Option<u64>, shared_control_generation: u64) -> Self {
+        Self {
+            shared_runtime_generation,
+            shared_control_generation,
+        }
+    }
+}
+
+fn initialize_refresh_ownership(
+    process_info: &ProcessInfo,
+    diagnostics: &StartupDiagnostics,
+    shared_control: &mut SharedControlState,
+) -> (Option<RefreshOwner>, Task<Message>) {
+    match refresh_owner::try_acquire(process_info.lock_path.clone()) {
+        Ok(RefreshOwnerAttempt::Owner(owner)) => {
+            tracing::info!(
+                pid = process_info.pid,
+                process_id = %process_info.id,
+                panel_output = ?process_info.panel_output,
+                owner_status = "owner",
+                flatpak_status = process_info.flatpak_status(),
+                lock_path = %owner.lock_path().display(),
+                config_version = Config::VERSION,
+                shared_runtime_version = RUNTIME_DOCUMENT_VERSION,
+                shared_runtime_generation = ?diagnostics.shared_runtime_generation,
+                shared_control_version = CONTROL_DOCUMENT_VERSION,
+                shared_control_generation = diagnostics.shared_control_generation,
+                "refresh ownership acquired at startup"
+            );
+            clear_shared_refresh_requests(shared_control);
+            (Some(owner), Task::none())
+        }
+        Ok(RefreshOwnerAttempt::NonOwner(waiter)) => {
+            tracing::info!(
+                pid = process_info.pid,
+                process_id = %process_info.id,
+                panel_output = ?process_info.panel_output,
+                owner_status = "non_owner",
+                flatpak_status = process_info.flatpak_status(),
+                lock_path = %process_info.lock_path.display(),
+                config_version = Config::VERSION,
+                shared_runtime_version = RUNTIME_DOCUMENT_VERSION,
+                shared_runtime_generation = ?diagnostics.shared_runtime_generation,
+                shared_control_version = CONTROL_DOCUMENT_VERSION,
+                shared_control_generation = diagnostics.shared_control_generation,
+                "refresh ownership held by another process; waiting for takeover"
+            );
+            (None, refresh_owner_wait_task(waiter))
+        }
+        Err(error) => {
+            tracing::error!(
+                pid = process_info.pid,
+                process_id = %process_info.id,
+                panel_output = ?process_info.panel_output,
+                owner_status = "read_only",
+                flatpak_status = process_info.flatpak_status(),
+                lock_path = %process_info.lock_path.display(),
+                config_version = Config::VERSION,
+                shared_runtime_version = RUNTIME_DOCUMENT_VERSION,
+                shared_runtime_generation = ?diagnostics.shared_runtime_generation,
+                shared_control_version = CONTROL_DOCUMENT_VERSION,
+                shared_control_generation = diagnostics.shared_control_generation,
+                error = ?error,
+                "failed to acquire refresh ownership lock"
+            );
+            (None, Task::none())
+        }
+    }
+}
+
+fn refresh_owner_wait_task(waiter: RefreshOwnerWaiter) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || waiter.wait())
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
+        },
+        |result| cosmic::Action::App(Message::RefreshOwnershipAcquired(result)),
+    )
+}
+
+fn clear_shared_refresh_requests(shared_control: &mut SharedControlState) {
+    let had_requests = !shared_control.requests.is_empty();
+    match shared_state::clear_control_requests(APP_ID, shared_control) {
+        Ok(cleared) => {
+            *shared_control = cleared;
+            if had_requests {
+                tracing::info!(
+                    generation = shared_control.generation,
+                    "shared refresh requests cleared by refresh owner"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "failed to clear shared refresh requests");
+        }
     }
 }
