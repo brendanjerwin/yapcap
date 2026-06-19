@@ -87,6 +87,12 @@
     <keyword>Applet</keyword>
   </keywords>
   <releases>
+    <release type="stable" version="0.5.2" date="2026-06-19">
+      <description>
+        <p>Fixes automatic refresh scheduling and in-progress state synchronization across multiple panel instances.</p>
+        <p>Improves multi-process lifecycle, refresh ownership, and support diagnostics.</p>
+      </description>
+    </release>
     <release type="stable" version="0.5.1" date="2026-06-16">
       <description>
         <p>Fixes the Claude OAuth token endpoint.</p>

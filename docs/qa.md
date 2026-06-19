@@ -1,18 +1,18 @@
 # YapCap QA Plan
 
-Manual test plan for v0.5.1. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
+Manual test plan for v0.5.2. Run against both Native (`just install`) and Flatpak (`just flatpak-install`) builds unless noted.
 
 Paths used below:
 
 **Native** (default XDG layout on typical Linux installs):
 
-- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v501/`
+- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v502/`
 - Former snapshot cache, no longer active runtime state: `~/.cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.local/state/yapcap/` (e.g. `…/logs/yapcap.log`)
 
 **Flatpak** (app id `io.github.TopiCsarno.YapCap`; paths use passwd `pw_dir` as `~`):
 
-- Config: same COSMIC config schema `v501` dir (manifest mounts `~/.config/cosmic`)
+- Config: same COSMIC config schema `v502` dir (manifest mounts `~/.config/cosmic`)
 - Former snapshot cache, no longer active runtime state: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`
 
@@ -23,7 +23,7 @@ Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data�
 ## 1. Fresh install
 
 - `just clear-all-data` then install. All five provider tabs visible with "Login required" state (not hidden).
-- Existing `v500` COSMIC settings are not loaded after the `v501` schema boundary; users must re-add accounts.
+- Existing `v501` COSMIC settings are not loaded after the `v502` schema boundary; users must re-add accounts.
 - Existing account directories, old snapshot caches, and logs are not automatically deleted by the schema boundary and may remain orphaned.
 - Settings → General → About shows correct version and dist label ("Native" or "Flatpak").
 - Panel icon renders without clipping or overflow.
@@ -381,7 +381,7 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 - Delete old cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify runtime comes from shared COSMIC runtime state, not the old file.
 - Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
-- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v500/` config in place. Restart the current build and verify `v501` defaults are used instead.
+- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v501/` config in place. Restart the current build and verify `v502` defaults are used instead.
 - Manually edit config to add a non-existent account id to `selected_codex_account_ids`. Restart. Verify graceful fallback to first valid account or Login Required — no crash.
 - Set `refresh_interval_seconds = 5` in config. Verify it is clamped to 10s at runtime (not 5s).
 
@@ -428,7 +428,7 @@ Expected diagnostic log patterns for this section:
 
 - Install via `just flatpak-install`. YapCap appears in COSMIC applet list.
 - Install from the COSMIC Store. YapCap appears in the COSMIC panel applet picker after installation, uses the `io.github.TopiCsarno.YapCap` Flatpak id, appears under the applet category/filter, and shows "Place on desktop" rather than "Open".
-- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.5.1`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Gemini zoom, Copilot zoom.
+- COSMIC Store details page shows developer `Tamás Csarnó`, version `0.5.2`, description paragraphs without manual line-break wrapping, and screenshots in this order: detail popup, Codex zoom, Claude Code zoom, Cursor zoom, Gemini zoom, Copilot zoom.
 - About section shows "Flatpak" dist label.
 - OAuth flows (Codex, Claude, Gemini, Copilot) open the system browser correctly from inside the sandbox.
 - COSMIC dark/light theme and accent colour updates are observed immediately through the settings config watcher.

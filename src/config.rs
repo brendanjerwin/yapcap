@@ -13,7 +13,7 @@ mod watch_update;
 pub const APP_ID: &str = "io.github.TopiCsarno.YapCap";
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 501]
+#[version = 502]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -437,7 +437,7 @@ mod tests {
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 501);
+        assert_eq!(Config::VERSION, 502);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());

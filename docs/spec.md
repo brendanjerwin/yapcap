@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.5.1 · **Last updated:** 2026-06-16
+**Status:** As-built v0.5.2 · **Last updated:** 2026-06-19
 
 ## Document Metadata
 
@@ -875,7 +875,7 @@ that integration: settings live under `…/cosmic/io.github.TopiCsarno.YapCap/vN
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
 files manually if you need to salvage values after a version bump.
-The 0.5.1 release uses schema `v501` as a deliberate fresh-start boundary
+The 0.5.2 release uses schema `v502` as a deliberate fresh-start boundary
 after the multi-process runtime sync and provider account model changes. Existing `v500` COSMIC settings may
 remain on disk, but YapCap starts from fresh defaults and users must re-add
 accounts. The schema bump does not delete YapCap-owned account directories,
@@ -1115,7 +1115,7 @@ All paths come from `config::paths()`.
 
 **Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-- Durable config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v501`
+- Durable config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v502`
 - Shared runtime config: versioned COSMIC config entry containing `document_version`, `generation`, `written_at`, and an `AppState` payload.
 - Shared control config: versioned COSMIC config entry containing `document_version`, `generation`, `updated_at`, and per-provider refresh requests.
 - Refresh owner lock: `refresh-owner.lock` under the YapCap state directory.
