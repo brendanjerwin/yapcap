@@ -35,8 +35,11 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Copilot, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/copilot-reversed.svg")
         }
-        (ProviderId::Minimax, _) => {
-            include_bytes!("../../resources/providers/codex.svg")
+        (ProviderId::Minimax, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/minimax.svg")
+        }
+        (ProviderId::Minimax, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/minimax-reversed.svg")
         }
     };
 
