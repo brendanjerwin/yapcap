@@ -24,7 +24,7 @@ impl MinimaxLoginState {
     pub fn new(account_id: String) -> Self {
         Self {
             account_id,
-            label: "Default".to_string(),
+            label: String::new(),
             status: MinimaxLoginStatus::Editing,
             api_key: String::new(),
             error: None,
