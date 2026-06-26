@@ -601,10 +601,13 @@ pub enum MinimaxError {
     DecodeUsage(#[source] serde_json::Error),
     #[error("failed to parse Minimax token plan response")]
     ParseTokenPlan,
-    #[error("invalid Minimax bearer header")]
-    InvalidBearerHeader(#[source] reqwest::header::InvalidHeaderValue),
     #[error("Rate limited by Minimax — will retry automatically")]
     RateLimited { retry_after_secs: Option<u64> },
+    #[error("Minimax API error ({status_code}): {status_msg}")]
+    ApiError {
+        status_code: i32,
+        status_msg: String,
+    },
 }
 
 impl MinimaxError {

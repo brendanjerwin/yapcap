@@ -115,6 +115,18 @@ async fn fetch_at(
 pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnapshot, MinimaxError> {
     let response: MinimaxTokenPlanResponse = serde_json::from_str(body).map_err(MinimaxError::DecodeUsage)?;
 
+    // Check for API error in base_resp first
+    if let Some(base_resp) = &response.base_resp
+        && let (Some(status_code), Some(status_msg)) =
+            (&base_resp.status_code, &base_resp.status_msg)
+        && *status_code != 0
+    {
+        return Err(MinimaxError::ApiError {
+            status_code: *status_code,
+            status_msg: (*status_msg).clone(),
+        });
+    }
+
     let model_remains = response.model_remains.ok_or(MinimaxError::ParseTokenPlan)?;
     
     if model_remains.is_empty() {
@@ -217,6 +229,16 @@ mod tests {
         let body = r#"{"base_resp": {"status_code": 0, "status_msg": "success"}}"#;
         let result = parse(body, Utc::now());
         assert!(matches!(result, Err(MinimaxError::ParseTokenPlan)));
+    }
+
+    #[test]
+    fn parse_api_error_with_base_resp() {
+        let body = r#"{"base_resp": {"status_code": 2062, "status_msg": "no active token plan subscription"}, "model_remains": null}"#;
+        let result = parse(body, Utc::now());
+        assert!(matches!(
+            result,
+            Err(MinimaxError::ApiError { status_code: 2062, status_msg: ref msg }) if msg == "no active token plan subscription"
+        ));
     }
 
     #[test]
