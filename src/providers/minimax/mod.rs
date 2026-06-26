@@ -12,8 +12,10 @@ use serde::Deserialize;
 use std::path::Path;
 
 pub use account::{discover_accounts, remove_managed_config_dir};
-pub use login::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus, prepare as prepare_login};
-pub use storage::{load_api_key};
+pub use login::{
+    MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus, prepare as prepare_login,
+};
+pub use storage::load_api_key;
 
 const MINIMAX_API_URL: &str = "https://www.minimax.io/v1/token_plan/remains";
 const MINIMAX_API_KEY_ENV: &str = "MINIMAX_API_KEY";
@@ -62,7 +64,12 @@ pub async fn fetch(
     client: &reqwest::Client,
     account: &ManagedMinimaxAccountConfig,
 ) -> Result<UsageSnapshot, MinimaxError> {
-    fetch_at(client, &managed_minimax_account_dir(&account.id), MINIMAX_API_URL).await
+    fetch_at(
+        client,
+        &managed_minimax_account_dir(&account.id),
+        MINIMAX_API_URL,
+    )
+    .await
 }
 
 async fn fetch_at(
@@ -73,9 +80,7 @@ async fn fetch_at(
     let api_key = load_api_key(account_root)
         .ok()
         .and_then(|key| if key.is_empty() { None } else { Some(key) })
-        .or_else(|| {
-            std::env::var(MINIMAX_API_KEY_ENV).ok()
-        })
+        .or_else(|| std::env::var(MINIMAX_API_KEY_ENV).ok())
         .ok_or(MinimaxError::LoginRequired)?;
 
     if api_key.is_empty() {
@@ -99,21 +104,28 @@ async fn fetch_at(
                 .get(reqwest::header::RETRY_AFTER)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse().ok());
-            return Err(MinimaxError::RateLimited { retry_after_secs: retry_after });
+            return Err(MinimaxError::RateLimited {
+                retry_after_secs: retry_after,
+            });
         }
         status if status.is_server_error() => {
-            return Err(MinimaxError::UsageHttp { status: status.as_u16() });
+            return Err(MinimaxError::UsageHttp {
+                status: status.as_u16(),
+            });
         }
         _ => {}
     }
 
-    let response = response.error_for_status().map_err(MinimaxError::UsageEndpoint)?;
+    let response = response
+        .error_for_status()
+        .map_err(MinimaxError::UsageEndpoint)?;
     let body = response.text().await.map_err(MinimaxError::UsageEndpoint)?;
     parse(&body, Utc::now())
 }
 
 pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnapshot, MinimaxError> {
-    let response: MinimaxTokenPlanResponse = serde_json::from_str(body).map_err(MinimaxError::DecodeUsage)?;
+    let response: MinimaxTokenPlanResponse =
+        serde_json::from_str(body).map_err(MinimaxError::DecodeUsage)?;
 
     // Check for API error in base_resp first
     if let Some(base_resp) = &response.base_resp
@@ -128,7 +140,7 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
     }
 
     let model_remains = response.model_remains.ok_or(MinimaxError::ParseTokenPlan)?;
-    
+
     if model_remains.is_empty() {
         return Err(MinimaxError::ParseTokenPlan);
     }
@@ -136,12 +148,18 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
     let mut windows = Vec::new();
 
     for model in model_remains {
-        let model_name = model.model_name.clone().unwrap_or_else(|| "unknown".to_string());
-        
+        let model_name = model
+            .model_name
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+
         // Handle 5-hour window (interval)
         if let Some(remaining_percent) = model.current_interval_remaining_percent {
             let used_percent = (100.0 - remaining_percent as f32).clamp(0.0, 100.0);
-            let label = if let (Some(total), Some(used)) = (model.current_interval_total_count, model.current_interval_usage_count) {
+            let label = if let (Some(total), Some(used)) = (
+                model.current_interval_total_count,
+                model.current_interval_usage_count,
+            ) {
                 if total > 0 {
                     format!("{} (5h): {}/{}", model_name, total - used, total)
                 } else {
@@ -158,11 +176,14 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
                 reset_description: Some("Resets every 5 hours".to_string()),
             });
         }
-        
+
         // Handle weekly window
         if let Some(remaining_percent) = model.current_weekly_remaining_percent {
             let used_percent = (100.0 - remaining_percent as f32).clamp(0.0, 100.0);
-            let label = if let (Some(total), Some(used)) = (model.current_weekly_total_count, model.current_weekly_usage_count) {
+            let label = if let (Some(total), Some(used)) = (
+                model.current_weekly_total_count,
+                model.current_weekly_usage_count,
+            ) {
                 if total > 0 {
                     format!("{} (Weekly): {}/{}", model_name, total - used, total)
                 } else {

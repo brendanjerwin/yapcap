@@ -18,11 +18,6 @@ pub fn load_api_key(account_dir: &Path) -> Result<String, String> {
         .map_err(|error| format!("failed to read api key: {error}"))
 }
 
-pub fn delete_api_key(account_dir: &Path) -> Result<(), String> {
-    fs::remove_file(account_dir.join(API_KEY_FILE))
-        .map_err(|error| format!("failed to delete api key: {error}"))
-}
-
 pub fn create_private_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path)
         .map_err(|error| format!("failed to create {}: {error}", path.display()))?;

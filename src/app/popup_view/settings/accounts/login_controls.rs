@@ -377,29 +377,28 @@ pub(super) fn minimax_login_controls(
     content = content.width(Length::Fill);
 
     if login.status == MinimaxLoginStatus::Editing {
-        content = content.push(
-            widget::text(fl!("minimax-api-key-placeholder")).size(12),
-        );
+        content = content.push(widget::text(fl!("minimax-api-key-placeholder")).size(12));
         content = content.push(
             widget::text_input(fl!("minimax-api-key-placeholder"), &login.api_key)
-                .on_input(|api_key| Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::ApiKeyChanged(api_key))))
+                .on_input(|api_key| {
+                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::ApiKeyChanged(api_key)))
+                })
                 .on_submit(|_| Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved)))
                 .width(Length::Fill),
         );
-        content = content.push(
-            widget::text(fl!("account-label")).size(12),
-        );
+        content = content.push(widget::text(fl!("account-label")).size(12));
         content = content.push(
             widget::text_input(fl!("account-label"), &login.label)
-                .on_input(|label| Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::LabelChanged(label))))
+                .on_input(|label| {
+                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::LabelChanged(label)))
+                })
                 .width(Length::Fill),
         );
         content = content.push(
             row![
-                widget::button::standard(fl!("account-add"))
-                    .on_press_maybe(enabled.then_some(Message::MinimaxLoginEvent(Box::new(
-                        MinimaxLoginEvent::Saved
-                    )))),
+                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
+                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved))
+                )),
                 widget::button::text(fl!("account-cancel"))
                     .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
             ]

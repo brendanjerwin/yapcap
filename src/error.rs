@@ -94,6 +94,7 @@ impl AppError {
             Self::Provider(ProviderError::Claude(e)) => e.is_rate_limited(),
             Self::Provider(ProviderError::Gemini(e)) => e.is_rate_limited(),
             Self::Provider(ProviderError::Copilot(e)) => e.is_rate_limited(),
+            Self::Provider(ProviderError::Minimax(e)) => e.is_rate_limited(),
             _ => false,
         }
     }
@@ -104,6 +105,7 @@ impl AppError {
             Self::Provider(ProviderError::Claude(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Gemini(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Copilot(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Minimax(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }

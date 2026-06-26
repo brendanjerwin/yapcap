@@ -6,6 +6,6 @@ pub mod codex;
 pub mod copilot;
 pub mod cursor;
 pub mod gemini;
-pub mod minimax;
 pub mod interface;
+pub mod minimax;
 pub mod registry;

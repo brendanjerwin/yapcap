@@ -64,27 +64,28 @@ impl MinimaxLoginState {
 
         Ok(managed_account)
     }
-
-    pub fn validate(&self) -> Option<String> {
-        if self.api_key.trim().is_empty() {
-            Some("API key is required".to_string())
-        } else {
-            None
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
 pub enum MinimaxLoginEvent {
+    // TODO: These variants are used in pattern matching (app/login.rs) but never constructed.
+    // This suggests incomplete implementation. They should either be constructed where appropriate
+    // or removed and the pattern matching updated.
+    #[allow(dead_code)]
     Started,
     ApiKeyChanged(String),
     LabelChanged(String),
     Saved,
+    #[allow(dead_code)]
     Cancelled,
+    #[allow(dead_code)]
     Failed(String),
 }
 
 pub fn prepare() -> MinimaxLoginState {
-    let account_id = format!("minimax-{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+    let account_id = format!(
+        "minimax-{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
     MinimaxLoginState::new(account_id)
 }

@@ -4,11 +4,11 @@ use super::{minimax_system_active_account_id, reconcile_provider_account_descrip
 use crate::config::{Config, managed_minimax_account_dir};
 use crate::error::AppError;
 use crate::model::{AppState, ProviderId, UsageSnapshot};
-use crate::providers::minimax;
 use crate::providers::interface::{
     BoxFuture, ProviderAccountDescriptor, ProviderAccountHandle, ProviderAdapter,
     ProviderCapabilities,
 };
+use crate::providers::minimax;
 
 pub(super) struct MinimaxAdapter;
 
@@ -81,11 +81,9 @@ impl ProviderAdapter for MinimaxAdapter {
     ) -> BoxFuture<'a, crate::error::Result<UsageSnapshot, AppError>> {
         Box::pin(async move {
             match handle {
-                ProviderAccountHandle::Minimax(account) => {
-                    minimax::fetch(client, account)
-                        .await
-                        .map_err(AppError::from)
-                }
+                ProviderAccountHandle::Minimax(account) => minimax::fetch(client, account)
+                    .await
+                    .map_err(AppError::from),
                 _ => unreachable!(),
             }
         })

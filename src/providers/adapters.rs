@@ -154,19 +154,20 @@ pub(super) fn gemini_system_active_account_id(
     gemini::system_active_account_id(managed_accounts, &path)
 }
 
+// NOTE: This function is used via the adapter pattern (reconcile_provider_accounts in minimax_adapter.rs)
+// but clippy cannot detect this usage through the dynamic dispatch. This is not actually dead code.
+#[allow(dead_code)]
 pub(super) fn minimax_system_active_account_id(
     managed_accounts: &[crate::config::ManagedMinimaxAccountConfig],
 ) -> Option<String> {
-    std::env::var("MINIMAX_API_KEY")
-        .ok()
-        .and_then(|api_key| {
-            if api_key.is_empty() {
-                None
-            } else {
-                managed_accounts
-                    .iter()
-                    .find(|acc| acc.api_key_source == "env:MINIMAX_API_KEY")
-                    .map(|acc| acc.id.clone())
-            }
-        })
+    std::env::var("MINIMAX_API_KEY").ok().and_then(|api_key| {
+        if api_key.is_empty() {
+            None
+        } else {
+            managed_accounts
+                .iter()
+                .find(|acc| acc.api_key_source == "env:MINIMAX_API_KEY")
+                .map(|acc| acc.id.clone())
+        }
+    })
 }

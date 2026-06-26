@@ -2,12 +2,11 @@ use super::{
     AccountSelectionStatus, AppModel, ClaudeLoginEvent, ClaudeLoginStatus, CodexLoginEvent,
     CodexLoginState, CodexLoginStatus, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus,
     CursorScanResult, CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
-    ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
-    ManagedCursorAccountConfig, Message, MinimaxLoginEvent, MinimaxLoginStatus,
-    ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, copilot, cursor,
-    gemini, minimax, refresh_provider_task, refresh_provider_tasks, runtime,
+    ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
+    MinimaxLoginEvent, MinimaxLoginStatus, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
+    Task, claude, codex, copilot, cursor, gemini, minimax, refresh_provider_task,
+    refresh_provider_tasks, runtime,
 };
-
 
 impl AppModel {
     pub(super) fn reauthenticate_codex_account(&mut self, account_id: &str) -> Task<Message> {
