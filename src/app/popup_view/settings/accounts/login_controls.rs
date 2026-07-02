@@ -3,6 +3,7 @@ use super::super::super::{
     CopilotLoginState, CopilotLoginStatus, CursorScanState, Element, GeminiLoginState,
     GeminiLoginStatus, Length, Message, fl, row, widget,
 };
+use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
 
 pub(super) fn codex_login_controls(
     login: Option<&CodexLoginState>,
@@ -349,5 +350,82 @@ fn claude_login_status(login: &ClaudeLoginState) -> String {
             Some(msg) => msg.to_string(),
             None => fl!("claude-login-failed"),
         },
+    }
+}
+
+pub(super) fn minimax_login_controls(
+    login: Option<&MinimaxLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(enabled.then_some(Message::StartMinimaxLogin))
+            .into();
+    };
+
+    let mut content = if let Some(error) = &login.error {
+        cosmic::iced::widget::column![
+            widget::text(minimax_login_status(login)).size(13),
+            widget::text(error).size(13)
+        ]
+        .spacing(10)
+    } else {
+        cosmic::iced::widget::column![widget::text(minimax_login_status(login)).size(13)]
+            .spacing(10)
+    };
+
+    content = content.width(Length::Fill);
+
+    if login.status == MinimaxLoginStatus::Editing {
+        content = content.push(widget::text(fl!("minimax-api-key-placeholder")).size(12));
+        content = content.push(
+            widget::text_input(fl!("minimax-api-key-placeholder"), &login.api_key)
+                .on_input(|api_key| {
+                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::ApiKeyChanged(api_key)))
+                })
+                .on_submit(|_| Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved)))
+                .width(Length::Fill),
+        );
+        content = content.push(widget::text(fl!("account-label")).size(12));
+        content = content.push(
+            widget::text_input(fl!("account-label"), &login.label)
+                .on_input(|label| {
+                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::LabelChanged(label)))
+                })
+                .width(Length::Fill),
+        );
+        content = content.push(
+            row![
+                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
+                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved))
+                )),
+                widget::button::text(fl!("account-cancel"))
+                    .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
+            ]
+            .spacing(8),
+        );
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another"))
+                    .on_press_maybe(enabled.then_some(Message::StartMinimaxLogin)),
+                widget::button::text(fl!("account-dismiss"))
+                    .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn minimax_login_status(login: &MinimaxLoginState) -> String {
+    match login.status {
+        MinimaxLoginStatus::Editing => fl!("minimax-login-editing"),
+        MinimaxLoginStatus::Saved => fl!("minimax-login-saved"),
+        MinimaxLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("minimax-login-failed")),
     }
 }

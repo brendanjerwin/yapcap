@@ -3,8 +3,9 @@ use super::{
     CodexLoginState, CodexLoginStatus, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus,
     CursorScanResult, CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
     ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
-    ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, copilot, cursor,
-    gemini, refresh_provider_task, refresh_provider_tasks, runtime,
+    MinimaxLoginEvent, MinimaxLoginStatus, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
+    Task, claude, codex, copilot, cursor, gemini, minimax, refresh_provider_task,
+    refresh_provider_tasks, runtime,
 };
 
 impl AppModel {
@@ -784,6 +785,110 @@ impl AppModel {
                         Task::none()
                     }
                 }
+            }
+        }
+    }
+
+    pub(super) fn reauthenticate_minimax_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .minimax_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        self.start_minimax_login()
+    }
+
+    pub(super) fn start_minimax_login(&mut self) -> Task<Message> {
+        if self
+            .minimax_login
+            .as_ref()
+            .is_some_and(|login| login.status == MinimaxLoginStatus::Editing)
+        {
+            return Task::none();
+        }
+        self.minimax_login = None;
+        let state = minimax::prepare_login();
+        self.minimax_login = Some(state);
+        Task::none()
+    }
+
+    pub(super) fn cancel_minimax_login(&mut self) {
+        if let Some(handle) = self.minimax_login_handle.take() {
+            handle.abort();
+        }
+        self.minimax_login = None;
+    }
+
+    pub(super) fn handle_minimax_login_event(&mut self, event: MinimaxLoginEvent) -> Task<Message> {
+        match event {
+            MinimaxLoginEvent::Started => Task::none(),
+            MinimaxLoginEvent::ApiKeyChanged(api_key) => {
+                if let Some(login) = self.minimax_login.as_mut() {
+                    login.update_api_key(api_key);
+                }
+                Task::none()
+            }
+            MinimaxLoginEvent::LabelChanged(label) => {
+                if let Some(login) = self.minimax_login.as_mut() {
+                    login.update_label(label);
+                }
+                Task::none()
+            }
+            MinimaxLoginEvent::Saved => {
+                let Some(login) = self.minimax_login.as_ref() else {
+                    return Task::none();
+                };
+                match login.save(&mut self.config) {
+                    Ok(managed_account) => {
+                        self.minimax_login_handle = None;
+                        let account_id = managed_account.id.clone();
+                        let account_label = managed_account.label.clone();
+                        self.write_config(|new_config| {
+                            minimax::account::apply_login_account(new_config, managed_account);
+                        });
+                        let mut account = ProviderAccountRuntimeState::empty(
+                            ProviderId::Minimax,
+                            account_id.clone(),
+                            account_label,
+                        );
+                        account.auth_state = crate::model::AuthState::Ready;
+                        account.error = None;
+                        self.state.upsert_account(account);
+                        if let Some(provider) = self.state.provider_mut(ProviderId::Minimax) {
+                            provider.account_status = AccountSelectionStatus::Ready;
+                            provider.error = None;
+                            // Add the new account to selected ids if not already there
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id.clone());
+                            }
+                        }
+                        runtime::persist_state(&self.state);
+                        let login = self.minimax_login.as_mut().unwrap();
+                        login.status = MinimaxLoginStatus::Saved;
+                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Minimax)
+                    }
+                    Err(error) => {
+                        if let Some(login) = self.minimax_login.as_mut() {
+                            login.error = Some(error);
+                            login.status = MinimaxLoginStatus::Failed;
+                        }
+                        Task::none()
+                    }
+                }
+            }
+            MinimaxLoginEvent::Cancelled => {
+                self.cancel_minimax_login();
+                Task::none()
+            }
+            MinimaxLoginEvent::Failed(error) => {
+                if let Some(login) = self.minimax_login.as_mut() {
+                    login.error = Some(error);
+                    login.status = MinimaxLoginStatus::Failed;
+                }
+                Task::none()
             }
         }
     }

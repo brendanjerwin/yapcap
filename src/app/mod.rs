@@ -36,6 +36,7 @@ use crate::providers::codex::{self, CodexLoginEvent, CodexLoginState, CodexLogin
 use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus};
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
+use crate::providers::minimax::{self, MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
 use crate::providers::registry;
 use crate::runtime;
 use crate::runtime::ProviderRefreshResult;
@@ -86,6 +87,8 @@ pub struct AppModel {
     gemini_login_handle: Option<Handle>,
     copilot_login: Option<CopilotLoginState>,
     copilot_login_handle: Option<Handle>,
+    minimax_login: Option<MinimaxLoginState>,
+    minimax_login_handle: Option<Handle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,6 +145,11 @@ pub enum Message {
     CopilotLoginEvent(Box<CopilotLoginEvent>),
     CopyCopilotLoginCode(String),
     ClearCopilotLoginCodeCopied(String),
+    DeleteMinimaxAccount(String),
+    ReauthenticateMinimaxAccount(String),
+    StartMinimaxLogin,
+    CancelMinimaxLogin,
+    MinimaxLoginEvent(Box<MinimaxLoginEvent>),
     DeleteCursorAccount(String),
     ReauthenticateCursorAccount(String),
     StartCursorScan,
@@ -170,12 +178,14 @@ pub(super) struct PopupBodyMeasurements {
     cursor: Option<f32>,
     gemini: Option<f32>,
     copilot: Option<f32>,
+    minimax: Option<f32>,
     general_settings: Option<f32>,
     codex_settings: Option<f32>,
     claude_settings: Option<f32>,
     cursor_settings: Option<f32>,
     gemini_settings: Option<f32>,
     copilot_settings: Option<f32>,
+    minimax_settings: Option<f32>,
 }
 
 impl PopupBodyMeasurements {
@@ -186,6 +196,7 @@ impl PopupBodyMeasurements {
             ProviderId::Cursor => self.cursor,
             ProviderId::Gemini => self.gemini,
             ProviderId::Copilot => self.copilot,
+            ProviderId::Minimax => self.minimax,
         }
     }
 
@@ -196,6 +207,7 @@ impl PopupBodyMeasurements {
             ProviderId::Cursor => self.cursor = Some(height),
             ProviderId::Gemini => self.gemini = Some(height),
             ProviderId::Copilot => self.copilot = Some(height),
+            ProviderId::Minimax => self.minimax = Some(height),
         }
     }
 
@@ -207,6 +219,7 @@ impl PopupBodyMeasurements {
             SettingsRoute::Provider(ProviderId::Cursor) => self.cursor_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Gemini) => self.gemini_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Copilot) => self.copilot_settings = Some(height),
+            SettingsRoute::Provider(ProviderId::Minimax) => self.minimax_settings = Some(height),
         }
     }
 
@@ -309,6 +322,8 @@ impl cosmic::Application for AppModel {
             gemini_login_handle: None,
             copilot_login: None,
             copilot_login_handle: None,
+            minimax_login: None,
+            minimax_login_handle: None,
         };
 
         let update_task = update_check_task(0);
@@ -365,6 +380,7 @@ impl cosmic::Application for AppModel {
                 cursor_scan: &self.cursor_scan,
                 gemini: self.gemini_login.as_ref(),
                 copilot: self.copilot_login.as_ref(),
+                minimax: self.minimax_login.as_ref(),
             },
             self.selected_provider,
             &self.popup_route,
@@ -538,6 +554,17 @@ impl AppModel {
             Message::ClearCopilotLoginCodeCopied(flow_id) => {
                 self.clear_copilot_login_code_copied(&flow_id);
             }
+            Message::DeleteMinimaxAccount(account_id) => {
+                return Some(self.delete_minimax_account(&account_id));
+            }
+            Message::ReauthenticateMinimaxAccount(account_id) => {
+                return Some(self.reauthenticate_minimax_account(&account_id));
+            }
+            Message::StartMinimaxLogin => return Some(self.start_minimax_login()),
+            Message::CancelMinimaxLogin => self.cancel_minimax_login(),
+            Message::MinimaxLoginEvent(event) => {
+                return Some(self.handle_minimax_login_event(*event));
+            }
             Message::StartClaudeLogin => return Some(self.start_claude_login()),
             Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
             Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
@@ -626,6 +653,9 @@ impl AppModel {
                     }
                     SettingsRoute::Provider(ProviderId::Copilot) => {
                         self.popup_body_measurements.copilot_settings
+                    }
+                    SettingsRoute::Provider(ProviderId::Minimax) => {
+                        self.popup_body_measurements.minimax_settings
                     }
                 };
                 self.popup_body_measurements.set_settings(route, height);
