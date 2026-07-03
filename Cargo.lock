@@ -7121,6 +7121,7 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 name = "yapcap"
 version = "0.5.1"
 dependencies = [
+ "async-trait",
  "base64",
  "chrono",
  "dirs",

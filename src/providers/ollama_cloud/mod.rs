@@ -58,8 +58,10 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
 pub async fn fetch(
     client: &reqwest::Client,
     account: &ManagedOllamaCloudAccountConfig,
+    cookie_source: &dyn crate::browser_cookies::CookieSource,
 ) -> Result<UsageSnapshot, OllamaCloudError> {
     let account_root = managed_ollama_cloud_account_dir(&account.id);
+
 
     let mut session_cookie = load_session_cookie(&account_root)
         .ok()
@@ -81,7 +83,7 @@ pub async fn fetch(
     let response = match response.status() {
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
             // Try refreshing the cookie from browser storage
-            if let Some(fresh) = crate::browser_cookies::find_cookie("__Secure-session", "ollama.com").await {
+            if let Some(fresh) = cookie_source.find_cookie("__Secure-session", "ollama.com").await {
                 session_cookie = fresh.value.clone();
                 if let Err(e) = crate::providers::ollama_cloud::storage::write_session_cookie(&account_root, &session_cookie) {
                     tracing::warn!(error = %e, "failed to persist refreshed session cookie");

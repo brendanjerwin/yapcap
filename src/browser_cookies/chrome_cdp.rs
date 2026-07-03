@@ -1,8 +1,27 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use super::BrowserCookie;
+use super::{BrowserCookie, CookieSource, WorkspaceInfo};
+use async_trait::async_trait;
 use serde::Deserialize;
 use std::time::Duration;
+
+/// Chrome/Chromium cookie source — connects via Chrome DevTools Protocol.
+pub struct ChromeSource;
+
+#[async_trait]
+impl CookieSource for ChromeSource {
+    async fn find_cookie(&self, cookie_name: &str, domain: &str) -> Option<BrowserCookie> {
+        find_cookie(cookie_name, domain).await
+    }
+
+    async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
+        discover_workspaces().await
+    }
+
+    fn open_browser(&self, url: &str) {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
 
 const CDP_DEFAULT_PORT: u16 = 9222;
 const CDP_QUERY_TIMEOUT: Duration = Duration::from_secs(5);

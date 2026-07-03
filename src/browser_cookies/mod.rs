@@ -3,13 +3,15 @@
 pub mod chrome_cdp;
 pub mod firefox;
 
-/// A cookie extracted from a browser, with the target domain and name.
+use async_trait::async_trait;
+
+/// A cookie extracted from a browser.
 #[derive(Debug, Clone)]
 pub struct BrowserCookie {
     pub value: String,
 }
 
-/// A discovered OpenCode workspace with its ID and display name.
+/// A discovered OpenCode workspace with its ID and optional display name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceInfo {
     pub id: String,
@@ -21,6 +23,24 @@ pub struct WorkspaceInfo {
 pub enum BrowserKind {
     Firefox,
     Chrome,
+}
+
+/// Trait abstracting browser cookie extraction and workspace discovery.
+///
+/// Implementations include Firefox (SQLite) and Chrome (CDP), plus mock
+/// implementations for testing. This allows the `fetch()` functions in
+/// provider modules to accept an injectable cookie source rather than
+/// binding directly to disk/CDP.
+#[async_trait]
+pub trait CookieSource: Send + Sync {
+    /// Find a cookie by name and domain.
+    async fn find_cookie(&self, cookie_name: &str, domain: &str) -> Option<BrowserCookie>;
+
+    /// Discover OpenCode workspaces from browser history/tabs.
+    async fn discover_workspaces(&self) -> Vec<WorkspaceInfo>;
+
+    /// Open the browser to a URL (for interactive login).
+    fn open_browser(&self, url: &str);
 }
 
 /// Detect the system's default browser via xdg-mime.
@@ -45,24 +65,24 @@ pub fn detect_default_browser() -> BrowserKind {
     }
 }
 
-/// Find a cookie by name+domain using the detected default browser only.
-pub async fn find_cookie(cookie_name: &str, domain: &str) -> Option<BrowserCookie> {
-    let browser = detect_default_browser();
-    match browser {
-        BrowserKind::Firefox => firefox::find_cookie(cookie_name, domain),
-        BrowserKind::Chrome => chrome_cdp::find_cookie(cookie_name, domain).await,
+/// Construct the default `CookieSource` for the system's detected browser.
+pub fn default_cookie_source() -> Box<dyn CookieSource> {
+    match detect_default_browser() {
+        BrowserKind::Firefox => Box::new(firefox::FirefoxSource),
+        BrowserKind::Chrome => Box::new(chrome_cdp::ChromeSource),
     }
 }
 
-/// Discover OpenCode workspaces using the detected default browser only.
-/// Returns workspace IDs from browser history/tabs. Names are fetched
-/// separately via `fetch_workspace_name` using the auth cookie.
+/// Find a cookie by name+domain using the detected default browser.
+pub async fn find_cookie(cookie_name: &str, domain: &str) -> Option<BrowserCookie> {
+    default_cookie_source()
+        .find_cookie(cookie_name, domain)
+        .await
+}
+
+/// Discover OpenCode workspaces using the detected default browser.
 pub async fn discover_workspaces() -> Vec<WorkspaceInfo> {
-    let browser = detect_default_browser();
-    match browser {
-        BrowserKind::Firefox => firefox::discover_workspaces(),
-        BrowserKind::Chrome => chrome_cdp::discover_workspaces().await,
-    }
+    default_cookie_source().discover_workspaces().await
 }
 
 /// Fetch the workspace name by scraping the /go page with the auth cookie.
@@ -97,9 +117,10 @@ pub async fn fetch_workspace_name(
     None
 }
 
-/// Poll for a cookie using the default browser, checking every `interval_ms`
+/// Poll for a cookie using the given source, checking every `interval_ms`
 /// milliseconds for up to `timeout_secs` seconds.
-pub async fn poll_for_cookie(
+pub async fn poll_for_cookie_with(
+    source: &dyn CookieSource,
     cookie_name: &str,
     domain: &str,
     interval_ms: u64,
@@ -108,7 +129,7 @@ pub async fn poll_for_cookie(
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
 
     loop {
-        if let Some(cookie) = find_cookie(cookie_name, domain).await {
+        if let Some(cookie) = source.find_cookie(cookie_name, domain).await {
             return Some(cookie);
         }
 
@@ -120,15 +141,27 @@ pub async fn poll_for_cookie(
     }
 }
 
-/// Poll for workspaces to appear in the default browser's history/tabs.
-pub async fn poll_for_workspaces(
+/// Poll for a cookie using the default browser.
+pub async fn poll_for_cookie(
+    cookie_name: &str,
+    domain: &str,
+    interval_ms: u64,
+    timeout_secs: u64,
+) -> Option<BrowserCookie> {
+    let source = default_cookie_source();
+    poll_for_cookie_with(source.as_ref(), cookie_name, domain, interval_ms, timeout_secs).await
+}
+
+/// Poll for workspaces using the given source.
+pub async fn poll_for_workspaces_with(
+    source: &dyn CookieSource,
     interval_ms: u64,
     timeout_secs: u64,
 ) -> Vec<WorkspaceInfo> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
 
     loop {
-        let workspaces = discover_workspaces().await;
+        let workspaces = source.discover_workspaces().await;
         if !workspaces.is_empty() {
             return workspaces;
         }
@@ -152,15 +185,109 @@ pub fn open_browser(url: &str) {
 mod tests {
     use super::*;
 
+    /// A mock cookie source for testing that returns canned data.
+    pub struct MockCookieSource {
+        pub cookie: Option<BrowserCookie>,
+        pub workspaces: Vec<WorkspaceInfo>,
+    }
+
+    #[async_trait]
+    impl CookieSource for MockCookieSource {
+        async fn find_cookie(&self, _cookie_name: &str, _domain: &str) -> Option<BrowserCookie> {
+            self.cookie.clone()
+        }
+
+        async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
+            self.workspaces.clone()
+        }
+
+        fn open_browser(&self, _url: &str) {}
+    }
+
+    #[test]
+    fn mock_source_returns_canned_cookie() {
+        let source = MockCookieSource {
+            cookie: Some(BrowserCookie {
+                value: "test-cookie-value".to_string(),
+            }),
+            workspaces: Vec::new(),
+        };
+        let future = source.find_cookie("auth", "opencode.ai");
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(future);
+        assert_eq!(result.unwrap().value, "test-cookie-value");
+    }
+
+    #[test]
+    fn mock_source_returns_canned_workspaces() {
+        let source = MockCookieSource {
+            cookie: None,
+            workspaces: vec![
+                WorkspaceInfo {
+                    id: "wrk_test1".to_string(),
+                    name: Some("Team A".to_string()),
+                },
+                WorkspaceInfo {
+                    id: "wrk_test2".to_string(),
+                    name: None,
+                },
+            ],
+        };
+        let future = source.discover_workspaces();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(future);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].id, "wrk_test1");
+        assert_eq!(result[0].name.as_deref(), Some("Team A"));
+    }
+
+    #[test]
+    fn mock_source_returns_none_when_no_cookie() {
+        let source = MockCookieSource {
+            cookie: None,
+            workspaces: Vec::new(),
+        };
+        let future = source.find_cookie("auth", "opencode.ai");
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(future);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn mock_source_returns_empty_workspaces_when_none() {
+        let source = MockCookieSource {
+            cookie: None,
+            workspaces: Vec::new(),
+        };
+        let future = source.discover_workspaces();
+        let result = tokio::runtime::Runtime::new().unwrap().block_on(future);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn browser_cookie_clone_preserves_value() {
+        let cookie = BrowserCookie {
+            value: "abc123".to_string(),
+        };
+        let cloned = cookie.clone();
+        assert_eq!(cloned.value, "abc123");
+    }
+
+    #[test]
+    fn browser_cookie_debug_repr_contains_value() {
+        let cookie = BrowserCookie {
+            value: "xyz789".to_string(),
+        };
+        let debug = format!("{cookie:?}");
+        assert!(debug.contains("xyz789"));
+    }
+
     #[test]
     fn workspace_info_equal_when_id_and_name_match() {
         let a = WorkspaceInfo {
-            id: "wrk_123".to_string(),
-            name: Some("My Workspace".to_string()),
+            id: "wrk_1".to_string(),
+            name: Some("Team".to_string()),
         };
         let b = WorkspaceInfo {
-            id: "wrk_123".to_string(),
-            name: Some("My Workspace".to_string()),
+            id: "wrk_1".to_string(),
+            name: Some("Team".to_string()),
         };
         assert_eq!(a, b);
     }
@@ -168,12 +295,12 @@ mod tests {
     #[test]
     fn workspace_info_unequal_when_id_differs() {
         let a = WorkspaceInfo {
-            id: "wrk_123".to_string(),
-            name: Some("My Workspace".to_string()),
+            id: "wrk_1".to_string(),
+            name: None,
         };
         let b = WorkspaceInfo {
-            id: "wrk_456".to_string(),
-            name: Some("My Workspace".to_string()),
+            id: "wrk_2".to_string(),
+            name: None,
         };
         assert_ne!(a, b);
     }
@@ -181,12 +308,12 @@ mod tests {
     #[test]
     fn workspace_info_unequal_when_name_differs() {
         let a = WorkspaceInfo {
-            id: "wrk_123".to_string(),
-            name: Some("Alpha".to_string()),
+            id: "wrk_1".to_string(),
+            name: Some("A".to_string()),
         };
         let b = WorkspaceInfo {
-            id: "wrk_123".to_string(),
-            name: Some("Beta".to_string()),
+            id: "wrk_1".to_string(),
+            name: Some("B".to_string()),
         };
         assert_ne!(a, b);
     }
@@ -194,11 +321,11 @@ mod tests {
     #[test]
     fn workspace_info_unequal_when_some_vs_none_name() {
         let a = WorkspaceInfo {
-            id: "wrk_123".to_string(),
-            name: Some("Alpha".to_string()),
+            id: "wrk_1".to_string(),
+            name: Some("A".to_string()),
         };
         let b = WorkspaceInfo {
-            id: "wrk_123".to_string(),
+            id: "wrk_1".to_string(),
             name: None,
         };
         assert_ne!(a, b);
@@ -207,11 +334,11 @@ mod tests {
     #[test]
     fn workspace_info_equal_when_both_names_none() {
         let a = WorkspaceInfo {
-            id: "wrk_123".to_string(),
+            id: "wrk_1".to_string(),
             name: None,
         };
         let b = WorkspaceInfo {
-            id: "wrk_123".to_string(),
+            id: "wrk_1".to_string(),
             name: None,
         };
         assert_eq!(a, b);
@@ -220,31 +347,11 @@ mod tests {
     #[test]
     fn workspace_info_clone_is_equal() {
         let a = WorkspaceInfo {
-            id: "wrk_789".to_string(),
-            name: Some("Cloned".to_string()),
+            id: "wrk_1".to_string(),
+            name: Some("Team".to_string()),
         };
         let b = a.clone();
         assert_eq!(a, b);
-    }
-
-    #[test]
-    fn browser_cookie_clone_is_equal() {
-        let a = BrowserCookie {
-            value: "session_abc".to_string(),
-        };
-        let b = a.clone();
-        assert_eq!(a.value, b.value);
-    }
-
-    #[test]
-    fn browser_cookie_clone_preserves_value() {
-        let original = BrowserCookie {
-            value: "cookie_value_xyz".to_string(),
-        };
-        let cloned = original.clone();
-        // mutating the clone must not affect the original
-        let _ = cloned;
-        assert_eq!(original.value, "cookie_value_xyz");
     }
 
     #[test]
@@ -260,28 +367,80 @@ mod tests {
 
     #[test]
     fn browser_kind_is_copy() {
-        let a = BrowserKind::Chrome;
-        let b = a; // Copy, not move
+        let a = BrowserKind::Firefox;
+        let b = a; // copy
         assert_eq!(a, b);
     }
 
     #[test]
     fn workspace_info_debug_repr_contains_id() {
-        let info = WorkspaceInfo {
-            id: "wrk_debug".to_string(),
-            name: Some("Debug".to_string()),
+        let ws = WorkspaceInfo {
+            id: "wrk_abc".to_string(),
+            name: None,
         };
-        let s = format!("{:?}", info);
-        assert!(s.contains("wrk_debug"));
-        assert!(s.contains("Debug"));
+        let debug = format!("{ws:?}");
+        assert!(debug.contains("wrk_abc"));
     }
 
     #[test]
-    fn browser_cookie_debug_repr_contains_value() {
-        let cookie = BrowserCookie {
-            value: "v_debug".to_string(),
+    fn poll_for_cookie_with_mock_returns_immediately_when_cookie_present() {
+        let source = MockCookieSource {
+            cookie: Some(BrowserCookie {
+                value: "found".to_string(),
+            }),
+            workspaces: Vec::new(),
         };
-        let s = format!("{:?}", cookie);
-        assert!(s.contains("v_debug"));
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(poll_for_cookie_with(
+            &source,
+            "auth",
+            "opencode.ai",
+            10,
+            5,
+        ));
+        assert_eq!(result.unwrap().value, "found");
+    }
+
+    #[test]
+    fn poll_for_cookie_with_mock_returns_none_on_timeout() {
+        let source = MockCookieSource {
+            cookie: None,
+            workspaces: Vec::new(),
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(poll_for_cookie_with(
+            &source,
+            "auth",
+            "opencode.ai",
+            10,
+            1,
+        ));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn poll_for_workspaces_with_mock_returns_immediately_when_present() {
+        let source = MockCookieSource {
+            cookie: None,
+            workspaces: vec![WorkspaceInfo {
+                id: "wrk_test".to_string(),
+                name: None,
+            }],
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(poll_for_workspaces_with(&source, 10, 5));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "wrk_test");
+    }
+
+    #[test]
+    fn poll_for_workspaces_with_mock_returns_empty_on_timeout() {
+        let source = MockCookieSource {
+            cookie: None,
+            workspaces: Vec::new(),
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(poll_for_workspaces_with(&source, 10, 1));
+        assert!(result.is_empty());
     }
 }

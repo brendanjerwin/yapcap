@@ -78,7 +78,10 @@ impl ProviderAdapter for OpencodeGoAdapter {
         Box::pin(async move {
             match handle {
                 ProviderAccountHandle::OpencodeGo(account) => {
-                    opencode_go::fetch(client, account).await.map_err(AppError::from)
+                    let source = crate::browser_cookies::default_cookie_source();
+                    opencode_go::fetch(client, account, source.as_ref())
+                        .await
+                        .map_err(AppError::from)
                 }
                 _ => unreachable!(),
             }

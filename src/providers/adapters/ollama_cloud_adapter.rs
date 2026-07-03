@@ -78,7 +78,10 @@ impl ProviderAdapter for OllamaCloudAdapter {
         Box::pin(async move {
             match handle {
                 ProviderAccountHandle::OllamaCloud(account) => {
-                    ollama_cloud::fetch(client, account).await.map_err(AppError::from)
+                    let source = crate::browser_cookies::default_cookie_source();
+                    ollama_cloud::fetch(client, account, source.as_ref())
+                        .await
+                        .map_err(AppError::from)
                 }
                 _ => unreachable!(),
             }

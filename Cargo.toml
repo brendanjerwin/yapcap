@@ -35,6 +35,7 @@ assets = [
 
 [dependencies]
 base64 = "0.22"
+async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 i18n-embed-fl = "0.10"

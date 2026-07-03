@@ -251,8 +251,10 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
 pub async fn fetch(
     client: &reqwest::Client,
     account: &ManagedOpencodeGoAccountConfig,
+    cookie_source: &dyn crate::browser_cookies::CookieSource,
 ) -> Result<UsageSnapshot, OpencodeGoError> {
     let account_root = managed_opencode_go_account_dir(&account.id);
+
 
     let workspace_id = load_workspace_id(&account_root)
         .ok()
@@ -277,7 +279,7 @@ pub async fn fetch(
     let response = match response.status() {
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
             // Try refreshing the cookie from browser storage
-            if let Some(fresh) = crate::browser_cookies::find_cookie("auth", "opencode.ai").await {
+            if let Some(fresh) = cookie_source.find_cookie("auth", "opencode.ai").await {
                 auth_cookie = fresh.value.clone();
                 if let Err(e) = crate::providers::opencode_go::storage::write_auth_cookie(&account_root, &auth_cookie) {
                     tracing::warn!(error = %e, "failed to persist refreshed auth cookie");
