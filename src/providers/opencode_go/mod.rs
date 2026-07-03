@@ -73,23 +73,27 @@ fn parse_ssr_window(
     re_reset_first: &Regex,
 ) -> Option<ScrapedWindowUsage> {
     if let Some(caps) = re_pct_first.captures(html) {
-        let usage_percent: f64 = caps[1].parse().ok()?;
-        let reset_in_sec: f64 = caps[2].parse().ok()?;
-        if usage_percent.is_finite() && reset_in_sec.is_finite() {
-            return Some(ScrapedWindowUsage {
-                usage_percent,
-                reset_in_sec,
-            });
+        if let (Ok(usage_percent), Ok(reset_in_sec)) =
+            (caps[1].parse::<f64>(), caps[2].parse::<f64>())
+        {
+            if usage_percent.is_finite() && reset_in_sec.is_finite() {
+                return Some(ScrapedWindowUsage {
+                    usage_percent,
+                    reset_in_sec,
+                });
+            }
         }
     }
     if let Some(caps) = re_reset_first.captures(html) {
-        let reset_in_sec: f64 = caps[1].parse().ok()?;
-        let usage_percent: f64 = caps[2].parse().ok()?;
-        if usage_percent.is_finite() && reset_in_sec.is_finite() {
-            return Some(ScrapedWindowUsage {
-                usage_percent,
-                reset_in_sec,
-            });
+        if let (Ok(reset_in_sec), Ok(usage_percent)) =
+            (caps[1].parse::<f64>(), caps[2].parse::<f64>())
+        {
+            if usage_percent.is_finite() && reset_in_sec.is_finite() {
+                return Some(ScrapedWindowUsage {
+                    usage_percent,
+                    reset_in_sec,
+                });
+            }
         }
     }
     None
@@ -107,22 +111,31 @@ fn parse_human_readable_time(time_str: &str) -> Option<f64> {
         return Some(0.0);
     }
 
+    static RE_DAYS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*days?").unwrap());
+    static RE_HOURS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*hours?").unwrap());
+    static RE_MINUTES: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*minutes?").unwrap());
+    static RE_SECONDS: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*seconds?").unwrap());
+
     let mut total_seconds = 0.0;
     let mut has_duration = false;
 
-    if let Some(day_match) = regex::Regex::new(r"(\d+(?:\.\d+)?)\s*days?").ok().and_then(|re| re.captures(normalized)) {
+    if let Some(day_match) = RE_DAYS.captures(normalized) {
         total_seconds += day_match[1].parse::<f64>().unwrap_or(0.0) * 86400.0;
         has_duration = true;
     }
-    if let Some(hour_match) = regex::Regex::new(r"(\d+(?:\.\d+)?)\s*hours?").ok().and_then(|re| re.captures(normalized)) {
+    if let Some(hour_match) = RE_HOURS.captures(normalized) {
         total_seconds += hour_match[1].parse::<f64>().unwrap_or(0.0) * 3600.0;
         has_duration = true;
     }
-    if let Some(min_match) = regex::Regex::new(r"(\d+(?:\.\d+)?)\s*minutes?").ok().and_then(|re| re.captures(normalized)) {
+    if let Some(min_match) = RE_MINUTES.captures(normalized) {
         total_seconds += min_match[1].parse::<f64>().unwrap_or(0.0) * 60.0;
         has_duration = true;
     }
-    if let Some(sec_match) = regex::Regex::new(r"(\d+(?:\.\d+)?)\s*seconds?").ok().and_then(|re| re.captures(normalized)) {
+    if let Some(sec_match) = RE_SECONDS.captures(normalized) {
         total_seconds += sec_match[1].parse::<f64>().unwrap_or(0.0);
         has_duration = true;
     }
@@ -136,6 +149,14 @@ fn parse_human_readable_time(time_str: &str) -> Option<f64> {
 
 /// Parse the newer data-slot HTML format.
 fn parse_data_slot_format(html: &str) -> Vec<(String, ScrapedWindowUsage)> {
+    static RE_LABEL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"data-slot="usage-label">([^<]+)<"#).unwrap());
+    static RE_USAGE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"data-slot="usage-value">[^0-9]*(\d+(?:\.\d+)?)"#).unwrap());
+    static RE_RESET: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"data-slot="(reset-time|reset-now)">([\s\S]*?)</span>"#).unwrap()
+    });
+
     let mut results = Vec::new();
     let items: Vec<&str> = html.split(r#"data-slot="usage-item""#).collect();
 
@@ -145,15 +166,13 @@ fn parse_data_slot_format(html: &str) -> Vec<(String, ScrapedWindowUsage)> {
         }
 
         // Extract label
-        let label_re = regex::Regex::new(r#"data-slot="usage-label">([^<]+)<"#).unwrap();
-        let Some(label_match) = label_re.captures(content) else {
+        let Some(label_match) = RE_LABEL.captures(content) else {
             continue;
         };
         let label = label_match[1].trim().to_lowercase();
 
         // Extract usage percentage
-        let usage_re = regex::Regex::new(r#"data-slot="usage-value">[^0-9]*(\d+(?:\.\d+)?)"#).unwrap();
-        let Some(usage_match) = usage_re.captures(content) else {
+        let Some(usage_match) = RE_USAGE.captures(content) else {
             continue;
         };
         let usage_percent: f64 = match usage_match[1].parse() {
@@ -162,9 +181,7 @@ fn parse_data_slot_format(html: &str) -> Vec<(String, ScrapedWindowUsage)> {
         };
 
         // Extract reset time
-        let reset_re =
-            regex::Regex::new(r#"data-slot="(reset-time|reset-now)">([\s\S]*?)</span>"#).unwrap();
-        let Some(reset_match) = reset_re.captures(content) else {
+        let Some(reset_match) = RE_RESET.captures(content) else {
             continue;
         };
 

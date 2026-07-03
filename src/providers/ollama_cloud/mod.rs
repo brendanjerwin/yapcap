@@ -138,7 +138,6 @@ pub fn parse(
         return Err(OllamaCloudError::ParseDashboard);
     }
 
-    let now = Utc::now();
     let mut windows = Vec::new();
 
     if let Some(used_percent) = session_percent {

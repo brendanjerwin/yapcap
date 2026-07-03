@@ -986,8 +986,9 @@ impl AppModel {
                             }
                         }
                         runtime::persist_state(&self.state);
-                        let login = self.opencode_go_login.as_mut().unwrap();
-                        login.status = OpencodeGoLoginStatus::Saved;
+                        if let Some(login) = self.opencode_go_login.as_mut() {
+                            login.status = OpencodeGoLoginStatus::Saved;
+                        }
                         refresh_provider_task(&self.config, &mut self.state, ProviderId::OpencodeGo)
                     }
                     Err(error) => {
@@ -1097,9 +1098,9 @@ impl AppModel {
                                 provider.selected_account_ids.push(account_id.clone());
                             }
                         }
-                        runtime::persist_state(&self.state);
-                        let login = self.ollama_cloud_login.as_mut().unwrap();
-                        login.status = OllamaCloudLoginStatus::Saved;
+                        if let Some(login) = self.ollama_cloud_login.as_mut() {
+                            login.status = OllamaCloudLoginStatus::Saved;
+                        }
                         refresh_provider_task(&self.config, &mut self.state, ProviderId::OllamaCloud)
                     }
                     Err(error) => {
