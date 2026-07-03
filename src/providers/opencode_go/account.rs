@@ -114,4 +114,34 @@ mod tests {
         assert_eq!(config.opencode_go_managed_accounts.len(), 1);
         assert_eq!(config.opencode_go_managed_accounts[0].label, "New Label");
     }
+    #[test]
+    fn remove_managed_config_dir_removes_dir_inside_managed_root() {
+        use crate::config::managed_opencode_go_account_dir;
+        let dir = managed_opencode_go_account_dir(&format!("test-remove-{}", std::process::id()));
+        // ensure clean slate
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        std::fs::write(dir.join("marker.txt"), "data").expect("write marker file");
+        assert!(dir.exists(), "dir should exist before removal");
+
+        remove_managed_config_dir(&dir);
+
+        assert!(!dir.exists(), "dir should be removed when inside managed root");
+    }
+
+    #[test]
+    fn remove_managed_config_dir_refuses_dir_outside_managed_root() {
+        let dir = std::env::temp_dir().join(format!("yapcap-safety-test-{}", std::process::id()));
+        // ensure clean slate
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        std::fs::write(dir.join("marker.txt"), "data").expect("write marker file");
+        assert!(dir.exists(), "dir should exist before call");
+
+        remove_managed_config_dir(&dir);
+
+        assert!(dir.exists(), "dir outside managed root must NOT be deleted");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

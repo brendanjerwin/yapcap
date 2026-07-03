@@ -112,4 +112,71 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+    #[cfg(unix)]
+    #[test]
+    fn create_private_dir_results_in_existing_private_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("create_private_dir_perms");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        create_private_dir(&dir).expect("create should succeed");
+        assert!(dir.exists(), "directory should exist after create_private_dir");
+        assert!(dir.is_dir(), "path should be a directory");
+
+        let mode = std::fs::metadata(&dir)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "dir should be 0o700, got {:o}", mode);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_workspace_id_creates_file_with_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("write_workspace_id_perms");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        write_workspace_id(&dir, "ws-perms-test").expect("write should succeed");
+        let file = dir.join(WORKSPACE_ID_FILE);
+        assert!(file.exists(), "workspace id file should exist");
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("read"),
+            "ws-perms-test"
+        );
+
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "file should be 0o600, got {:o}", mode);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_auth_cookie_creates_file_with_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("write_auth_cookie_perms");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        write_auth_cookie(&dir, "secret-cookie-value").expect("write should succeed");
+        let file = dir.join(AUTH_COOKIE_FILE);
+        assert!(file.exists(), "auth cookie file should exist");
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("read"),
+            "secret-cookie-value"
+        );
+
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "file should be 0o600, got {:o}", mode);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

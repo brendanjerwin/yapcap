@@ -86,4 +86,47 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+    #[cfg(unix)]
+    #[test]
+    fn create_private_dir_results_in_existing_private_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("create_private_dir_perms");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        create_private_dir(&dir).expect("create should succeed");
+        assert!(dir.exists(), "directory should exist after create_private_dir");
+        assert!(dir.is_dir(), "path should be a directory");
+
+        let mode = std::fs::metadata(&dir)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700, "dir should be 0o700, got {:o}", mode);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_session_cookie_creates_file_with_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("write_session_cookie_perms");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        write_session_cookie(&dir, "secret-session-value").expect("write should succeed");
+        let file = dir.join(SESSION_COOKIE_FILE);
+        assert!(file.exists(), "session cookie file should exist");
+        assert_eq!(
+            std::fs::read_to_string(&file).expect("read"),
+            "secret-session-value"
+        );
+
+        let mode = std::fs::metadata(&file)
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "file should be 0o600, got {:o}", mode);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

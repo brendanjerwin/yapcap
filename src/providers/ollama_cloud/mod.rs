@@ -55,14 +55,44 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
     changed
 }
 
+/// What to do with an HTTP response from the dashboard.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum DashboardResponseAction {
+    Proceed,
+    RefreshCookie,
+    RateLimited { retry_after_secs: Option<u64> },
+    ServerError { status: u16 },
+}
+
+/// Decide what to do based on the HTTP status code from the dashboard.
+pub(crate) fn handle_status_code(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> DashboardResponseAction {
+    match status {
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
+            DashboardResponseAction::RefreshCookie
+        }
+        reqwest::StatusCode::TOO_MANY_REQUESTS => {
+            let retry_after = headers
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok());
+            DashboardResponseAction::RateLimited { retry_after_secs: retry_after }
+        }
+        s if s.is_server_error() => {
+            DashboardResponseAction::ServerError { status: s.as_u16() }
+        }
+        _ => DashboardResponseAction::Proceed,
+    }
+}
+
 pub async fn fetch(
     client: &reqwest::Client,
     account: &ManagedOllamaCloudAccountConfig,
     cookie_source: &dyn crate::browser_cookies::CookieSource,
 ) -> Result<UsageSnapshot, OllamaCloudError> {
     let account_root = managed_ollama_cloud_account_dir(&account.id);
-
-
     let mut session_cookie = load_session_cookie(&account_root)
         .ok()
         .filter(|c| !c.is_empty())
@@ -72,31 +102,24 @@ pub async fn fetch(
         .get(DASHBOARD_URL)
         .header("User-Agent", USER_AGENT)
         .header("Accept", "text/html")
-        .header(
-            "Cookie",
-            format!("__Secure-session={session_cookie}"),
-        )
+        .header("Cookie", format!("__Secure-session={session_cookie}"))
         .send()
         .await
         .map_err(OllamaCloudError::DashboardRequest)?;
 
-    let response = match response.status() {
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
-            // Try refreshing the cookie from browser storage
+    let response = match handle_status_code(response.status(), response.headers()) {
+        DashboardResponseAction::Proceed => response,
+        DashboardResponseAction::RefreshCookie => {
             if let Some(fresh) = cookie_source.find_cookie("__Secure-session", "ollama.com").await {
                 session_cookie = fresh.value.clone();
                 if let Err(e) = crate::providers::ollama_cloud::storage::write_session_cookie(&account_root, &session_cookie) {
                     tracing::warn!(error = %e, "failed to persist refreshed session cookie");
                 }
-                // Retry with the fresh cookie
                 client
                     .get(DASHBOARD_URL)
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "text/html")
-                    .header(
-                        "Cookie",
-                        format!("__Secure-session={session_cookie}"),
-                    )
+                    .header("Cookie", format!("__Secure-session={session_cookie}"))
                     .send()
                     .await
                     .map_err(OllamaCloudError::DashboardRequest)?
@@ -104,35 +127,21 @@ pub async fn fetch(
                 return Err(OllamaCloudError::LoginRequired);
             }
         }
-        reqwest::StatusCode::TOO_MANY_REQUESTS => {
-            let retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse().ok());
-            return Err(OllamaCloudError::RateLimited {
-                retry_after_secs: retry_after,
-            });
+        DashboardResponseAction::RateLimited { retry_after_secs } => {
+            return Err(OllamaCloudError::RateLimited { retry_after_secs });
         }
-        status if status.is_server_error() => {
-            return Err(OllamaCloudError::DashboardHttp {
-                status: status.as_u16(),
-            });
+        DashboardResponseAction::ServerError { status } => {
+            return Err(OllamaCloudError::DashboardHttp { status });
         }
-        _ => response,
     };
 
     let response = response
         .error_for_status()
         .map_err(OllamaCloudError::DashboardEndpoint)?;
-    let html = response
-        .text()
-        .await
-        .map_err(OllamaCloudError::ReadDashboard)?;
+    let html = response.text().await.map_err(OllamaCloudError::ReadDashboard)?;
 
     parse(&html, Utc::now())
 }
-
 pub fn parse(
     html: &str,
     updated_at: chrono::DateTime<Utc>,
@@ -205,6 +214,75 @@ pub fn parse(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handle_status_code_200_ok_proceeds() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(200).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::Proceed);
+    }
+
+    #[test]
+    fn handle_status_code_401_refreshes_cookie() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(401).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::RefreshCookie);
+    }
+
+    #[test]
+    fn handle_status_code_403_refreshes_cookie() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(403).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::RefreshCookie);
+    }
+
+    #[test]
+    fn handle_status_code_429_without_retry_after_is_rate_limited_none() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(429).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::RateLimited { retry_after_secs: None }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_429_with_retry_after_is_rate_limited_some() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "60".parse().unwrap());
+        let status = reqwest::StatusCode::from_u16(429).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::RateLimited { retry_after_secs: Some(60) }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_500_is_server_error_500() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(500).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::ServerError { status: 500 }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_503_is_server_error_503() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(503).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::ServerError { status: 503 }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_302_redirect_proceeds() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(302).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::Proceed);
+    }
 
     #[test]
     fn parse_aria_label_format() {

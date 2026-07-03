@@ -43,6 +43,17 @@ pub trait CookieSource: Send + Sync {
     fn open_browser(&self, url: &str);
 }
 
+/// Parse a browser name string to determine the browser kind.
+/// "chrome", "chromium", "brave" → Chrome; anything else → Firefox.
+pub fn detect_browser_kind_from_string(name: &str) -> BrowserKind {
+    let lower = name.to_lowercase();
+    if lower.contains("chrome") || lower.contains("chromium") || lower.contains("brave") {
+        BrowserKind::Chrome
+    } else {
+        BrowserKind::Firefox
+    }
+}
+
 /// Detect the system's default browser via xdg-mime.
 /// Falls back to Firefox if detection fails.
 pub fn detect_default_browser() -> BrowserKind {
@@ -53,14 +64,7 @@ pub fn detect_default_browser() -> BrowserKind {
         .output();
 
     match output {
-        Ok(o) => {
-            let name = String::from_utf8_lossy(&o.stdout).to_lowercase();
-            if name.contains("chrome") || name.contains("chromium") || name.contains("brave") {
-                BrowserKind::Chrome
-            } else {
-                BrowserKind::Firefox
-            }
-        }
+        Ok(o) => detect_browser_kind_from_string(&String::from_utf8_lossy(&o.stdout)),
         Err(_) => BrowserKind::Firefox,
     }
 }
@@ -85,6 +89,17 @@ pub async fn discover_workspaces() -> Vec<WorkspaceInfo> {
     default_cookie_source().discover_workspaces().await
 }
 
+/// Extract a workspace name from SSR hydration data in HTML.
+/// Looks for `{id:"wrk_...",name:"WorkspaceName"}`.
+pub fn parse_workspace_name_from_html(html: &str, workspace_id: &str) -> Option<String> {
+    let marker = format!(r#"id:"{workspace_id}",name:""#);
+    let pos = html.find(&marker)?;
+    let after = &html[pos + marker.len()..];
+    let end = after.find('"')?;
+    let name = &after[..end];
+    if name.is_empty() { None } else { Some(name.to_string()) }
+}
+
 /// Fetch the workspace name by scraping the /go page with the auth cookie.
 /// The SSR hydration data contains `{id:"wrk_...",name:"WorkspaceName"}`.
 pub async fn fetch_workspace_name(
@@ -101,20 +116,7 @@ pub async fn fetch_workspace_name(
         .ok()?;
 
     let html = response.text().await.ok()?;
-
-    // Look for {id:"wrk_...",name:"WorkspaceName"} in SSR hydration data
-    let marker = format!(r#"id:"{workspace_id}",name:""#);
-    if let Some(pos) = html.find(&marker) {
-        let after = &html[pos + marker.len()..];
-        if let Some(end) = after.find('"') {
-            let name = &after[..end];
-            if !name.is_empty() {
-                return Some(name.to_string());
-            }
-        }
-    }
-
-    None
+    parse_workspace_name_from_html(&html, workspace_id)
 }
 
 /// Poll for a cookie using the given source, checking every `interval_ms`
@@ -184,6 +186,71 @@ pub fn open_browser(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_workspace_name_from_html_extracts_name() {
+        let html = r#"<script>{id:"wrk_test",name:"My Workspace"}</script>"#;
+        assert_eq!(
+            parse_workspace_name_from_html(html, "wrk_test"),
+            Some("My Workspace".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_workspace_name_from_html_empty_name_is_none() {
+        let html = r#"<script>{id:"wrk_test",name:""}</script>"#;
+        assert_eq!(parse_workspace_name_from_html(html, "wrk_test"), None);
+    }
+
+    #[test]
+    fn parse_workspace_name_from_html_without_marker_is_none() {
+        let html = r#"<script>{id:"wrk_other",name:"Not Ours"}</script>"#;
+        assert_eq!(parse_workspace_name_from_html(html, "wrk_test"), None);
+    }
+
+    #[test]
+    fn parse_workspace_name_from_html_extracts_from_larger_context() {
+        let html = r#"<script>...$R[35]={id:"wrk_xyz",name:"Default",slug:null}...</script>"#;
+        assert_eq!(
+            parse_workspace_name_from_html(html, "wrk_xyz"),
+            Some("Default".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_browser_kind_google_chrome_is_chrome() {
+        assert_eq!(detect_browser_kind_from_string("google-chrome.desktop"), BrowserKind::Chrome);
+    }
+
+    #[test]
+    fn detect_browser_kind_chromium_browser_is_chrome() {
+        assert_eq!(detect_browser_kind_from_string("chromium-browser.desktop"), BrowserKind::Chrome);
+    }
+
+    #[test]
+    fn detect_browser_kind_brave_browser_is_chrome() {
+        assert_eq!(detect_browser_kind_from_string("brave-browser.desktop"), BrowserKind::Chrome);
+    }
+
+    #[test]
+    fn detect_browser_kind_firefox_is_firefox() {
+        assert_eq!(detect_browser_kind_from_string("firefox.desktop"), BrowserKind::Firefox);
+    }
+
+    #[test]
+    fn detect_browser_kind_userapp_firefox_is_firefox() {
+        assert_eq!(detect_browser_kind_from_string("userapp-Firefox-XYZ.desktop"), BrowserKind::Firefox);
+    }
+
+    #[test]
+    fn detect_browser_kind_empty_string_is_firefox() {
+        assert_eq!(detect_browser_kind_from_string(""), BrowserKind::Firefox);
+    }
+
+    #[test]
+    fn detect_browser_kind_uppercase_chrome_is_chrome() {
+        assert_eq!(detect_browser_kind_from_string("Chrome"), BrowserKind::Chrome);
+    }
 
     /// A mock cookie source for testing that returns canned data.
     pub struct MockCookieSource {

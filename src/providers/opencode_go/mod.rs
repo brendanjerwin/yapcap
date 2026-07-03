@@ -248,6 +248,43 @@ pub fn sync_managed_accounts(config: &mut Config) -> bool {
     changed
 }
 
+
+/// What to do with an HTTP response from the dashboard.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum DashboardResponseAction {
+    /// Proceed normally — the response body is the dashboard HTML.
+    Proceed,
+    /// The cookie is invalid — try refreshing from browser storage.
+    RefreshCookie,
+    /// Rate limited — retry after the given number of seconds (if known).
+    RateLimited { retry_after_secs: Option<u64> },
+    /// Server error.
+    ServerError { status: u16 },
+}
+
+/// Decide what to do based on the HTTP status code from the dashboard.
+/// This is a pure function extracted from `fetch()` for testability.
+pub(crate) fn handle_status_code(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> DashboardResponseAction {
+    match status {
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
+            DashboardResponseAction::RefreshCookie
+        }
+        reqwest::StatusCode::TOO_MANY_REQUESTS => {
+            let retry_after = headers
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse().ok());
+            DashboardResponseAction::RateLimited { retry_after_secs: retry_after }
+        }
+        s if s.is_server_error() => {
+            DashboardResponseAction::ServerError { status: s.as_u16() }
+        }
+        _ => DashboardResponseAction::Proceed,
+    }
+}
 pub async fn fetch(
     client: &reqwest::Client,
     account: &ManagedOpencodeGoAccountConfig,
@@ -276,15 +313,14 @@ pub async fn fetch(
         .await
         .map_err(OpencodeGoError::DashboardRequest)?;
 
-    let response = match response.status() {
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
-            // Try refreshing the cookie from browser storage
+    let response = match handle_status_code(response.status(), response.headers()) {
+        DashboardResponseAction::Proceed => response,
+        DashboardResponseAction::RefreshCookie => {
             if let Some(fresh) = cookie_source.find_cookie("auth", "opencode.ai").await {
                 auth_cookie = fresh.value.clone();
                 if let Err(e) = crate::providers::opencode_go::storage::write_auth_cookie(&account_root, &auth_cookie) {
                     tracing::warn!(error = %e, "failed to persist refreshed auth cookie");
                 }
-                // Retry with the fresh cookie
                 client
                     .get(&url)
                     .header("User-Agent", USER_AGENT)
@@ -297,22 +333,12 @@ pub async fn fetch(
                 return Err(OpencodeGoError::LoginRequired);
             }
         }
-        reqwest::StatusCode::TOO_MANY_REQUESTS => {
-            let retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.parse().ok());
-            return Err(OpencodeGoError::RateLimited {
-                retry_after_secs: retry_after,
-            });
+        DashboardResponseAction::RateLimited { retry_after_secs } => {
+            return Err(OpencodeGoError::RateLimited { retry_after_secs });
         }
-        status if status.is_server_error() => {
-            return Err(OpencodeGoError::DashboardHttp {
-                status: status.as_u16(),
-            });
+        DashboardResponseAction::ServerError { status } => {
+            return Err(OpencodeGoError::DashboardHttp { status });
         }
-        _ => response,
     };
 
     let response = response
@@ -414,6 +440,75 @@ pub fn parse(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handle_status_code_200_ok_proceeds() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(200).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::Proceed);
+    }
+
+    #[test]
+    fn handle_status_code_401_refreshes_cookie() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(401).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::RefreshCookie);
+    }
+
+    #[test]
+    fn handle_status_code_403_refreshes_cookie() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(403).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::RefreshCookie);
+    }
+
+    #[test]
+    fn handle_status_code_429_without_retry_after_is_rate_limited_none() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(429).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::RateLimited { retry_after_secs: None }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_429_with_retry_after_is_rate_limited_some() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "60".parse().unwrap());
+        let status = reqwest::StatusCode::from_u16(429).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::RateLimited { retry_after_secs: Some(60) }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_500_is_server_error_500() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(500).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::ServerError { status: 500 }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_503_is_server_error_503() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(503).unwrap();
+        assert_eq!(
+            handle_status_code(status, &headers),
+            DashboardResponseAction::ServerError { status: 503 }
+        );
+    }
+
+    #[test]
+    fn handle_status_code_302_redirect_proceeds() {
+        let headers = reqwest::header::HeaderMap::new();
+        let status = reqwest::StatusCode::from_u16(302).unwrap();
+        assert_eq!(handle_status_code(status, &headers), DashboardResponseAction::Proceed);
+    }
 
     #[test]
     fn parse_ssr_format() {
