@@ -46,23 +46,25 @@ impl OpencodeGoLoginState {
     }
 
     pub fn save(&self, _config: &mut Config) -> Result<ManagedOpencodeGoAccountConfig, String> {
-        if self.workspace_id.is_empty() {
+        let workspace_id = self.workspace_id.trim().to_string();
+        let auth_cookie = self.auth_cookie.trim().to_string();
+
+        if workspace_id.is_empty() {
             return Err("Workspace ID is required".to_string());
         }
-        if self.auth_cookie.is_empty() {
+        if auth_cookie.is_empty() {
             return Err("Auth cookie is required".to_string());
         }
 
         let account_id = self.account_id.clone();
-        let label = self.label.clone();
-        let workspace_id = self.workspace_id.clone();
+        let label = self.label.trim().to_string();
         let auth_cookie_source = "stored".to_string();
         let now = Utc::now();
 
         let managed_account = ManagedOpencodeGoAccountConfig {
             id: account_id.clone(),
-            label: label.clone(),
-            workspace_id,
+            label,
+            workspace_id: workspace_id.clone(),
             auth_cookie_source,
             created_at: now,
             updated_at: now,
@@ -71,8 +73,8 @@ impl OpencodeGoLoginState {
 
         let account_dir = crate::config::managed_opencode_go_account_dir(&account_id);
         create_private_dir(&account_dir)?;
-        write_workspace_id(&account_dir, &self.workspace_id)?;
-        write_auth_cookie(&account_dir, &self.auth_cookie)?;
+        write_workspace_id(&account_dir, &workspace_id)?;
+        write_auth_cookie(&account_dir, &auth_cookie)?;
 
         Ok(managed_account)
     }

@@ -141,6 +141,7 @@ pub fn parse(
     let mut windows = Vec::new();
 
     if let Some(used_percent) = session_percent {
+        let used_percent = used_percent.clamp(0.0, 100.0);
         let reset_at = reset_times.first().copied();
         windows.push(crate::model::UsageWindow {
             label: "Session".to_string(),
@@ -150,8 +151,8 @@ pub fn parse(
             reset_description: Some("Rolling session window".to_string()),
         });
     }
-
     if let Some(used_percent) = weekly_percent {
+        let used_percent = used_percent.clamp(0.0, 100.0);
         let reset_at = reset_times.get(1).copied().or(reset_times.first().copied());
         windows.push(crate::model::UsageWindow {
             label: "Weekly".to_string(),

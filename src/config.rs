@@ -540,6 +540,7 @@ mod tests {
         assert!(config.copilot_managed_accounts.is_empty());
         assert!(config.minimax_managed_accounts.is_empty());
         assert!(config.opencode_go_managed_accounts.is_empty());
+        assert!(config.ollama_cloud_managed_accounts.is_empty());
     }
 
     #[test]

@@ -337,12 +337,11 @@ pub fn parse(
         return Err(OpencodeGoError::ParseDashboard);
     }
 
-    let now = Utc::now();
     let mut windows = Vec::new();
 
     if let Some(usage) = rolling {
-        let used_percent = usage.usage_percent.max(0.0) as f32;
-        let reset_at = Some(now + chrono::Duration::seconds(usage.reset_in_sec.max(0.0) as i64));
+        let used_percent = usage.usage_percent.clamp(0.0, 100.0) as f32;
+        let reset_at = Some(updated_at + chrono::Duration::seconds(usage.reset_in_sec.max(0.0) as i64));
         windows.push(crate::model::UsageWindow {
             label: "5h".to_string(),
             used_percent,
@@ -353,8 +352,8 @@ pub fn parse(
     }
 
     if let Some(usage) = weekly {
-        let used_percent = usage.usage_percent.max(0.0) as f32;
-        let reset_at = Some(now + chrono::Duration::seconds(usage.reset_in_sec.max(0.0) as i64));
+        let used_percent = usage.usage_percent.clamp(0.0, 100.0) as f32;
+        let reset_at = Some(updated_at + chrono::Duration::seconds(usage.reset_in_sec.max(0.0) as i64));
         windows.push(crate::model::UsageWindow {
             label: "Weekly".to_string(),
             used_percent,
@@ -365,8 +364,8 @@ pub fn parse(
     }
 
     if let Some(usage) = monthly {
-        let used_percent = usage.usage_percent.max(0.0) as f32;
-        let reset_at = Some(now + chrono::Duration::seconds(usage.reset_in_sec.max(0.0) as i64));
+        let used_percent = usage.usage_percent.clamp(0.0, 100.0) as f32;
+        let reset_at = Some(updated_at + chrono::Duration::seconds(usage.reset_in_sec.max(0.0) as i64));
         windows.push(crate::model::UsageWindow {
             label: "Monthly".to_string(),
             used_percent,
@@ -410,6 +409,26 @@ mod tests {
         assert!((snapshot.windows[0].used_percent - 42.5).abs() < 0.01);
         assert!((snapshot.windows[1].used_percent - 60.0).abs() < 0.01);
         assert!((snapshot.windows[2].used_percent - 75.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_data_slot_format_fallback() {
+        let html = r#"<html><body>
+        <div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">25%</span>
+          <span data-slot="reset-time">Resets in 2 hours 30 minutes</span>
+        </div>
+        <div data-slot="usage-item">
+          <span data-slot="usage-label">Weekly Usage</span>
+          <span data-slot="usage-value">50%</span>
+          <span data-slot="reset-time">Resets in 3 days 4 hours</span>
+        </div>
+        </body></html>"#;
+        let snapshot = parse(html, Utc::now(), "wrk_test").unwrap();
+        assert_eq!(snapshot.windows.len(), 2);
+        assert!((snapshot.windows[0].used_percent - 25.0).abs() < 0.01);
+        assert!((snapshot.windows[1].used_percent - 50.0).abs() < 0.01);
     }
 
     #[test]

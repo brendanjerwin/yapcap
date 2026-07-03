@@ -40,18 +40,20 @@ impl OllamaCloudLoginState {
     }
 
     pub fn save(&self, _config: &mut Config) -> Result<ManagedOllamaCloudAccountConfig, String> {
-        if self.session_cookie.is_empty() {
+        let session_cookie = self.session_cookie.trim().to_string();
+
+        if session_cookie.is_empty() {
             return Err("Session cookie is required".to_string());
         }
 
         let account_id = self.account_id.clone();
-        let label = self.label.clone();
+        let label = self.label.trim().to_string();
         let session_cookie_source = "stored".to_string();
         let now = Utc::now();
 
         let managed_account = ManagedOllamaCloudAccountConfig {
             id: account_id.clone(),
-            label: label.clone(),
+            label,
             session_cookie_source,
             created_at: now,
             updated_at: now,
@@ -60,7 +62,7 @@ impl OllamaCloudLoginState {
 
         let account_dir = crate::config::managed_ollama_cloud_account_dir(&account_id);
         create_private_dir(&account_dir)?;
-        write_session_cookie(&account_dir, &self.session_cookie)?;
+        write_session_cookie(&account_dir, &session_cookie)?;
 
         Ok(managed_account)
     }
