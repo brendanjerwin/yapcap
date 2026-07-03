@@ -6,7 +6,7 @@ use crate::providers::adapters::adapter;
 use crate::providers::interface::{
     ProviderAccountDescriptor, ProviderAccountHandle, ProviderCapabilities,
 };
-use crate::providers::{claude, codex, copilot, cursor, gemini, minimax};
+use crate::providers::{claude, codex, copilot, cursor, gemini, minimax, ollama_cloud, opencode_go};
 
 #[cfg(test)]
 mod tests;
@@ -22,12 +22,16 @@ pub fn startup_sync(config: &mut Config) -> bool {
     let gemini_changed = gemini::sync_managed_accounts(config);
     let copilot_changed = copilot::sync_managed_accounts(config);
     let minimax_changed = minimax::sync_managed_accounts(config);
+    let opencode_go_changed = opencode_go::sync_managed_accounts(config);
+    let ollama_cloud_changed = ollama_cloud::sync_managed_accounts(config);
     codex_changed
         | cursor_changed
         | claude_changed
         | gemini_changed
         | copilot_changed
         | minimax_changed
+        | opencode_go_changed
+        | ollama_cloud_changed
 }
 
 pub fn initialize_provider_visibility(config: &mut Config, providers: &[ProviderId]) -> bool {
@@ -94,6 +98,8 @@ pub async fn fetch_handle(
         ProviderAccountHandle::Gemini(_) => ProviderId::Gemini,
         ProviderAccountHandle::Copilot(_) => ProviderId::Copilot,
         ProviderAccountHandle::Minimax(_) => ProviderId::Minimax,
+        ProviderAccountHandle::OpencodeGo(_) => ProviderId::OpencodeGo,
+        ProviderAccountHandle::OllamaCloud(_) => ProviderId::OllamaCloud,
     };
     adapter(provider).fetch_account(handle, client).await
 }

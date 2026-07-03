@@ -2,10 +2,10 @@ use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
     PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, Size, Task, UpdateStatus,
     UsageAmountFormat, app_popup, applet_button_size, claude, cosmic_config, cursor, demo_env,
-    destroy_popup, format_retry_delay, minimax, popup_size_limits_with_max_width, popup_size_tuple,
-    popup_view, refresh_provider_account_statuses_task, refresh_provider_task,
-    refresh_provider_tasks, registry, resize_popup, runtime, select_provider, update_retry_delay,
-    update_retry_task,
+    destroy_popup, format_retry_delay, minimax, ollama_cloud, opencode_go,
+    popup_size_limits_with_max_width, popup_size_tuple, popup_view,
+    refresh_provider_account_statuses_task, refresh_provider_task, refresh_provider_tasks,
+    registry, resize_popup, runtime, select_provider, update_retry_delay, update_retry_task,
 };
 use crate::account_selection::provider_show_all_account_selection;
 
@@ -205,6 +205,8 @@ impl AppModel {
             ProviderId::Gemini => new_config.gemini_enabled = enabled,
             ProviderId::Copilot => new_config.copilot_enabled = enabled,
             ProviderId::Minimax => new_config.minimax_enabled = enabled,
+            ProviderId::OpencodeGo => new_config.opencode_go_enabled = enabled,
+            ProviderId::OllamaCloud => new_config.ollama_cloud_enabled = enabled,
         });
         if enabled {
             runtime::reconcile_provider(&self.config, &mut self.state, provider);
@@ -459,6 +461,68 @@ impl AppModel {
             .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
         {
             return refresh_provider_task(&self.config, &mut self.state, ProviderId::Minimax);
+        }
+        Task::none()
+    }
+
+    pub(super) fn delete_opencode_go_account(&mut self, account_id: &str) -> Task<Message> {
+        let provider = ProviderId::OpencodeGo;
+        if !self
+            .config
+            .opencode_go_managed_accounts
+            .iter()
+            .any(|account| account.id == account_id)
+        {
+            return Task::none();
+        }
+
+        opencode_go::remove_managed_config_dir(
+            &crate::config::managed_opencode_go_account_dir(account_id),
+        );
+        self.write_config(|new_config| {
+            let _ = registry::delete_account(provider, account_id, new_config);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
+        });
+        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::persist_state(&self.state);
+
+        if self
+            .state
+            .provider(ProviderId::OpencodeGo)
+            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
+        {
+            return refresh_provider_task(&self.config, &mut self.state, ProviderId::OpencodeGo);
+        }
+        Task::none()
+    }
+
+    pub(super) fn delete_ollama_cloud_account(&mut self, account_id: &str) -> Task<Message> {
+        let provider = ProviderId::OllamaCloud;
+        if !self
+            .config
+            .ollama_cloud_managed_accounts
+            .iter()
+            .any(|account| account.id == account_id)
+        {
+            return Task::none();
+        }
+
+        ollama_cloud::remove_managed_config_dir(
+            &crate::config::managed_ollama_cloud_account_dir(account_id),
+        );
+        self.write_config(|new_config| {
+            let _ = registry::delete_account(provider, account_id, new_config);
+            registry::sync_selected_ids_with_discoveries(new_config, provider);
+        });
+        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::persist_state(&self.state);
+
+        if self
+            .state
+            .provider(ProviderId::OllamaCloud)
+            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
+        {
+            return refresh_provider_task(&self.config, &mut self.state, ProviderId::OllamaCloud);
         }
         Task::none()
     }

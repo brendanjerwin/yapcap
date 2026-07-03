@@ -27,6 +27,8 @@ use crate::providers::cursor::CursorScanState;
 use crate::providers::gemini::{GeminiLoginState, GeminiLoginStatus};
 use crate::providers::interface::ProviderAccountActionSupport;
 use crate::providers::minimax::MinimaxLoginState;
+use crate::providers::opencode_go::OpencodeGoLoginState;
+use crate::providers::ollama_cloud::OllamaCloudLoginState;
 use crate::providers::registry;
 use crate::updates::UpdateStatus;
 use crate::usage_display;
@@ -55,9 +57,9 @@ const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
 const PROVIDER_TAB_ICON_SIZE: u16 = 16;
 const PROVIDER_TAB_ICON_LENGTH: f32 = 16.0;
 const PROVIDER_TAB_LABEL_SIZE: u16 = 11;
+const PROVIDER_TAB_MIN_WIDTH: f32 = 64.0;
 const UPDATE_NOTIFICATION_DOT_COLOR: Color = Color::from_rgb(0.93, 0.11, 0.15);
 const ACCENT_SOFT_FILL_ALPHA: f32 = 0.14;
-
 #[derive(Clone, Copy)]
 pub struct ProviderLoginStates<'a> {
     pub codex: Option<&'a CodexLoginState>,
@@ -66,6 +68,8 @@ pub struct ProviderLoginStates<'a> {
     pub gemini: Option<&'a GeminiLoginState>,
     pub copilot: Option<&'a CopilotLoginState>,
     pub minimax: Option<&'a MinimaxLoginState>,
+    pub opencode_go: Option<&'a OpencodeGoLoginState>,
+    pub ollama_cloud: Option<&'a OllamaCloudLoginState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -365,9 +369,9 @@ fn settings_category_row(
         update_available(update_status),
     )]
     .spacing(8)
-    .width(Length::Fill);
+    .width(Length::Shrink);
     let providers = ProviderId::ALL;
-    providers
+    let tabs = providers
         .into_iter()
         .fold(row, |row, provider| {
             let target_route = SettingsRoute::Provider(provider);
@@ -378,7 +382,10 @@ fn settings_category_row(
                 target_route,
                 false,
             ))
-        })
+        });
+    scrollable(tabs)
+        .horizontal()
+        .width(Length::Fill)
         .into()
 }
 
@@ -405,13 +412,13 @@ fn settings_category_tab(
             .spacing(5)
             .align_y(Alignment::Center),
         )
-        .width(Length::Fill)
+        .width(Length::Shrink)
         .align_x(Alignment::Center)
         .into()
     } else {
         widget::text(label)
             .size(PROVIDER_TAB_LABEL_SIZE)
-            .width(Length::Fill)
+            .width(Length::Shrink)
             .align_x(Alignment::Center)
             .into()
     };
@@ -421,14 +428,14 @@ fn settings_category_tab(
             .align_x(Alignment::Center)
             .width(Length::Fill),
     )
-    .width(Length::Fill)
+    .width(Length::Shrink)
     .padding([5, 9])
     .align_x(Alignment::Center);
 
     Element::from(
         widget::button::custom(content)
             .class(settings_category_tab_class(selected))
-            .width(Length::FillPortion(1))
+            .width(Length::Fixed(PROVIDER_TAB_MIN_WIDTH))
             .on_press(Message::NavigateTo(PopupRoute::Settings(route))),
     )
 }

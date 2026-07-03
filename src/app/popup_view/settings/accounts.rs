@@ -3,12 +3,14 @@ mod rows;
 
 use self::login_controls::{
     claude_login_controls, codex_login_controls, copilot_login_controls, cursor_scan_controls,
-    gemini_login_controls, minimax_login_controls,
+    gemini_login_controls, minimax_login_controls, ollama_cloud_login_controls,
+    opencode_go_login_controls,
 };
 use self::rows::{
     account_selector_list, claude_account_settings_row, codex_account_settings_row,
     copilot_account_settings_row, cursor_account_settings_row, gemini_account_settings_row,
-    minimax_account_settings_row, show_all_accounts_row,
+    minimax_account_settings_row, ollama_cloud_account_settings_row, opencode_go_account_settings_row,
+    show_all_accounts_row,
 };
 use super::super::{
     AppState, Config, Element, Length, Message, ProviderId, ProviderLoginStates, fl,
@@ -20,6 +22,8 @@ use crate::providers::copilot::CopilotLoginState;
 use crate::providers::cursor::CursorScanState;
 use crate::providers::gemini::GeminiLoginState;
 use crate::providers::minimax::MinimaxLoginState;
+use crate::providers::opencode_go::OpencodeGoLoginState;
+use crate::providers::ollama_cloud::OllamaCloudLoginState;
 
 pub(super) fn provider_settings_view<'a>(
     state: &'a AppState,
@@ -45,6 +49,12 @@ pub(super) fn provider_settings_view<'a>(
         ProviderId::Gemini => gemini_accounts_section(state, config, logins.gemini, enabled),
         ProviderId::Copilot => copilot_accounts_section(state, config, logins.copilot, enabled),
         ProviderId::Minimax => minimax_accounts_section(state, config, logins.minimax, enabled),
+        ProviderId::OpencodeGo => {
+            opencode_go_accounts_section(state, config, logins.opencode_go, enabled)
+        }
+        ProviderId::OllamaCloud => {
+            ollama_cloud_accounts_section(state, config, logins.ollama_cloud, enabled)
+        }
     };
 
     Element::from(
@@ -412,6 +422,132 @@ fn minimax_accounts_section<'a>(
 
     settings_block_enabled(
         widget::text("Minimax Accounts").size(16).into(),
+        rows,
+        enabled,
+    )
+}
+
+fn opencode_go_accounts_section<'a>(
+    state: &'a AppState,
+    config: &'a Config,
+    opencode_go_login: Option<&'a OpencodeGoLoginState>,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let opencode_go = state.provider(ProviderId::OpencodeGo);
+    let selected_ids: Vec<&str> = opencode_go
+        .map(|provider| {
+            provider
+                .selected_account_ids
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let accounts = state.accounts_for(ProviderId::OpencodeGo);
+    let active_id = opencode_go.and_then(|provider| provider.system_active_account_id.as_deref());
+    let mut rows = cosmic::iced::widget::column![]
+        .spacing(8)
+        .width(Length::Fill);
+
+    if accounts.is_empty() {
+        rows = rows.push(widget::text(fl!("opencode-go-accounts-empty")).size(13));
+    } else {
+        let mut account_rows = cosmic::iced::widget::column![]
+            .spacing(6)
+            .width(Length::Fill);
+        for account in &accounts {
+            account_rows = account_rows.push(opencode_go_account_settings_row(
+                account,
+                &selected_ids,
+                active_id,
+                config,
+                enabled,
+            ));
+        }
+        rows = rows.push(account_selector_list(account_rows));
+    }
+
+    if let Some(provider) = opencode_go
+        && provider.account_status == crate::model::AccountSelectionStatus::SelectionRequired
+    {
+        rows = rows.push(widget::text(fl!("opencode-go-account-select-required")).size(13));
+    }
+
+    if accounts.len() > 1 {
+        rows = rows.push(show_all_accounts_row(
+            ProviderId::OpencodeGo,
+            config.show_all_accounts(ProviderId::OpencodeGo),
+            enabled,
+        ));
+    }
+
+    rows = rows.push(opencode_go_login_controls(opencode_go_login, enabled));
+
+    settings_block_enabled(
+        widget::text("OpenCode Go Accounts").size(16).into(),
+        rows,
+        enabled,
+    )
+}
+
+fn ollama_cloud_accounts_section<'a>(
+    state: &'a AppState,
+    config: &'a Config,
+    ollama_cloud_login: Option<&'a OllamaCloudLoginState>,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let ollama_cloud = state.provider(ProviderId::OllamaCloud);
+    let selected_ids: Vec<&str> = ollama_cloud
+        .map(|provider| {
+            provider
+                .selected_account_ids
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let accounts = state.accounts_for(ProviderId::OllamaCloud);
+    let active_id = ollama_cloud.and_then(|provider| provider.system_active_account_id.as_deref());
+    let mut rows = cosmic::iced::widget::column![]
+        .spacing(8)
+        .width(Length::Fill);
+
+    if accounts.is_empty() {
+        rows = rows.push(widget::text(fl!("ollama-cloud-accounts-empty")).size(13));
+    } else {
+        let mut account_rows = cosmic::iced::widget::column![]
+            .spacing(6)
+            .width(Length::Fill);
+        for account in &accounts {
+            account_rows = account_rows.push(ollama_cloud_account_settings_row(
+                account,
+                &selected_ids,
+                active_id,
+                config,
+                enabled,
+            ));
+        }
+        rows = rows.push(account_selector_list(account_rows));
+    }
+
+    if let Some(provider) = ollama_cloud
+        && provider.account_status == crate::model::AccountSelectionStatus::SelectionRequired
+    {
+        rows = rows.push(widget::text(fl!("ollama-cloud-account-select-required")).size(13));
+    }
+
+    if accounts.len() > 1 {
+        rows = rows.push(show_all_accounts_row(
+            ProviderId::OllamaCloud,
+            config.show_all_accounts(ProviderId::OllamaCloud),
+            enabled,
+        ));
+    }
+
+    rows = rows.push(ollama_cloud_login_controls(ollama_cloud_login, enabled));
+
+    settings_block_enabled(
+        widget::text("Ollama Cloud Accounts").size(16).into(),
         rows,
         enabled,
     )

@@ -6,6 +6,8 @@ mod copilot_adapter;
 mod cursor_adapter;
 mod gemini_adapter;
 mod minimax_adapter;
+mod opencode_go_adapter;
+mod ollama_cloud_adapter;
 
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, host_user_home_dir, paths};
@@ -21,6 +23,8 @@ pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
         ProviderId::Gemini => &GEMINI_ADAPTER,
         ProviderId::Copilot => &COPILOT_ADAPTER,
         ProviderId::Minimax => &MINIMAX_ADAPTER,
+        ProviderId::OpencodeGo => &OPENCODE_GO_ADAPTER,
+        ProviderId::OllamaCloud => &OLLAMA_CLOUD_ADAPTER,
     }
 }
 
@@ -30,6 +34,10 @@ static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAda
 static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
 static COPILOT_ADAPTER: copilot_adapter::CopilotAdapter = copilot_adapter::CopilotAdapter;
 static MINIMAX_ADAPTER: minimax_adapter::MinimaxAdapter = minimax_adapter::MinimaxAdapter;
+static OLLAMA_CLOUD_ADAPTER: ollama_cloud_adapter::OllamaCloudAdapter =
+    ollama_cloud_adapter::OllamaCloudAdapter;
+static OPENCODE_GO_ADAPTER: opencode_go_adapter::OpencodeGoAdapter =
+    opencode_go_adapter::OpencodeGoAdapter;
 
 pub(super) fn reconcile_provider_account_descriptors(
     provider: ProviderId,

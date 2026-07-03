@@ -131,16 +131,21 @@ pub(super) fn badge_with_tooltip(
 }
 
 pub(super) fn account_label_text(label: &str, size: u16) -> Element<'static, Message> {
-    let truncated = truncate_account_label(label);
+    let effective_label = if label.trim().is_empty() {
+        fl!("account-label")
+    } else {
+        label.to_string()
+    };
+    let truncated = truncate_account_label(&effective_label);
     let text = widget::text(truncated.clone())
         .size(size)
         .width(Length::Fill);
-    if truncated == label {
+    if truncated == effective_label {
         return text.into();
     }
     widget::tooltip::tooltip(
         text,
-        widget::text(label.to_string()).size(12),
+        widget::text(effective_label.clone()).size(12),
         widget::tooltip::Position::Top,
     )
     .into()

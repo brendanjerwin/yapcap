@@ -37,6 +37,12 @@ use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, Copi
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
 use crate::providers::minimax::{self, MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
+use crate::providers::opencode_go::{
+    self, OpencodeGoLoginEvent, OpencodeGoLoginState, OpencodeGoLoginStatus,
+};
+use crate::providers::ollama_cloud::{
+    self, OllamaCloudLoginEvent, OllamaCloudLoginState, OllamaCloudLoginStatus,
+};
 use crate::providers::registry;
 use crate::runtime;
 use crate::runtime::ProviderRefreshResult;
@@ -89,6 +95,10 @@ pub struct AppModel {
     copilot_login_handle: Option<Handle>,
     minimax_login: Option<MinimaxLoginState>,
     minimax_login_handle: Option<Handle>,
+    opencode_go_login: Option<OpencodeGoLoginState>,
+    opencode_go_login_handle: Option<Handle>,
+    ollama_cloud_login: Option<OllamaCloudLoginState>,
+    ollama_cloud_login_handle: Option<Handle>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +160,16 @@ pub enum Message {
     StartMinimaxLogin,
     CancelMinimaxLogin,
     MinimaxLoginEvent(Box<MinimaxLoginEvent>),
+    DeleteOpencodeGoAccount(String),
+    ReauthenticateOpencodeGoAccount(String),
+    StartOpencodeGoLogin,
+    CancelOpencodeGoLogin,
+    OpencodeGoLoginEvent(Box<OpencodeGoLoginEvent>),
+    DeleteOllamaCloudAccount(String),
+    ReauthenticateOllamaCloudAccount(String),
+    StartOllamaCloudLogin,
+    CancelOllamaCloudLogin,
+    OllamaCloudLoginEvent(Box<OllamaCloudLoginEvent>),
     DeleteCursorAccount(String),
     ReauthenticateCursorAccount(String),
     StartCursorScan,
@@ -179,6 +199,8 @@ pub(super) struct PopupBodyMeasurements {
     gemini: Option<f32>,
     copilot: Option<f32>,
     minimax: Option<f32>,
+    opencode_go: Option<f32>,
+    ollama_cloud: Option<f32>,
     general_settings: Option<f32>,
     codex_settings: Option<f32>,
     claude_settings: Option<f32>,
@@ -186,6 +208,8 @@ pub(super) struct PopupBodyMeasurements {
     gemini_settings: Option<f32>,
     copilot_settings: Option<f32>,
     minimax_settings: Option<f32>,
+    opencode_go_settings: Option<f32>,
+    ollama_cloud_settings: Option<f32>,
 }
 
 impl PopupBodyMeasurements {
@@ -197,6 +221,8 @@ impl PopupBodyMeasurements {
             ProviderId::Gemini => self.gemini,
             ProviderId::Copilot => self.copilot,
             ProviderId::Minimax => self.minimax,
+            ProviderId::OpencodeGo => self.opencode_go,
+            ProviderId::OllamaCloud => self.ollama_cloud,
         }
     }
 
@@ -208,6 +234,8 @@ impl PopupBodyMeasurements {
             ProviderId::Gemini => self.gemini = Some(height),
             ProviderId::Copilot => self.copilot = Some(height),
             ProviderId::Minimax => self.minimax = Some(height),
+            ProviderId::OpencodeGo => self.opencode_go = Some(height),
+            ProviderId::OllamaCloud => self.ollama_cloud = Some(height),
         }
     }
 
@@ -220,6 +248,12 @@ impl PopupBodyMeasurements {
             SettingsRoute::Provider(ProviderId::Gemini) => self.gemini_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Copilot) => self.copilot_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Minimax) => self.minimax_settings = Some(height),
+            SettingsRoute::Provider(ProviderId::OpencodeGo) => {
+                self.opencode_go_settings = Some(height)
+            }
+            SettingsRoute::Provider(ProviderId::OllamaCloud) => {
+                self.ollama_cloud_settings = Some(height)
+            }
         }
     }
 
@@ -324,6 +358,10 @@ impl cosmic::Application for AppModel {
             copilot_login_handle: None,
             minimax_login: None,
             minimax_login_handle: None,
+            opencode_go_login: None,
+            opencode_go_login_handle: None,
+            ollama_cloud_login: None,
+            ollama_cloud_login_handle: None,
         };
 
         let update_task = update_check_task(0);
@@ -381,6 +419,8 @@ impl cosmic::Application for AppModel {
                 gemini: self.gemini_login.as_ref(),
                 copilot: self.copilot_login.as_ref(),
                 minimax: self.minimax_login.as_ref(),
+                opencode_go: self.opencode_go_login.as_ref(),
+                ollama_cloud: self.ollama_cloud_login.as_ref(),
             },
             self.selected_provider,
             &self.popup_route,
@@ -565,6 +605,28 @@ impl AppModel {
             Message::MinimaxLoginEvent(event) => {
                 return Some(self.handle_minimax_login_event(*event));
             }
+            Message::DeleteOpencodeGoAccount(account_id) => {
+                return Some(self.delete_opencode_go_account(&account_id));
+            }
+            Message::ReauthenticateOpencodeGoAccount(account_id) => {
+                return Some(self.reauthenticate_opencode_go_account(&account_id));
+            }
+            Message::StartOpencodeGoLogin => return Some(self.start_opencode_go_login()),
+            Message::CancelOpencodeGoLogin => self.cancel_opencode_go_login(),
+            Message::OpencodeGoLoginEvent(event) => {
+                return Some(self.handle_opencode_go_login_event(*event));
+            }
+            Message::DeleteOllamaCloudAccount(account_id) => {
+                return Some(self.delete_ollama_cloud_account(&account_id));
+            }
+            Message::ReauthenticateOllamaCloudAccount(account_id) => {
+                return Some(self.reauthenticate_ollama_cloud_account(&account_id));
+            }
+            Message::StartOllamaCloudLogin => return Some(self.start_ollama_cloud_login()),
+            Message::CancelOllamaCloudLogin => self.cancel_ollama_cloud_login(),
+            Message::OllamaCloudLoginEvent(event) => {
+                return Some(self.handle_ollama_cloud_login_event(*event));
+            }
             Message::StartClaudeLogin => return Some(self.start_claude_login()),
             Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
             Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
@@ -656,6 +718,12 @@ impl AppModel {
                     }
                     SettingsRoute::Provider(ProviderId::Minimax) => {
                         self.popup_body_measurements.minimax_settings
+                    }
+                    SettingsRoute::Provider(ProviderId::OpencodeGo) => {
+                        self.popup_body_measurements.opencode_go_settings
+                    }
+                    SettingsRoute::Provider(ProviderId::OllamaCloud) => {
+                        self.popup_body_measurements.ollama_cloud_settings
                     }
                 };
                 self.popup_body_measurements.set_settings(route, height);

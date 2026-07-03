@@ -252,6 +252,8 @@ impl ProviderAccountStorage {
             ProviderId::Gemini => "gemini",
             ProviderId::Copilot => "copilot",
             ProviderId::Minimax => "minimax",
+            ProviderId::OpencodeGo => "opencode-go",
+            ProviderId::OllamaCloud => "ollama-cloud",
         };
         let millis = Utc::now().timestamp_millis();
         format!("{prefix}-{millis}-{}", std::process::id())

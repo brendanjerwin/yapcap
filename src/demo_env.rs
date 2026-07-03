@@ -133,6 +133,8 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::Gemini => GEMINI_PRIMARY_ID,
         ProviderId::Copilot => return None,
         ProviderId::Minimax => return None,
+        ProviderId::OpencodeGo => return None,
+        ProviderId::OllamaCloud => return None,
     };
     Some(id.to_string())
 }
@@ -142,7 +144,7 @@ fn demo_source(provider: ProviderId) -> String {
         ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini | ProviderId::Copilot => {
             "OAuth".to_string()
         }
-        ProviderId::Cursor | ProviderId::Minimax => "Managed Account".to_string(),
+        ProviderId::Cursor | ProviderId::Minimax | ProviderId::OpencodeGo | ProviderId::OllamaCloud => "Managed Account".to_string(),
     }
 }
 
@@ -264,6 +266,8 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
             ),
         ],
         ProviderId::Minimax => vec![],
+        ProviderId::OpencodeGo => vec![],
+        ProviderId::OllamaCloud => vec![],
     }
 }
 

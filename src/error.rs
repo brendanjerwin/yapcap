@@ -54,6 +54,18 @@ impl From<MinimaxError> for AppError {
     }
 }
 
+impl From<OpencodeGoError> for AppError {
+    fn from(value: OpencodeGoError) -> Self {
+        Self::Provider(ProviderError::OpencodeGo(value))
+    }
+}
+
+impl From<OllamaCloudError> for AppError {
+    fn from(value: OllamaCloudError) -> Self {
+        Self::Provider(ProviderError::OllamaCloud(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -163,6 +175,10 @@ pub enum ProviderError {
     Copilot(#[from] CopilotError),
     #[error(transparent)]
     Minimax(#[from] MinimaxError),
+    #[error(transparent)]
+    OpencodeGo(#[from] OpencodeGoError),
+    #[error(transparent)]
+    OllamaCloud(#[from] OllamaCloudError),
 }
 
 impl ProviderError {
@@ -175,6 +191,8 @@ impl ProviderError {
             Self::Gemini(error) => error.is_network_unavailable(),
             Self::Copilot(error) => error.is_network_unavailable(),
             Self::Minimax(error) => error.is_network_unavailable(),
+            Self::OllamaCloud(error) => error.is_network_unavailable(),
+            Self::OpencodeGo(error) => error.is_network_unavailable(),
         }
     }
 
@@ -187,6 +205,8 @@ impl ProviderError {
             Self::Gemini(error) => error.requires_user_action(),
             Self::Copilot(error) => error.requires_user_action(),
             Self::Minimax(error) => error.requires_user_action(),
+            Self::OllamaCloud(error) => error.requires_user_action(),
+            Self::OpencodeGo(error) => error.requires_user_action(),
         }
     }
 
@@ -198,7 +218,9 @@ impl ProviderError {
             Self::Cursor(_) => false,
             Self::Gemini(error) => error.is_transient(),
             Self::Copilot(error) => error.is_transient(),
+            Self::OllamaCloud(error) => error.is_transient(),
             Self::Minimax(error) => error.is_transient(),
+            Self::OpencodeGo(error) => error.is_transient(),
         }
     }
 }
@@ -645,6 +667,118 @@ impl MinimaxError {
             Self::RateLimited { .. } => true,
             Self::UsageRequest(source) => request_could_not_reach_network(source),
             Self::UsageHttp { status } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum OpencodeGoError {
+    #[error("OpenCode Go login required")]
+    LoginRequired,
+    #[error("OpenCode Go dashboard request failed")]
+    DashboardRequest(#[source] reqwest::Error),
+    #[error("OpenCode Go dashboard returned HTTP {status}")]
+    DashboardHttp { status: u16 },
+    #[error("OpenCode Go dashboard endpoint returned error")]
+    DashboardEndpoint(#[source] reqwest::Error),
+    #[error("failed to read OpenCode Go dashboard response")]
+    ReadDashboard(#[source] reqwest::Error),
+    #[error("failed to parse OpenCode Go dashboard usage data")]
+    ParseDashboard,
+    #[error("Rate limited by OpenCode Go — will retry automatically")]
+    RateLimited { retry_after_secs: Option<u64> },
+}
+
+impl OpencodeGoError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::LoginRequired)
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            Self::DashboardHttp { status } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum OllamaCloudError {
+    #[error("Ollama Cloud login required")]
+    LoginRequired,
+    #[error("Ollama Cloud dashboard request failed")]
+    DashboardRequest(#[source] reqwest::Error),
+    #[error("Ollama Cloud dashboard returned HTTP {status}")]
+    DashboardHttp { status: u16 },
+    #[error("Ollama Cloud dashboard endpoint returned error")]
+    DashboardEndpoint(#[source] reqwest::Error),
+    #[error("failed to read Ollama Cloud dashboard response")]
+    ReadDashboard(#[source] reqwest::Error),
+    #[error("failed to parse Ollama Cloud dashboard usage data")]
+    ParseDashboard,
+    #[error("Rate limited by Ollama Cloud — will retry automatically")]
+    RateLimited { retry_after_secs: Option<u64> },
+}
+
+impl OllamaCloudError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        matches!(self, Self::LoginRequired)
+    }
+
+    #[must_use]
+    pub fn is_rate_limited(&self) -> bool {
+        matches!(self, Self::RateLimited { .. })
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            Self::DashboardHttp { status } => *status >= 500,
             _ => false,
         }
     }

@@ -4,6 +4,8 @@ use super::super::super::{
     GeminiLoginStatus, Length, Message, fl, row, widget,
 };
 use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
+use crate::providers::opencode_go::{OpencodeGoLoginEvent, OpencodeGoLoginState, OpencodeGoLoginStatus};
+use crate::providers::ollama_cloud::{OllamaCloudLoginEvent, OllamaCloudLoginState, OllamaCloudLoginStatus};
 
 pub(super) fn codex_login_controls(
     login: Option<&CodexLoginState>,
@@ -427,5 +429,167 @@ fn minimax_login_status(login: &MinimaxLoginState) -> String {
             .error
             .clone()
             .unwrap_or_else(|| fl!("minimax-login-failed")),
+    }
+}
+
+pub(super) fn opencode_go_login_controls(
+    login: Option<&OpencodeGoLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(enabled.then_some(Message::StartOpencodeGoLogin))
+            .into();
+    };
+
+    let mut content = if let Some(error) = &login.error {
+        cosmic::iced::widget::column![
+            widget::text(opencode_go_login_status(login)).size(13),
+            widget::text(error).size(13)
+        ]
+        .spacing(10)
+    } else {
+        cosmic::iced::widget::column![widget::text(opencode_go_login_status(login)).size(13)]
+            .spacing(10)
+    };
+
+    content = content.width(Length::Fill);
+
+    if login.status == OpencodeGoLoginStatus::Editing {
+        content = content.push(widget::text(fl!("opencode-go-workspace-id-placeholder")).size(12));
+        content = content.push(
+            widget::text_input(fl!("opencode-go-workspace-id-placeholder"), &login.workspace_id)
+                .on_input(|workspace_id| {
+                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::WorkspaceIdChanged(workspace_id)))
+                })
+                .on_submit(|_| Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::Saved)))
+                .width(Length::Fill),
+        );
+        content = content.push(widget::text(fl!("opencode-go-auth-cookie-placeholder")).size(12));
+        content = content.push(
+            widget::text_input(fl!("opencode-go-auth-cookie-placeholder"), &login.auth_cookie)
+                .on_input(|auth_cookie| {
+                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::AuthCookieChanged(auth_cookie)))
+                })
+                .on_submit(|_| Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::Saved)))
+                .width(Length::Fill),
+        );
+        content = content.push(widget::text(fl!("account-label")).size(12));
+        content = content.push(
+            widget::text_input(fl!("account-label"), &login.label)
+                .on_input(|label| {
+                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::LabelChanged(label)))
+                })
+                .width(Length::Fill),
+        );
+        content = content.push(
+            row![
+                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
+                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::Saved))
+                )),
+                widget::button::text(fl!("account-cancel"))
+                    .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
+            ]
+            .spacing(8),
+        );
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another"))
+                    .on_press_maybe(enabled.then_some(Message::StartOpencodeGoLogin)),
+                widget::button::text(fl!("account-dismiss"))
+                    .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn opencode_go_login_status(login: &OpencodeGoLoginState) -> String {
+    match login.status {
+        OpencodeGoLoginStatus::Editing => fl!("opencode-go-login-editing"),
+        OpencodeGoLoginStatus::Saved => fl!("opencode-go-login-saved"),
+        OpencodeGoLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("opencode-go-login-failed")),
+    }
+}
+pub(super) fn ollama_cloud_login_controls(
+    login: Option<&OllamaCloudLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(enabled.then_some(Message::StartOllamaCloudLogin))
+            .into();
+    };
+
+    let mut content = if let Some(error) = &login.error {
+        cosmic::iced::widget::column![
+            widget::text(ollama_cloud_login_status(login)).size(13),
+            widget::text(error).size(13)
+        ]
+        .spacing(10)
+    } else {
+        cosmic::iced::widget::column![widget::text(ollama_cloud_login_status(login)).size(13)]
+            .spacing(10)
+    };
+
+    content = content.width(Length::Fill);
+
+    if login.status == OllamaCloudLoginStatus::Editing {
+        content = content.push(widget::text(fl!("ollama-cloud-session-cookie-placeholder")).size(12));
+        content = content.push(
+            widget::text_input(fl!("ollama-cloud-session-cookie-placeholder"), &login.session_cookie)
+                .on_input(|session_cookie| {
+                    Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::SessionCookieChanged(session_cookie)))
+                })
+                .on_submit(|_| Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::Saved)))
+                .width(Length::Fill),
+        );
+        content = content.push(widget::text(fl!("account-label")).size(12));
+        content = content.push(
+            widget::text_input(fl!("account-label"), &login.label)
+                .on_input(|label| {
+                    Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::LabelChanged(label)))
+                })
+                .width(Length::Fill),
+        );
+        content = content.push(
+            row![
+                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
+                    Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::Saved))
+                )),
+                widget::button::text(fl!("account-cancel"))
+                    .on_press_maybe(enabled.then_some(Message::CancelOllamaCloudLogin)),
+            ]
+            .spacing(8),
+        );
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another"))
+                    .on_press_maybe(enabled.then_some(Message::StartOllamaCloudLogin)),
+                widget::button::text(fl!("account-dismiss"))
+                    .on_press_maybe(enabled.then_some(Message::CancelOllamaCloudLogin)),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn ollama_cloud_login_status(login: &OllamaCloudLoginState) -> String {
+    match login.status {
+        OllamaCloudLoginStatus::Editing => fl!("ollama-cloud-login-editing"),
+        OllamaCloudLoginStatus::Saved => fl!("ollama-cloud-login-saved"),
+        OllamaCloudLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("ollama-cloud-login-failed")),
     }
 }

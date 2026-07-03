@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 500]
+#[version = 600]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -26,6 +26,10 @@ pub struct Config {
     pub copilot_enabled: bool,
     #[serde(default = "default_minimax_enabled")]
     pub minimax_enabled: bool,
+    #[serde(default = "default_opencode_go_enabled")]
+    pub opencode_go_enabled: bool,
+    #[serde(default = "default_ollama_cloud_enabled")]
+    pub ollama_cloud_enabled: bool,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -46,6 +50,14 @@ pub struct Config {
     pub selected_minimax_account_ids: Vec<String>,
     #[serde(default)]
     pub minimax_managed_accounts: Vec<ManagedMinimaxAccountConfig>,
+    #[serde(default)]
+    pub selected_opencode_go_account_ids: Vec<String>,
+    #[serde(default)]
+    pub opencode_go_managed_accounts: Vec<ManagedOpencodeGoAccountConfig>,
+    #[serde(default)]
+    pub selected_ollama_cloud_account_ids: Vec<String>,
+    #[serde(default)]
+    pub ollama_cloud_managed_accounts: Vec<ManagedOllamaCloudAccountConfig>,
     pub log_level: String,
 }
 
@@ -58,6 +70,14 @@ fn default_copilot_enabled() -> bool {
 }
 
 fn default_minimax_enabled() -> bool {
+    true
+}
+
+fn default_opencode_go_enabled() -> bool {
+    true
+}
+
+fn default_ollama_cloud_enabled() -> bool {
     true
 }
 
@@ -75,6 +95,8 @@ impl Default for Config {
             gemini_enabled: true,
             copilot_enabled: true,
             minimax_enabled: true,
+            opencode_go_enabled: true,
+            ollama_cloud_enabled: true,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -88,6 +110,10 @@ impl Default for Config {
             copilot_managed_accounts: Vec::new(),
             selected_minimax_account_ids: Vec::new(),
             minimax_managed_accounts: Vec::new(),
+            selected_opencode_go_account_ids: Vec::new(),
+            opencode_go_managed_accounts: Vec::new(),
+            selected_ollama_cloud_account_ids: Vec::new(),
+            ollama_cloud_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -107,6 +133,8 @@ impl Config {
             ProviderId::Gemini => self.gemini_enabled,
             ProviderId::Copilot => self.copilot_enabled,
             ProviderId::Minimax => self.minimax_enabled,
+            ProviderId::OpencodeGo => self.opencode_go_enabled,
+            ProviderId::OllamaCloud => self.ollama_cloud_enabled,
         }
     }
 
@@ -119,6 +147,8 @@ impl Config {
             ProviderId::Gemini => &self.selected_gemini_account_ids,
             ProviderId::Copilot => &self.selected_copilot_account_ids,
             ProviderId::Minimax => &self.selected_minimax_account_ids,
+            ProviderId::OpencodeGo => &self.selected_opencode_go_account_ids,
+            ProviderId::OllamaCloud => &self.selected_ollama_cloud_account_ids,
         }
     }
 
@@ -130,6 +160,8 @@ impl Config {
             ProviderId::Gemini => &mut self.selected_gemini_account_ids,
             ProviderId::Copilot => &mut self.selected_copilot_account_ids,
             ProviderId::Minimax => &mut self.selected_minimax_account_ids,
+            ProviderId::OpencodeGo => &mut self.selected_opencode_go_account_ids,
+            ProviderId::OllamaCloud => &mut self.selected_ollama_cloud_account_ids,
         }
     }
 
@@ -154,6 +186,8 @@ impl Config {
             ProviderId::Gemini => &mut self.gemini_enabled,
             ProviderId::Copilot => &mut self.copilot_enabled,
             ProviderId::Minimax => &mut self.minimax_enabled,
+            ProviderId::OpencodeGo => &mut self.opencode_go_enabled,
+            ProviderId::OllamaCloud => &mut self.ollama_cloud_enabled,
         };
         let changed = *target != enabled;
         *target = enabled;
@@ -275,6 +309,27 @@ pub struct ManagedMinimaxAccountConfig {
     pub last_authenticated_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedOpencodeGoAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub workspace_id: String,
+    pub auth_cookie_source: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedOllamaCloudAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub session_cookie_source: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
 fn deserialize_cursor_email<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: Deserializer<'de>,
@@ -301,6 +356,8 @@ pub struct AppPaths {
     pub gemini_accounts_dir: PathBuf,
     pub copilot_accounts_dir: PathBuf,
     pub minimax_accounts_dir: PathBuf,
+    pub opencode_go_accounts_dir: PathBuf,
+    pub ollama_cloud_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -410,6 +467,16 @@ pub fn managed_minimax_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn managed_opencode_go_account_dir(account_id: &str) -> PathBuf {
+    paths().opencode_go_accounts_dir.join(account_id)
+}
+
+#[must_use]
+pub fn managed_ollama_cloud_account_dir(account_id: &str) -> PathBuf {
+    paths().ollama_cloud_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn paths() -> AppPaths {
     let cache_root = cache_root_dir();
     let state_root = state_parent_dir();
@@ -421,6 +488,8 @@ pub fn paths() -> AppPaths {
     let gemini_accounts_dir = state_dir.join("gemini-accounts");
     let copilot_accounts_dir = state_dir.join("copilot-accounts");
     let minimax_accounts_dir = state_dir.join("minimax-accounts");
+    let opencode_go_accounts_dir = state_dir.join("opencode-go-accounts");
+    let ollama_cloud_accounts_dir = state_dir.join("ollama-cloud-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         snapshot_file: cache_dir.join("snapshots.json"),
@@ -431,6 +500,8 @@ pub fn paths() -> AppPaths {
         gemini_accounts_dir,
         copilot_accounts_dir,
         minimax_accounts_dir,
+        ollama_cloud_accounts_dir,
+        opencode_go_accounts_dir,
         log_dir,
     }
 }
@@ -461,13 +532,14 @@ mod tests {
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 500);
+        assert_eq!(Config::VERSION, 600);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());
         assert!(config.gemini_managed_accounts.is_empty());
         assert!(config.copilot_managed_accounts.is_empty());
         assert!(config.minimax_managed_accounts.is_empty());
+        assert!(config.opencode_go_managed_accounts.is_empty());
     }
 
     #[test]

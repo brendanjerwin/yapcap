@@ -41,6 +41,18 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Minimax, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/minimax-reversed.svg")
         }
+        (ProviderId::OpencodeGo, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/opencode-go.svg")
+        }
+        (ProviderId::OpencodeGo, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/opencode-go-reversed.svg")
+        }
+        (ProviderId::OllamaCloud, ProviderIconVariant::Default) => {
+            include_bytes!("../../resources/providers/ollama-cloud.svg")
+        }
+        (ProviderId::OllamaCloud, ProviderIconVariant::Reversed) => {
+            include_bytes!("../../resources/providers/ollama-cloud-reversed.svg")
+        }
     };
 
     icon::from_svg_bytes(bytes)

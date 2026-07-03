@@ -3,9 +3,11 @@ use super::{
     CodexLoginState, CodexLoginStatus, CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus,
     CursorScanResult, CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
     ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
-    MinimaxLoginEvent, MinimaxLoginStatus, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
-    Task, claude, codex, copilot, cursor, gemini, minimax, refresh_provider_task,
-    refresh_provider_tasks, runtime,
+    MinimaxLoginEvent, MinimaxLoginStatus, OpencodeGoLoginEvent, OpencodeGoLoginStatus,
+    ProviderAccountRuntimeState, ProviderHealth, ProviderId, Task, claude, codex, copilot, cursor,
+    OllamaCloudLoginEvent, OllamaCloudLoginStatus,
+    gemini, minimax, opencode_go, refresh_provider_task, refresh_provider_tasks, runtime,
+    ollama_cloud,
 };
 
 impl AppModel {
@@ -887,6 +889,236 @@ impl AppModel {
                 if let Some(login) = self.minimax_login.as_mut() {
                     login.error = Some(error);
                     login.status = MinimaxLoginStatus::Failed;
+                }
+                Task::none()
+            }
+        }
+    }
+}
+
+impl AppModel {
+    pub(super) fn reauthenticate_opencode_go_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .opencode_go_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        self.start_opencode_go_login()
+    }
+
+    pub(super) fn start_opencode_go_login(&mut self) -> Task<Message> {
+        if self
+            .opencode_go_login
+            .as_ref()
+            .is_some_and(|login| login.status == OpencodeGoLoginStatus::Editing)
+        {
+            return Task::none();
+        }
+        self.opencode_go_login = None;
+        let state = opencode_go::prepare_login();
+        self.opencode_go_login = Some(state);
+        Task::none()
+    }
+
+    pub(super) fn cancel_opencode_go_login(&mut self) {
+        if let Some(handle) = self.opencode_go_login_handle.take() {
+            handle.abort();
+        }
+        self.opencode_go_login = None;
+    }
+
+    pub(super) fn handle_opencode_go_login_event(
+        &mut self,
+        event: OpencodeGoLoginEvent,
+    ) -> Task<Message> {
+        match event {
+            OpencodeGoLoginEvent::Started => Task::none(),
+            OpencodeGoLoginEvent::WorkspaceIdChanged(workspace_id) => {
+                if let Some(login) = self.opencode_go_login.as_mut() {
+                    login.update_workspace_id(workspace_id);
+                }
+                Task::none()
+            }
+            OpencodeGoLoginEvent::AuthCookieChanged(auth_cookie) => {
+                if let Some(login) = self.opencode_go_login.as_mut() {
+                    login.update_auth_cookie(auth_cookie);
+                }
+                Task::none()
+            }
+            OpencodeGoLoginEvent::LabelChanged(label) => {
+                if let Some(login) = self.opencode_go_login.as_mut() {
+                    login.update_label(label);
+                }
+                Task::none()
+            }
+            OpencodeGoLoginEvent::Saved => {
+                let Some(login) = self.opencode_go_login.as_ref() else {
+                    return Task::none();
+                };
+                match login.save(&mut self.config) {
+                    Ok(managed_account) => {
+                        self.opencode_go_login_handle = None;
+                        let account_id = managed_account.id.clone();
+                        let account_label = managed_account.label.clone();
+                        self.write_config(|new_config| {
+                            opencode_go::account::apply_login_account(
+                                new_config,
+                                managed_account,
+                            );
+                        });
+                        let mut account = ProviderAccountRuntimeState::empty(
+                            ProviderId::OpencodeGo,
+                            account_id.clone(),
+                            account_label,
+                        );
+                        account.auth_state = crate::model::AuthState::Ready;
+                        account.error = None;
+                        self.state.upsert_account(account);
+                        if let Some(provider) = self.state.provider_mut(ProviderId::OpencodeGo) {
+                            provider.account_status = AccountSelectionStatus::Ready;
+                            provider.error = None;
+                            // Add the new account to selected ids if not already there
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id.clone());
+                            }
+                        }
+                        runtime::persist_state(&self.state);
+                        let login = self.opencode_go_login.as_mut().unwrap();
+                        login.status = OpencodeGoLoginStatus::Saved;
+                        refresh_provider_task(&self.config, &mut self.state, ProviderId::OpencodeGo)
+                    }
+                    Err(error) => {
+                        if let Some(login) = self.opencode_go_login.as_mut() {
+                            login.error = Some(error);
+                            login.status = OpencodeGoLoginStatus::Failed;
+                        }
+                        Task::none()
+                    }
+                }
+            }
+            OpencodeGoLoginEvent::Cancelled => {
+                self.cancel_opencode_go_login();
+                Task::none()
+            }
+            OpencodeGoLoginEvent::Failed(error) => {
+                if let Some(login) = self.opencode_go_login.as_mut() {
+                    login.error = Some(error);
+                    login.status = OpencodeGoLoginStatus::Failed;
+                }
+                Task::none()
+            }
+        }
+    }
+}
+
+impl AppModel {
+    pub(super) fn reauthenticate_ollama_cloud_account(&mut self, account_id: &str) -> Task<Message> {
+        if self
+            .config
+            .ollama_cloud_managed_accounts
+            .iter()
+            .all(|a| a.id != account_id)
+        {
+            return Task::none();
+        }
+        self.start_ollama_cloud_login()
+    }
+
+    pub(super) fn start_ollama_cloud_login(&mut self) -> Task<Message> {
+        if self
+            .ollama_cloud_login
+            .as_ref()
+            .is_some_and(|login| login.status == OllamaCloudLoginStatus::Editing)
+        {
+            return Task::none();
+        }
+        self.ollama_cloud_login = None;
+        let state = ollama_cloud::prepare_login();
+        self.ollama_cloud_login = Some(state);
+        Task::none()
+    }
+
+    pub(super) fn cancel_ollama_cloud_login(&mut self) {
+        if let Some(handle) = self.ollama_cloud_login_handle.take() {
+            handle.abort();
+        }
+        self.ollama_cloud_login = None;
+    }
+
+    pub(super) fn handle_ollama_cloud_login_event(
+        &mut self,
+        event: OllamaCloudLoginEvent,
+    ) -> Task<Message> {
+        match event {
+            OllamaCloudLoginEvent::Started => Task::none(),
+            OllamaCloudLoginEvent::SessionCookieChanged(session_cookie) => {
+                if let Some(login) = self.ollama_cloud_login.as_mut() {
+                    login.update_session_cookie(session_cookie);
+                }
+                Task::none()
+            }
+            OllamaCloudLoginEvent::LabelChanged(label) => {
+                if let Some(login) = self.ollama_cloud_login.as_mut() {
+                    login.update_label(label);
+                }
+                Task::none()
+            }
+            OllamaCloudLoginEvent::Saved => {
+                let Some(login) = self.ollama_cloud_login.as_ref() else {
+                    return Task::none();
+                };
+                match login.save(&mut self.config) {
+                    Ok(managed_account) => {
+                        self.ollama_cloud_login_handle = None;
+                        let account_id = managed_account.id.clone();
+                        let account_label = managed_account.label.clone();
+                        self.write_config(|new_config| {
+                            ollama_cloud::account::apply_login_account(
+                                new_config,
+                                managed_account,
+                            );
+                        });
+                        let mut account = ProviderAccountRuntimeState::empty(
+                            ProviderId::OllamaCloud,
+                            account_id.clone(),
+                            account_label,
+                        );
+                        account.auth_state = crate::model::AuthState::Ready;
+                        account.error = None;
+                        self.state.upsert_account(account);
+                        if let Some(provider) = self.state.provider_mut(ProviderId::OllamaCloud) {
+                            provider.account_status = AccountSelectionStatus::Ready;
+                            provider.error = None;
+                            // Add the new account to selected ids if not already there
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id.clone());
+                            }
+                        }
+                        runtime::persist_state(&self.state);
+                        let login = self.ollama_cloud_login.as_mut().unwrap();
+                        login.status = OllamaCloudLoginStatus::Saved;
+                        refresh_provider_task(&self.config, &mut self.state, ProviderId::OllamaCloud)
+                    }
+                    Err(error) => {
+                        if let Some(login) = self.ollama_cloud_login.as_mut() {
+                            login.error = Some(error);
+                            login.status = OllamaCloudLoginStatus::Failed;
+                        }
+                        Task::none()
+                    }
+                }
+            }
+            OllamaCloudLoginEvent::Cancelled => {
+                self.cancel_ollama_cloud_login();
+                Task::none()
+            }
+            OllamaCloudLoginEvent::Failed(error) => {
+                if let Some(login) = self.ollama_cloud_login.as_mut() {
+                    login.error = Some(error);
+                    login.status = OllamaCloudLoginStatus::Failed;
                 }
                 Task::none()
             }

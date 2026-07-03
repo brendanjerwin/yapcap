@@ -8,4 +8,6 @@ pub mod cursor;
 pub mod gemini;
 pub mod interface;
 pub mod minimax;
+pub mod opencode_go;
+pub mod ollama_cloud;
 pub mod registry;
