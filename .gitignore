@@ -24,3 +24,4 @@ debian/*
 !debian/install
 !debian/rules
 !debian/source
+mutants.out/
