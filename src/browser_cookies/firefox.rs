@@ -232,3 +232,82 @@ fn extract_workspace_id(url: &str) -> Option<String> {
         None
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_workspace_id_simple() {
+        let url = "https://opencode.ai/workspace/wrk_01KFTT8TJ78XXG19NX1NY1PF5R";
+        assert_eq!(
+            extract_workspace_id(url),
+            Some("wrk_01KFTT8TJ78XXG19NX1NY1PF5R".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_workspace_id_with_go_suffix() {
+        let url = "https://opencode.ai/workspace/wrk_01KFTT8TJ78XXG19NX1NY1PF5R/go";
+        assert_eq!(
+            extract_workspace_id(url),
+            Some("wrk_01KFTT8TJ78XXG19NX1NY1PF5R".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_workspace_id_with_usage_suffix() {
+        let url = "https://opencode.ai/workspace/wrk_abc/usage";
+        assert_eq!(extract_workspace_id(url), Some("wrk_abc".to_string()));
+    }
+
+    #[test]
+    fn extract_workspace_id_rejects_wrong_prefix() {
+        let url = "https://opencode.ai/workspace/notwrk_123";
+        assert_eq!(extract_workspace_id(url), None);
+    }
+
+    #[test]
+    fn extract_workspace_id_no_marker() {
+        let url = "https://opencode.ai/no-workspace-here";
+        assert_eq!(extract_workspace_id(url), None);
+    }
+
+    #[test]
+    fn extract_workspace_id_empty_after_marker() {
+        let url = "https://opencode.ai/workspace/";
+        assert_eq!(extract_workspace_id(url), None);
+    }
+
+    #[test]
+    fn extract_workspace_id_too_short_after_prefix() {
+        // "wrk_" alone is length 4; the guard requires len > 4
+        let url = "https://opencode.ai/workspace/wrk_";
+        assert_eq!(extract_workspace_id(url), None);
+    }
+
+    #[test]
+    fn extract_workspace_id_empty_url() {
+        assert_eq!(extract_workspace_id(""), None);
+    }
+
+    #[test]
+    fn extract_workspace_id_marker_at_start() {
+        let url = "/workspace/wrk_something/extra";
+        assert_eq!(extract_workspace_id(url), Some("wrk_something".to_string()));
+    }
+
+    #[test]
+    fn extract_workspace_id_preserves_full_id() {
+        let long = "wrk_01KFTT8TJ78XXG19NX1NY1PF5RABCDEFGHIJ";
+        let url = format!("https://opencode.ai/workspace/{}", long);
+        assert_eq!(extract_workspace_id(&url), Some(long.to_string()));
+    }
+
+    #[test]
+    fn extract_workspace_id_ignores_query_string_as_part_of_id() {
+        // No '/' between id and '?' means '?' stays part of id, but it still
+        // starts with wrk_ and is long enough — this documents current behavior.
+        let url = "https://opencode.ai/workspace/wrk_abc?x=1";
+        assert_eq!(extract_workspace_id(url), Some("wrk_abc?x=1".to_string()));
+    }
+}

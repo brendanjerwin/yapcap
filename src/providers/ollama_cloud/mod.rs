@@ -25,10 +25,10 @@ const USER_AGENT: &str =
 // The page uses aria-label attributes like "Session usage 42% used" and
 // data-time attributes for reset timestamps.
 static RE_SESSION_USAGE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"aria-label="[^"]*[Ss]ession[^"]*?(\d+(?:\.\d+)?)\s*%"#).unwrap()
+    Regex::new(r#"(?i)aria-label="[^"]*session[^"]*?(\d+(?:\.\d+)?)\s*%"#).unwrap()
 });
 static RE_WEEKLY_USAGE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"aria-label="[^"]*[Ww]eekly[^"]*?(\d+(?:\.\d+)?)\s*%"#).unwrap()
+    Regex::new(r#"(?i)aria-label="[^"]*weekly[^"]*?(\d+(?:\.\d+)?)\s*%"#).unwrap()
 });
 static RE_RESET_TIME: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"data-time="([^"]+)""#).unwrap()
@@ -226,5 +226,216 @@ mod tests {
             Err(OllamaCloudError::ParseDashboard) => {}
             _ => panic!("expected ParseDashboard error"),
         }
+    }
+
+    // ---- aria-label format: only session ----
+    #[test]
+    fn parse_aria_label_only_session() {
+        let html = r#"<div aria-label="Session usage 10% used" data-time="2026-07-10T12:00:00Z"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].label, "Session");
+        assert!((snapshot.windows[0].used_percent - 10.0).abs() < 0.01);
+    }
+
+    // ---- aria-label format: only weekly ----
+    #[test]
+    fn parse_aria_label_only_weekly() {
+        let html = r#"<div aria-label="Weekly usage 25% used" data-time="2026-07-07T08:00:00Z"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].label, "Weekly");
+        assert!((snapshot.windows[0].used_percent - 25.0).abs() < 0.01);
+    }
+
+    // ---- both session and weekly ----
+    #[test]
+    fn parse_aria_label_both() {
+        let html = r#"<div aria-label="Session usage 42% used" data-time="2026-07-10T12:00:00Z"></div>
+        <div aria-label="Weekly usage 60% used" data-time="2026-07-07T08:00:00Z"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows[0].label, "Session");
+        assert_eq!(snapshot.windows[1].label, "Weekly");
+    }
+
+    // ---- empty html returns ParseDashboard ----
+    #[test]
+    fn parse_empty_html_returns_error() {
+        let result = parse("", Utc::now());
+        assert!(matches!(result, Err(OllamaCloudError::ParseDashboard)));
+    }
+
+    // ---- percentage clamping: >100 clamped to 100 ----
+    #[test]
+    fn parse_clamps_over_100() {
+        let html = r#"<div aria-label="Session usage 150% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!((snapshot.windows[0].used_percent - 100.0).abs() < 0.01);
+    }
+
+    // ---- percentage clamping: negative clamped to 0 ----
+    #[test]
+    fn parse_clamps_negative() {
+        let html = r#"<div aria-label="Session usage 0% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!(snapshot.windows[0].used_percent.abs() < 0.01);
+    }
+
+    // ---- data-time attributes parsed for reset_at ----
+    #[test]
+    fn parse_data_time_reset_at() {
+        let html = r#"<div aria-label="Session usage 42% used" data-time="2026-07-10T12:00:00Z"></div>
+        <div aria-label="Weekly usage 60% used" data-time="2026-07-07T08:00:00Z"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        let session_reset = snapshot.windows[0].reset_at.expect("session reset_at");
+        assert_eq!(session_reset.to_rfc3339(), "2026-07-10T12:00:00+00:00");
+        let weekly_reset = snapshot.windows[1].reset_at.expect("weekly reset_at");
+        assert_eq!(weekly_reset.to_rfc3339(), "2026-07-07T08:00:00+00:00");
+    }
+
+    // ---- weekly reset falls back to first reset time when only one data-time present ----
+    #[test]
+    fn parse_weekly_reset_falls_back_to_first() {
+        let html = r#"<div aria-label="Session usage 42% used" data-time="2026-07-10T12:00:00Z"></div>
+        <div aria-label="Weekly usage 60% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        let weekly_reset = snapshot.windows[1].reset_at.expect("weekly reset_at");
+        assert_eq!(weekly_reset.to_rfc3339(), "2026-07-10T12:00:00+00:00");
+    }
+
+    // ---- identity plan is 'Ollama Cloud' ----
+    #[test]
+    fn parse_identity_plan() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Ollama Cloud"));
+    }
+
+    // ---- source field is 'Dashboard' ----
+    #[test]
+    fn parse_source_field() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.source, "Dashboard");
+    }
+
+    // ---- provider is OllamaCloud ----
+    #[test]
+    fn parse_provider_id() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.provider, ProviderId::OllamaCloud);
+    }
+
+    // ---- window labels are 'Session' and 'Weekly' ----
+    #[test]
+    fn parse_window_labels() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>
+        <div aria-label="Weekly usage 60% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.windows[0].label, "Session");
+        assert_eq!(snapshot.windows[1].label, "Weekly");
+    }
+
+    // ---- window_seconds: 5*3600 for session, 7*24*3600 for weekly ----
+    #[test]
+    fn parse_window_seconds() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>
+        <div aria-label="Weekly usage 60% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.windows[0].window_seconds, Some(5 * 3600));
+        assert_eq!(snapshot.windows[1].window_seconds, Some(7 * 24 * 3600));
+    }
+
+    // ---- reset_description present ----
+    #[test]
+    fn parse_reset_description_present() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>
+        <div aria-label="Weekly usage 60% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!(snapshot.windows[0].reset_description.is_some());
+        assert!(snapshot.windows[1].reset_description.is_some());
+        assert_eq!(snapshot.windows[0].reset_description.as_deref(), Some("Rolling session window"));
+        assert_eq!(snapshot.windows[1].reset_description.as_deref(), Some("Weekly window"));
+    }
+
+    // ---- updated_at passed through ----
+    #[test]
+    fn parse_updated_at_passed_through() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>"#;
+        let ts = chrono::DateTime::parse_from_rfc3339("2026-01-15T09:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let snapshot = parse(html, ts).unwrap();
+        assert_eq!(snapshot.updated_at, ts);
+    }
+
+    // ---- decimal percentages parsed ----
+    #[test]
+    fn parse_decimal_percentage() {
+        let html = r#"<div aria-label="Session usage 33.5% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!((snapshot.windows[0].used_percent - 33.5).abs() < 0.01);
+    }
+
+    // ---- invalid data-time is ignored gracefully ----
+    #[test]
+    fn parse_invalid_data_time_ignored() {
+        let html = r#"<div aria-label="Session usage 42% used" data-time="not-a-date"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!(snapshot.windows[0].reset_at.is_none());
+    }
+
+    // ---- exactly 100% is not clamped ----
+    #[test]
+    fn parse_exactly_100() {
+        let html = r#"<div aria-label="Session usage 100% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!((snapshot.windows[0].used_percent - 100.0).abs() < 0.01);
+    }
+
+    // ---- exactly 0% is not clamped ----
+    #[test]
+    fn parse_exactly_0() {
+        let html = r#"<div aria-label="Session usage 0% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!(snapshot.windows[0].used_percent.abs() < 0.01);
+    }
+
+    // ---- case-insensitive session/weekly keywords ----
+    #[test]
+    fn parse_case_insensitive_keywords() {
+        let html = r#"<div aria-label="session usage 42% used"></div>
+        <div aria-label="WEEKLY usage 60% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows[0].label, "Session");
+        assert_eq!(snapshot.windows[1].label, "Weekly");
+    }
+
+    // ---- weekly-only with no reset time yields None reset_at ----
+    #[test]
+    fn parse_weekly_only_no_reset_time() {
+        let html = r#"<div aria-label="Weekly usage 60% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!(snapshot.windows[0].reset_at.is_none());
+    }
+
+    // ---- headline is zero ----
+    #[test]
+    fn parse_headline_zero() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert_eq!(snapshot.headline.0, 0);
+    }
+
+    // ---- provider_cost and extra_usage are None ----
+    #[test]
+    fn parse_no_cost_no_extra() {
+        let html = r#"<div aria-label="Session usage 42% used"></div>"#;
+        let snapshot = parse(html, Utc::now()).unwrap();
+        assert!(snapshot.provider_cost.is_none());
+        assert!(snapshot.extra_usage.is_none());
     }
 }

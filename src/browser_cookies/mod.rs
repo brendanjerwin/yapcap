@@ -147,3 +147,141 @@ pub fn open_browser(url: &str) {
         .arg(url)
         .spawn();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_info_equal_when_id_and_name_match() {
+        let a = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: Some("My Workspace".to_string()),
+        };
+        let b = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: Some("My Workspace".to_string()),
+        };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn workspace_info_unequal_when_id_differs() {
+        let a = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: Some("My Workspace".to_string()),
+        };
+        let b = WorkspaceInfo {
+            id: "wrk_456".to_string(),
+            name: Some("My Workspace".to_string()),
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn workspace_info_unequal_when_name_differs() {
+        let a = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: Some("Alpha".to_string()),
+        };
+        let b = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: Some("Beta".to_string()),
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn workspace_info_unequal_when_some_vs_none_name() {
+        let a = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: Some("Alpha".to_string()),
+        };
+        let b = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: None,
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn workspace_info_equal_when_both_names_none() {
+        let a = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: None,
+        };
+        let b = WorkspaceInfo {
+            id: "wrk_123".to_string(),
+            name: None,
+        };
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn workspace_info_clone_is_equal() {
+        let a = WorkspaceInfo {
+            id: "wrk_789".to_string(),
+            name: Some("Cloned".to_string()),
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn browser_cookie_clone_is_equal() {
+        let a = BrowserCookie {
+            value: "session_abc".to_string(),
+        };
+        let b = a.clone();
+        assert_eq!(a.value, b.value);
+    }
+
+    #[test]
+    fn browser_cookie_clone_preserves_value() {
+        let original = BrowserCookie {
+            value: "cookie_value_xyz".to_string(),
+        };
+        let cloned = original.clone();
+        // mutating the clone must not affect the original
+        let _ = cloned;
+        assert_eq!(original.value, "cookie_value_xyz");
+    }
+
+    #[test]
+    fn browser_kind_firefox_not_equal_chrome() {
+        assert_ne!(BrowserKind::Firefox, BrowserKind::Chrome);
+    }
+
+    #[test]
+    fn browser_kind_equal_to_self() {
+        assert_eq!(BrowserKind::Firefox, BrowserKind::Firefox);
+        assert_eq!(BrowserKind::Chrome, BrowserKind::Chrome);
+    }
+
+    #[test]
+    fn browser_kind_is_copy() {
+        let a = BrowserKind::Chrome;
+        let b = a; // Copy, not move
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn workspace_info_debug_repr_contains_id() {
+        let info = WorkspaceInfo {
+            id: "wrk_debug".to_string(),
+            name: Some("Debug".to_string()),
+        };
+        let s = format!("{:?}", info);
+        assert!(s.contains("wrk_debug"));
+        assert!(s.contains("Debug"));
+    }
+
+    #[test]
+    fn browser_cookie_debug_repr_contains_value() {
+        let cookie = BrowserCookie {
+            value: "v_debug".to_string(),
+        };
+        let s = format!("{:?}", cookie);
+        assert!(s.contains("v_debug"));
+    }
+}

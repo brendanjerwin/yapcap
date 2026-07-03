@@ -91,3 +91,125 @@ pub fn prepare() -> OllamaCloudLoginState {
     );
     OllamaCloudLoginState::new(account_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn state_with(session_cookie: &str) -> OllamaCloudLoginState {
+        let mut state = OllamaCloudLoginState::new("ollama-cloud-test".to_string());
+        state.session_cookie = session_cookie.to_string();
+        state
+    }
+
+    #[test]
+    fn new_creates_correct_initial_state() {
+        let state = OllamaCloudLoginState::new("ollama-cloud-abc".to_string());
+        assert_eq!(state.account_id, "ollama-cloud-abc");
+        assert_eq!(state.label, "");
+        assert_eq!(state.status, OllamaCloudLoginStatus::Editing);
+        assert_eq!(state.session_cookie, "");
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn prepare_generates_account_id_prefix() {
+        let state = prepare();
+        assert!(
+            state.account_id.starts_with("ollama-cloud-"),
+            "account_id should start with 'ollama-cloud-', got: {}",
+            state.account_id
+        );
+        assert!(
+            state.account_id.len() > "ollama-cloud-".len(),
+            "account_id should have a suffix after the prefix"
+        );
+    }
+
+    #[test]
+    fn update_session_cookie_works() {
+        let mut state = OllamaCloudLoginState::new("id".to_string());
+        assert_eq!(state.session_cookie, "");
+        state.update_session_cookie("sess-123".to_string());
+        assert_eq!(state.session_cookie, "sess-123");
+    }
+
+    #[test]
+    fn update_label_works() {
+        let mut state = OllamaCloudLoginState::new("id".to_string());
+        assert_eq!(state.label, "");
+        state.update_label("my account".to_string());
+        assert_eq!(state.label, "my account");
+    }
+
+    #[test]
+    fn save_succeeds_with_valid_session_cookie() {
+        let state = state_with("session-1");
+        let mut config = Config::default();
+        let result = state.save(&mut config);
+
+        let account = result.expect("save should succeed with a valid session cookie");
+        assert_eq!(account.id, "ollama-cloud-test");
+        assert_eq!(account.label, "");
+        assert_eq!(account.session_cookie_source, "stored");
+        assert!(account.last_authenticated_at.is_some());
+        assert_eq!(account.created_at, account.updated_at);
+        assert_eq!(account.updated_at, account.last_authenticated_at.unwrap());
+    }
+
+    #[test]
+    fn save_fails_with_empty_session_cookie() {
+        let state = state_with("");
+        let mut config = Config::default();
+        let err = state.save(&mut config).expect_err("should fail on empty session_cookie");
+        assert_eq!(err, "Session cookie is required");
+    }
+
+    #[test]
+    fn save_fails_with_whitespace_only_session_cookie() {
+        let state = state_with("   \t\n ");
+        let mut config = Config::default();
+        let err = state
+            .save(&mut config)
+            .expect_err("should fail on whitespace-only session_cookie");
+        assert_eq!(err, "Session cookie is required");
+    }
+
+    #[test]
+    fn save_trims_whitespace_from_session_cookie() {
+        let state = state_with("  session-1  ");
+        let mut config = Config::default();
+        let account = state.save(&mut config).expect("save should succeed");
+        // The trimmed session cookie is written to disk; read it back to verify.
+        let account_dir = crate::config::managed_ollama_cloud_account_dir(&account.id);
+        let stored = std::fs::read_to_string(account_dir.join("session_cookie.txt"))
+            .expect("session cookie file should exist");
+        assert_eq!(stored, "session-1");
+    }
+
+    #[test]
+    fn save_trims_label() {
+        let mut state = state_with("session-1");
+        state.label = "  my label  ".to_string();
+        let mut config = Config::default();
+        let account = state.save(&mut config).expect("save should succeed");
+        assert_eq!(account.label, "my label");
+    }
+
+    #[test]
+    fn save_uses_account_id_from_state() {
+        let state = state_with("session-1");
+        let mut config = Config::default();
+        let account = state.save(&mut config).expect("save should succeed");
+        assert_eq!(account.id, "ollama-cloud-test");
+    }
+
+    #[test]
+    fn save_returns_session_cookie_source_stored() {
+        let state = state_with("session-1");
+        let mut config = Config::default();
+        let account = state.save(&mut config).expect("save should succeed");
+        assert_eq!(account.session_cookie_source, "stored");
+    }
+}

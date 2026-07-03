@@ -61,7 +61,7 @@ static RE_MONTHLY_RESET_FIRST: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct ScrapedWindowUsage {
     usage_percent: f64,
     reset_in_sec: f64,
@@ -457,5 +457,534 @@ mod tests {
             Err(OpencodeGoError::ParseDashboard) => {}
             _ => panic!("expected ParseDashboard error"),
         }
+    }
+    // ---- SSR format: rolling/weekly/monthly pct-first vs reset-first orderings ----
+
+    #[test]
+    fn parse_ssr_rolling_pct_first() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:42,resetInSec:3600}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "5h");
+        assert!((snap.windows[0].used_percent - 42.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_rolling_reset_first() {
+        let html = r#"rollingUsage:$R[0]={resetInSec:3600,usagePercent:42}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert!((snap.windows[0].used_percent - 42.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_weekly_pct_first() {
+        let html = r#"weeklyUsage:$R[1]={usagePercent:70,resetInSec:7200}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Weekly");
+        assert!((snap.windows[0].used_percent - 70.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_weekly_reset_first() {
+        let html = r#"weeklyUsage:$R[1]={resetInSec:7200,usagePercent:70}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert!((snap.windows[0].used_percent - 70.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_monthly_pct_first() {
+        let html = r#"monthlyUsage:$R[2]={usagePercent:80,resetInSec:10800}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Monthly");
+        assert!((snap.windows[0].used_percent - 80.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_monthly_reset_first() {
+        let html = r#"monthlyUsage:$R[2]={resetInSec:10800,usagePercent:80}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert!((snap.windows[0].used_percent - 80.0).abs() < 0.01);
+    }
+
+    // ---- SSR format: decimal / boundary percentages ----
+
+    #[test]
+    fn parse_ssr_decimal_percent() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:42.5,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert!((snap.windows[0].used_percent - 42.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_zero_percent() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:0,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert!((snap.windows[0].used_percent - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_ssr_hundred_percent() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:100,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert!((snap.windows[0].used_percent - 100.0).abs() < 0.01);
+    }
+
+    // ---- Percentage clamping > 100 ----
+
+    #[test]
+    fn parse_ssr_clamps_over_100() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:150,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert!((snap.windows[0].used_percent - 100.0).abs() < 0.01,
+            "expected clamping to 100, got {}", snap.windows[0].used_percent);
+    }
+
+    #[test]
+    fn parse_data_slot_clamps_over_100() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">200%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert!((snap.windows[0].used_percent - 100.0).abs() < 0.01);
+    }
+
+    // ---- Data-slot format: labels + reset-now vs reset-time ----
+
+    #[test]
+    fn parse_data_slot_rolling() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">25%</span>
+          <span data-slot="reset-time">Resets in 1 hour 0 minutes</span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "5h");
+        assert!((snap.windows[0].used_percent - 25.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_data_slot_weekly() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Weekly Usage</span>
+          <span data-slot="usage-value">50%</span>
+          <span data-slot="reset-time">Resets in 2 days 3 hours</span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Weekly");
+        assert!((snap.windows[0].used_percent - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_data_slot_monthly() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Monthly Usage</span>
+          <span data-slot="usage-value">75%</span>
+          <span data-slot="reset-time">Resets in 10 days</span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Monthly");
+        assert!((snap.windows[0].used_percent - 75.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_data_slot_reset_now() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">42%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        // reset-now => reset_in_sec 0 => reset_at == updated_at
+        let ts = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
+            .unwrap().with_timezone(&Utc);
+        let html2 = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">42%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let snap2 = parse(html2, ts, "ws1").unwrap();
+        assert_eq!(snap2.windows[0].reset_at, Some(ts));
+    }
+
+    #[test]
+    fn parse_data_slot_all_three() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">10%</span>
+          <span data-slot="reset-time">Resets in 1 hour</span>
+        </div>
+        <div data-slot="usage-item">
+          <span data-slot="usage-label">Weekly Usage</span>
+          <span data-slot="usage-value">20%</span>
+          <span data-slot="reset-time">Resets in 2 days</span>
+        </div>
+        <div data-slot="usage-item">
+          <span data-slot="usage-label">Monthly Usage</span>
+          <span data-slot="usage-value">30%</span>
+          <span data-slot="reset-time">Resets in 5 days</span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 3);
+    }
+
+    // ---- parse_human_readable_time ----
+
+    #[test]
+    fn human_readable_hour_minutes() {
+        let secs = parse_human_readable_time("1 hour 56 minutes").unwrap();
+        assert!((secs - (3600.0 + 56.0 * 60.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn human_readable_days_hours() {
+        let secs = parse_human_readable_time("6 days 2 hours").unwrap();
+        assert!((secs - (6.0 * 86400.0 + 2.0 * 3600.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn human_readable_seconds() {
+        let secs = parse_human_readable_time("0 seconds").unwrap();
+        assert!((secs - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn human_readable_reset_now() {
+        assert_eq!(parse_human_readable_time("reset-now"), Some(0.0));
+        assert_eq!(parse_human_readable_time("reset now"), Some(0.0));
+        assert_eq!(parse_human_readable_time("now"), Some(0.0));
+        assert_eq!(parse_human_readable_time("resets now"), Some(0.0));
+    }
+
+    #[test]
+    fn human_readable_empty() {
+        assert_eq!(parse_human_readable_time(""), None);
+    }
+
+    #[test]
+    fn human_readable_garbage() {
+        assert_eq!(parse_human_readable_time("garbage"), None);
+    }
+
+    #[test]
+    fn human_readable_seconds_only() {
+        let secs = parse_human_readable_time("30 seconds").unwrap();
+        assert!((secs - 30.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn human_readable_singular_units() {
+        let secs = parse_human_readable_time("1 day 1 hour 1 minute 1 second").unwrap();
+        assert!((secs - (86400.0 + 3600.0 + 60.0 + 1.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn human_readable_case_insensitive() {
+        let secs = parse_human_readable_time("1 HOUR 2 MINUTES").unwrap();
+        assert!((secs - (3600.0 + 120.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn human_readable_decimal_days() {
+        let secs = parse_human_readable_time("1.5 days").unwrap();
+        assert!((secs - 1.5 * 86400.0).abs() < 0.01);
+    }
+
+    // ---- parse_data_slot_format directly (reset-now vs reset-time, label classification) ----
+
+    #[test]
+    fn data_slot_format_reset_time_and_reset_now() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">5%</span>
+          <span data-slot="reset-now"></span>
+        </div>
+        <div data-slot="usage-item">
+          <span data-slot="usage-label">Weekly Usage</span>
+          <span data-slot="usage-value">15%</span>
+          <span data-slot="reset-time">Resets in 1 day</span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].0, "rolling");
+        assert!((slots[0].1.reset_in_sec - 0.0).abs() < 0.01);
+        assert_eq!(slots[1].0, "weekly");
+        assert!((slots[1].1.reset_in_sec - 86400.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn data_slot_format_skips_unknown_label() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Unknown Window</span>
+          <span data-slot="usage-value">5%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert!(slots.is_empty(), "unknown label should be skipped");
+    }
+
+    #[test]
+    fn data_slot_format_missing_label_skipped() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-value">5%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert!(slots.is_empty());
+    }
+
+    #[test]
+    fn data_slot_format_missing_usage_skipped() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert!(slots.is_empty());
+    }
+
+    #[test]
+    fn data_slot_format_missing_reset_skipped() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">5%</span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert!(slots.is_empty());
+    }
+
+    #[test]
+    fn data_slot_format_unparsable_reset_time_skipped() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">5%</span>
+          <span data-slot="reset-time">garbage reset text</span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert!(slots.is_empty());
+    }
+
+    #[test]
+    fn data_slot_format_decimal_percent() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">42.5%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert_eq!(slots.len(), 1);
+        assert!((slots[0].1.usage_percent - 42.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn data_slot_format_strips_solidjs_comments() {
+        let html = r#"<div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">42%</span>
+          <span data-slot="reset-time"><!--$-->Resets in 2 hours<!--/-->%</span>
+        </div>"#;
+        let slots = parse_data_slot_format(html);
+        assert_eq!(slots.len(), 1);
+        assert!((slots[0].1.reset_in_sec - 7200.0).abs() < 0.01);
+    }
+
+    // ---- parse_ssr_window directly: None cases ----
+
+    #[test]
+    fn parse_ssr_window_returns_none_when_no_match() {
+        let re_pct = Regex::new(r"rollingUsage:\$R\[\d+\]=\{[^}]*usagePercent:(-?\d+(?:\.\d+)?)[^}]*resetInSec:(-?\d+(?:\.\d+)?)[^}]*\}").unwrap();
+        let re_reset = Regex::new(r"rollingUsage:\$R\[\d+\]=\{[^}]*resetInSec:(-?\d+(?:\.\d+)?)[^}]*usagePercent:(-?\d+(?:\.\d+)?)[^}]*\}").unwrap();
+        assert_eq!(parse_ssr_window("nothing here", &re_pct, &re_reset), None);
+    }
+
+    #[test]
+    fn parse_ssr_window_returns_none_on_nan() {
+        // Non-numeric capture groups cannot occur because the regex only matches digits/dots,
+        // so to exercise the parse-failure branch we use a regex that captures a non-numeric
+        // placeholder and confirm parse_ssr_window returns None.
+        let re_pct = Regex::new(r"key:\{usagePercent:([a-z]+),resetInSec:([a-z]+)\}").unwrap();
+        let re_reset = Regex::new(r"key:\{resetInSec:([a-z]+),usagePercent:([a-z]+)\}").unwrap();
+        let html = "key:{usagePercent:abc,resetInSec:def}";
+        assert_eq!(parse_ssr_window(html, &re_pct, &re_reset), None);
+    }
+
+    #[test]
+    fn parse_ssr_window_pct_first_wins_over_reset_first() {
+        let re_pct = Regex::new(r"key:\{usagePercent:(\d+),resetInSec:(\d+)\}").unwrap();
+        let re_reset = Regex::new(r"key:\{resetInSec:(\d+),usagePercent:(\d+)\}").unwrap();
+        let html = "key:{usagePercent:42,resetInSec:60}";
+        let r = parse_ssr_window(html, &re_pct, &re_reset).unwrap();
+        assert!((r.usage_percent - 42.0).abs() < 0.01);
+        assert!((r.reset_in_sec - 60.0).abs() < 0.01);
+    }
+
+    // ---- Partial data: only rolling / only weekly / only monthly / rolling+weekly ----
+
+    #[test]
+    fn parse_partial_only_rolling() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:10,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "5h");
+    }
+
+    #[test]
+    fn parse_partial_only_weekly() {
+        let html = r#"weeklyUsage:$R[0]={usagePercent:10,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Weekly");
+    }
+
+    #[test]
+    fn parse_partial_only_monthly() {
+        let html = r#"monthlyUsage:$R[0]={usagePercent:10,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 1);
+        assert_eq!(snap.windows[0].label, "Monthly");
+    }
+
+    #[test]
+    fn parse_partial_rolling_and_weekly_no_monthly() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:10,resetInSec:60}
+        weeklyUsage:$R[1]={usagePercent:20,resetInSec:120}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows.len(), 2);
+        assert_eq!(snap.windows[0].label, "5h");
+        assert_eq!(snap.windows[1].label, "Weekly");
+    }
+
+    // ---- Workspace ID passed through to snapshot identity ----
+
+    #[test]
+    fn parse_workspace_id_passed_through() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:42,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "wrk_abc123").unwrap();
+        assert_eq!(snap.identity.account_id, Some("wrk_abc123".to_string()));
+        assert_eq!(snap.identity.plan, Some("OpenCode Go".to_string()));
+        assert_eq!(snap.provider, ProviderId::OpencodeGo);
+        assert_eq!(snap.source, "Dashboard");
+    }
+
+    // ---- reset_at computation: uses updated_at + reset_in_sec ----
+
+    #[test]
+    fn parse_reset_at_uses_updated_at_plus_reset_in_sec() {
+        let ts = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
+            .unwrap().with_timezone(&Utc);
+        let html = r#"rollingUsage:$R[0]={usagePercent:50,resetInSec:3600}"#;
+        let snap = parse(html, ts, "ws1").unwrap();
+        let expected = ts + chrono::Duration::seconds(3600);
+        assert_eq!(snap.windows[0].reset_at, Some(expected));
+    }
+
+    #[test]
+    fn parse_negative_reset_clamped_to_zero() {
+        let ts = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
+            .unwrap().with_timezone(&Utc);
+        let html = r#"rollingUsage:$R[0]={usagePercent:50,resetInSec:-100}"#;
+        let snap = parse(html, ts, "ws1").unwrap();
+        // reset_in_sec.max(0.0) -> 0, reset_at == ts
+        assert_eq!(snap.windows[0].reset_at, Some(ts));
+    }
+
+    // ---- window_seconds per window ----
+
+    #[test]
+    fn parse_window_seconds_correct() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:1,resetInSec:60}
+        weeklyUsage:$R[1]={usagePercent:2,resetInSec:60}
+        monthlyUsage:$R[2]={usagePercent:3,resetInSec:60}"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        assert_eq!(snap.windows[0].window_seconds, Some(5 * 3600));
+        assert_eq!(snap.windows[1].window_seconds, Some(7 * 24 * 3600));
+        assert_eq!(snap.windows[2].window_seconds, Some(30 * 24 * 3600));
+    }
+
+    // ---- SSR takes precedence over data-slot (mixed) ----
+
+    #[test]
+    fn parse_ssr_takes_precedence_over_data_slot() {
+        let html = r#"rollingUsage:$R[0]={usagePercent:99,resetInSec:60}
+        <div data-slot="usage-item">
+          <span data-slot="usage-label">Rolling Usage</span>
+          <span data-slot="usage-value">1%</span>
+          <span data-slot="reset-now"></span>
+        </div>"#;
+        let snap = parse(html, Utc::now(), "ws1").unwrap();
+        // SSR found rolling => data-slot fallback not consulted
+        assert_eq!(snap.windows.len(), 1);
+        assert!((snap.windows[0].used_percent - 99.0).abs() < 0.01);
+    }
+
+    // ---- sync_managed_accounts retains env and non-empty sources, drops empty ----
+
+    #[test]
+    fn sync_managed_accounts_drops_empty_non_env_source() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![
+                ManagedOpencodeGoAccountConfig {
+                    id: "keep-env".to_string(),
+                    label: "env".to_string(),
+                    workspace_id: String::new(),
+                    auth_cookie_source: "env:VAR".to_string(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    last_authenticated_at: None,
+                },
+                ManagedOpencodeGoAccountConfig {
+                    id: "keep-path".to_string(),
+                    label: "path".to_string(),
+                    workspace_id: String::new(),
+                    auth_cookie_source: "/some/path".to_string(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    last_authenticated_at: None,
+                },
+                ManagedOpencodeGoAccountConfig {
+                    id: "drop".to_string(),
+                    label: "drop".to_string(),
+                    workspace_id: String::new(),
+                    auth_cookie_source: String::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    last_authenticated_at: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 2);
+        assert!(config.opencode_go_managed_accounts.iter().all(|a| a.id != "drop"));
+    }
+
+    #[test]
+    fn sync_managed_accounts_no_change_when_all_kept() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![ManagedOpencodeGoAccountConfig {
+                id: "keep".to_string(),
+                label: "keep".to_string(),
+                workspace_id: String::new(),
+                auth_cookie_source: "env:VAR".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 1);
     }
 }
