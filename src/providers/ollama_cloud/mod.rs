@@ -438,4 +438,72 @@ mod tests {
         assert!(snapshot.provider_cost.is_none());
         assert!(snapshot.extra_usage.is_none());
     }
+    // ---- sync_managed_accounts: assigned scenarios ----
+
+    #[test]
+    fn sync_managed_accounts_empty_list_no_change() {
+        let mut config = Config {
+            ollama_cloud_managed_accounts: vec![],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.ollama_cloud_managed_accounts.len(), 0);
+    }
+
+    #[test]
+    fn sync_managed_accounts_keeps_stored_source() {
+        let mut config = Config {
+            ollama_cloud_managed_accounts: vec![ManagedOllamaCloudAccountConfig {
+                id: "stored".to_string(),
+                label: "stored".to_string(),
+                session_cookie_source: "stored".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.ollama_cloud_managed_accounts.len(), 1);
+        assert_eq!(config.ollama_cloud_managed_accounts[0].id, "stored");
+    }
+
+    #[test]
+    fn sync_managed_accounts_keeps_env_source() {
+        let mut config = Config {
+            ollama_cloud_managed_accounts: vec![ManagedOllamaCloudAccountConfig {
+                id: "env".to_string(),
+                label: "env".to_string(),
+                session_cookie_source: "env:FOO".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.ollama_cloud_managed_accounts.len(), 1);
+        assert_eq!(config.ollama_cloud_managed_accounts[0].id, "env");
+    }
+
+    #[test]
+    fn sync_managed_accounts_drops_empty_source() {
+        let mut config = Config {
+            ollama_cloud_managed_accounts: vec![ManagedOllamaCloudAccountConfig {
+                id: "drop".to_string(),
+                label: "drop".to_string(),
+                session_cookie_source: String::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(changed);
+        assert_eq!(config.ollama_cloud_managed_accounts.len(), 0);
+    }
 }

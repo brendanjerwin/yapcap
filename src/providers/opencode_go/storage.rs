@@ -62,3 +62,54 @@ fn set_private_dir_permissions(_path: &Path) -> Result<(), String> {
 fn set_private_file_permissions(_path: &Path) -> Result<(), String> {
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "yapcap-test-{}-{}-{}",
+            "opencode_go_storage",
+            label,
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn workspace_id_round_trip() {
+        let dir = temp_dir("workspace_id");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        write_workspace_id(&dir, "ws-12345").unwrap();
+        let loaded = load_workspace_id(&dir).unwrap();
+        assert_eq!(loaded, "ws-12345");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auth_cookie_round_trip() {
+        let dir = temp_dir("auth_cookie");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        write_auth_cookie(&dir, "cookie-secret-value").unwrap();
+        let loaded = load_auth_cookie(&dir).unwrap();
+        assert_eq!(loaded, "cookie-secret-value");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_private_dir_creates_directory() {
+        let dir = temp_dir("create_private_dir");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        create_private_dir(&dir).unwrap();
+        assert!(dir.exists());
+        assert!(dir.is_dir());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

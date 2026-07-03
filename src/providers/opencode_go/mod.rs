@@ -987,4 +987,106 @@ mod tests {
         assert!(!changed);
         assert_eq!(config.opencode_go_managed_accounts.len(), 1);
     }
+    // ---- sync_managed_accounts: assigned scenarios ----
+
+    #[test]
+    fn sync_managed_accounts_empty_list_no_change() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 0);
+    }
+
+    #[test]
+    fn sync_managed_accounts_keeps_stored_source() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![ManagedOpencodeGoAccountConfig {
+                id: "stored".to_string(),
+                label: "stored".to_string(),
+                workspace_id: String::new(),
+                auth_cookie_source: "stored".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 1);
+        assert_eq!(config.opencode_go_managed_accounts[0].id, "stored");
+    }
+
+    #[test]
+    fn sync_managed_accounts_keeps_env_source() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![ManagedOpencodeGoAccountConfig {
+                id: "env".to_string(),
+                label: "env".to_string(),
+                workspace_id: String::new(),
+                auth_cookie_source: "env:FOO".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(!changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 1);
+        assert_eq!(config.opencode_go_managed_accounts[0].id, "env");
+    }
+
+    #[test]
+    fn sync_managed_accounts_drops_single_empty_source() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![ManagedOpencodeGoAccountConfig {
+                id: "drop".to_string(),
+                label: "drop".to_string(),
+                workspace_id: String::new(),
+                auth_cookie_source: String::new(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_authenticated_at: None,
+            }],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 0);
+    }
+
+    #[test]
+    fn sync_managed_accounts_mixed_stored_and_empty() {
+        let mut config = Config {
+            opencode_go_managed_accounts: vec![
+                ManagedOpencodeGoAccountConfig {
+                    id: "keep".to_string(),
+                    label: "keep".to_string(),
+                    workspace_id: String::new(),
+                    auth_cookie_source: "stored".to_string(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    last_authenticated_at: None,
+                },
+                ManagedOpencodeGoAccountConfig {
+                    id: "drop".to_string(),
+                    label: "drop".to_string(),
+                    workspace_id: String::new(),
+                    auth_cookie_source: String::new(),
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                    last_authenticated_at: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let changed = sync_managed_accounts(&mut config);
+        assert!(changed);
+        assert_eq!(config.opencode_go_managed_accounts.len(), 1);
+        assert_eq!(config.opencode_go_managed_accounts[0].id, "keep");
+    }
 }
