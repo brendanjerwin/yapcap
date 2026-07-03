@@ -94,6 +94,7 @@ ollama-cloud-login-editing = Enter your Ollama Cloud session cookie
 ollama-cloud-login-saved = Ollama Cloud account added
 ollama-cloud-login-failed = Ollama Cloud login failed
 ollama-cloud-session-cookie-placeholder = Session Cookie (from browser)
+open-browser-auth = Open Browser
 cursor-scan-button = Scan for Cursor accounts
 cursor-scan-subtitle = Make sure you're logged in to Cursor IDE first.
 cursor-scanning = Scanning for Cursor accounts...

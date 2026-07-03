@@ -16,6 +16,7 @@ pub struct OllamaCloudLoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OllamaCloudLoginStatus {
     Editing,
+    Polling,
     Saved,
     Failed,
 }
@@ -71,6 +72,8 @@ impl OllamaCloudLoginState {
 #[derive(Debug, Clone)]
 pub enum OllamaCloudLoginEvent {
     #[allow(dead_code)]
+    BrowserAuthStarted,
+    BrowserAuthComplete { session_cookie: String },
     Started,
     SessionCookieChanged(String),
     LabelChanged(String),

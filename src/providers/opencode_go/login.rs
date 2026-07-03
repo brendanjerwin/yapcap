@@ -11,12 +11,15 @@ pub struct OpencodeGoLoginState {
     pub status: OpencodeGoLoginStatus,
     pub workspace_id: String,
     pub auth_cookie: String,
+    pub discovered_workspaces: Vec<crate::browser_cookies::WorkspaceInfo>,
     pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpencodeGoLoginStatus {
     Editing,
+    Polling,
+    SelectWorkspace,
     Saved,
     Failed,
 }
@@ -29,6 +32,7 @@ impl OpencodeGoLoginState {
             status: OpencodeGoLoginStatus::Editing,
             workspace_id: String::new(),
             auth_cookie: String::new(),
+            discovered_workspaces: Vec::new(),
             error: None,
         }
     }
@@ -83,6 +87,12 @@ impl OpencodeGoLoginState {
 #[derive(Debug, Clone)]
 pub enum OpencodeGoLoginEvent {
     #[allow(dead_code)]
+    BrowserAuthStarted,
+    BrowserAuthComplete {
+        auth_cookie: String,
+        workspaces: Vec<crate::browser_cookies::WorkspaceInfo>,
+    },
+    WorkspaceSelected(String),
     Started,
     WorkspaceIdChanged(String),
     AuthCookieChanged(String),

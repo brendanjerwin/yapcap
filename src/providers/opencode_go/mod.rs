@@ -258,7 +258,7 @@ pub async fn fetch(
         .ok()
         .filter(|id| !id.is_empty())
         .ok_or(OpencodeGoError::LoginRequired)?;
-    let auth_cookie = load_auth_cookie(&account_root)
+    let mut auth_cookie = load_auth_cookie(&account_root)
         .ok()
         .filter(|c| !c.is_empty())
         .ok_or(OpencodeGoError::LoginRequired)?;
@@ -274,9 +274,26 @@ pub async fn fetch(
         .await
         .map_err(OpencodeGoError::DashboardRequest)?;
 
-    match response.status() {
+    let response = match response.status() {
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
-            return Err(OpencodeGoError::LoginRequired);
+            // Try refreshing the cookie from browser storage
+            if let Some(fresh) = crate::browser_cookies::find_cookie("auth", "opencode.ai").await {
+                auth_cookie = fresh.value.clone();
+                if let Err(e) = crate::providers::opencode_go::storage::write_auth_cookie(&account_root, &auth_cookie) {
+                    tracing::warn!(error = %e, "failed to persist refreshed auth cookie");
+                }
+                // Retry with the fresh cookie
+                client
+                    .get(&url)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "text/html")
+                    .header("Cookie", format!("auth={auth_cookie}"))
+                    .send()
+                    .await
+                    .map_err(OpencodeGoError::DashboardRequest)?
+            } else {
+                return Err(OpencodeGoError::LoginRequired);
+            }
         }
         reqwest::StatusCode::TOO_MANY_REQUESTS => {
             let retry_after = response
@@ -293,8 +310,8 @@ pub async fn fetch(
                 status: status.as_u16(),
             });
         }
-        _ => {}
-    }
+        _ => response,
+    };
 
     let response = response
         .error_for_status()

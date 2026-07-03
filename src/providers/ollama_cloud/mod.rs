@@ -61,7 +61,7 @@ pub async fn fetch(
 ) -> Result<UsageSnapshot, OllamaCloudError> {
     let account_root = managed_ollama_cloud_account_dir(&account.id);
 
-    let session_cookie = load_session_cookie(&account_root)
+    let mut session_cookie = load_session_cookie(&account_root)
         .ok()
         .filter(|c| !c.is_empty())
         .ok_or(OllamaCloudError::LoginRequired)?;
@@ -78,9 +78,29 @@ pub async fn fetch(
         .await
         .map_err(OllamaCloudError::DashboardRequest)?;
 
-    match response.status() {
+    let response = match response.status() {
         reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => {
-            return Err(OllamaCloudError::LoginRequired);
+            // Try refreshing the cookie from browser storage
+            if let Some(fresh) = crate::browser_cookies::find_cookie("__Secure-session", "ollama.com").await {
+                session_cookie = fresh.value.clone();
+                if let Err(e) = crate::providers::ollama_cloud::storage::write_session_cookie(&account_root, &session_cookie) {
+                    tracing::warn!(error = %e, "failed to persist refreshed session cookie");
+                }
+                // Retry with the fresh cookie
+                client
+                    .get(DASHBOARD_URL)
+                    .header("User-Agent", USER_AGENT)
+                    .header("Accept", "text/html")
+                    .header(
+                        "Cookie",
+                        format!("__Secure-session={session_cookie}"),
+                    )
+                    .send()
+                    .await
+                    .map_err(OllamaCloudError::DashboardRequest)?
+            } else {
+                return Err(OllamaCloudError::LoginRequired);
+            }
         }
         reqwest::StatusCode::TOO_MANY_REQUESTS => {
             let retry_after = response
@@ -97,8 +117,8 @@ pub async fn fetch(
                 status: status.as_u16(),
             });
         }
-        _ => {}
-    }
+        _ => response,
+    };
 
     let response = response
         .error_for_status()

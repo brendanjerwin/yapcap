@@ -165,6 +165,8 @@ pub enum Message {
     StartOpencodeGoLogin,
     CancelOpencodeGoLogin,
     OpencodeGoLoginEvent(Box<OpencodeGoLoginEvent>),
+    StartOpencodeGoBrowserAuth,
+    StartOllamaCloudBrowserAuth,
     DeleteOllamaCloudAccount(String),
     ReauthenticateOllamaCloudAccount(String),
     StartOllamaCloudLogin,
@@ -615,6 +617,12 @@ impl AppModel {
             Message::CancelOpencodeGoLogin => self.cancel_opencode_go_login(),
             Message::OpencodeGoLoginEvent(event) => {
                 return Some(self.handle_opencode_go_login_event(*event));
+            }
+            Message::StartOpencodeGoBrowserAuth => {
+                return Some(self.start_opencode_go_browser_auth());
+            }
+            Message::StartOllamaCloudBrowserAuth => {
+                return Some(self.start_ollama_cloud_browser_auth());
             }
             Message::DeleteOllamaCloudAccount(account_id) => {
                 return Some(self.delete_ollama_cloud_account(&account_id));

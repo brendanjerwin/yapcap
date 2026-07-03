@@ -2,6 +2,7 @@
 
 mod account_selection;
 pub mod account_storage;
+mod browser_cookies;
 mod app;
 mod auth;
 mod cache;

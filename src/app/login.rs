@@ -935,6 +935,35 @@ impl AppModel {
         event: OpencodeGoLoginEvent,
     ) -> Task<Message> {
         match event {
+            OpencodeGoLoginEvent::BrowserAuthStarted => Task::none(),
+            OpencodeGoLoginEvent::BrowserAuthComplete { auth_cookie, workspaces } => {
+                // Auto-fill the auth cookie from browser detection
+                if let Some(login) = self.opencode_go_login.as_mut() {
+                    login.auth_cookie = auth_cookie;
+                    login.error = None;
+                    login.discovered_workspaces = workspaces.clone();
+
+                    if workspaces.len() == 1 {
+                        // Single workspace — auto-fill and go back to editing so user can save
+                        login.workspace_id = workspaces[0].id.clone();
+                        login.status = OpencodeGoLoginStatus::Editing;
+                    } else if workspaces.is_empty() {
+                        // No workspaces found — user needs to enter workspace ID manually
+                        login.status = OpencodeGoLoginStatus::Editing;
+                    } else {
+                        // Multiple workspaces — show dropdown for selection
+                        login.status = OpencodeGoLoginStatus::SelectWorkspace;
+                    }
+                }
+                Task::none()
+            }
+            OpencodeGoLoginEvent::WorkspaceSelected(workspace_id) => {
+                if let Some(login) = self.opencode_go_login.as_mut() {
+                    login.workspace_id = workspace_id;
+                    login.status = OpencodeGoLoginStatus::Editing;
+                }
+                Task::none()
+            }
             OpencodeGoLoginEvent::Started => Task::none(),
             OpencodeGoLoginEvent::WorkspaceIdChanged(workspace_id) => {
                 if let Some(login) = self.opencode_go_login.as_mut() {
@@ -1013,6 +1042,64 @@ impl AppModel {
             }
         }
     }
+
+    pub(super) fn start_opencode_go_browser_auth(&mut self) -> Task<Message> {
+        // Open the browser to the OpenCode Go dashboard
+        crate::browser_cookies::open_browser("https://opencode.ai/auth");
+
+        // Set status to Polling
+        if let Some(login) = self.opencode_go_login.as_mut() {
+            login.status = OpencodeGoLoginStatus::Polling;
+            login.error = None;
+        }
+
+        // Spawn a polling task that looks for the auth cookie
+        let account_id = self
+            .opencode_go_login
+            .as_ref()
+            .map(|l| l.account_id.clone())
+            .unwrap_or_default();
+
+        Task::perform(
+            async move {
+                // Poll for the auth cookie on opencode.ai
+                let cookie = crate::browser_cookies::poll_for_cookie(
+                    "auth",
+                    "opencode.ai",
+                    2000,
+                    120,
+                )
+                .await;
+
+                if let Some(c) = cookie {
+                    // Give the browser a moment to redirect to the workspace page
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    // Discover workspaces from browser history/tabs
+                    let mut workspaces = crate::browser_cookies::discover_workspaces().await;
+                    // Fetch workspace names by scraping /go pages with the auth cookie
+                    let client = crate::runtime::http_client();
+                    for ws in &mut workspaces {
+                        if let Some(name) = crate::browser_cookies::fetch_workspace_name(
+                            &client, &ws.id, &c.value,
+                        ).await {
+                            ws.name = Some(name);
+                        }
+                    }
+                    OpencodeGoLoginEvent::BrowserAuthComplete {
+                        auth_cookie: c.value,
+                        workspaces,
+                    }
+                } else {
+                    OpencodeGoLoginEvent::Failed(
+                        "Timed out waiting for browser login".to_string(),
+                    )
+                }
+            },
+            |event: OpencodeGoLoginEvent| {
+                cosmic::Action::App(Message::OpencodeGoLoginEvent(Box::new(event)))
+            },
+        )
+    }
 }
 
 impl AppModel {
@@ -1054,6 +1141,58 @@ impl AppModel {
         event: OllamaCloudLoginEvent,
     ) -> Task<Message> {
         match event {
+            OllamaCloudLoginEvent::BrowserAuthStarted => Task::none(),
+            OllamaCloudLoginEvent::BrowserAuthComplete { session_cookie } => {
+                // Auto-fill the session cookie from browser detection, then save
+                if let Some(login) = self.ollama_cloud_login.as_mut() {
+                    login.session_cookie = session_cookie;
+                    login.error = None;
+                }
+                // Auto-save — Ollama Cloud only needs the session cookie
+                let Some(login) = self.ollama_cloud_login.as_ref() else {
+                    return Task::none();
+                };
+                match login.save(&mut self.config) {
+                    Ok(managed_account) => {
+                        self.ollama_cloud_login_handle = None;
+                        let account_id = managed_account.id.clone();
+                        let account_label = managed_account.label.clone();
+                        self.write_config(|new_config| {
+                            ollama_cloud::account::apply_login_account(
+                                new_config,
+                                managed_account,
+                            );
+                        });
+                        let mut account = ProviderAccountRuntimeState::empty(
+                            ProviderId::OllamaCloud,
+                            account_id.clone(),
+                            account_label,
+                        );
+                        account.auth_state = crate::model::AuthState::Ready;
+                        account.error = None;
+                        self.state.upsert_account(account);
+                        if let Some(provider) = self.state.provider_mut(ProviderId::OllamaCloud) {
+                            provider.account_status = AccountSelectionStatus::Ready;
+                            provider.error = None;
+                            if !provider.selected_account_ids.contains(&account_id) {
+                                provider.selected_account_ids.push(account_id.clone());
+                            }
+                        }
+                        runtime::persist_state(&self.state);
+                        if let Some(login) = self.ollama_cloud_login.as_mut() {
+                            login.status = OllamaCloudLoginStatus::Saved;
+                        }
+                        refresh_provider_task(&self.config, &mut self.state, ProviderId::OllamaCloud)
+                    }
+                    Err(error) => {
+                        if let Some(login) = self.ollama_cloud_login.as_mut() {
+                            login.error = Some(error);
+                            login.status = OllamaCloudLoginStatus::Failed;
+                        }
+                        Task::none()
+                    }
+                }
+            }
             OllamaCloudLoginEvent::Started => Task::none(),
             OllamaCloudLoginEvent::SessionCookieChanged(session_cookie) => {
                 if let Some(login) = self.ollama_cloud_login.as_mut() {
@@ -1124,6 +1263,43 @@ impl AppModel {
                 Task::none()
             }
         }
+    }
+
+    pub(super) fn start_ollama_cloud_browser_auth(&mut self) -> Task<Message> {
+        // Open the browser to Ollama login
+        crate::browser_cookies::open_browser("https://ollama.com/signin");
+
+        // Set status to Polling
+        if let Some(login) = self.ollama_cloud_login.as_mut() {
+            login.status = OllamaCloudLoginStatus::Polling;
+            login.error = None;
+        }
+
+        // Spawn a polling task that looks for the session cookie
+        Task::perform(
+            async move {
+                let cookie = crate::browser_cookies::poll_for_cookie(
+                    "__Secure-session",
+                    "ollama.com",
+                    2000,
+                    120,
+                )
+                .await;
+
+                if let Some(c) = cookie {
+                    OllamaCloudLoginEvent::BrowserAuthComplete {
+                        session_cookie: c.value,
+                    }
+                } else {
+                    OllamaCloudLoginEvent::Failed(
+                        "Timed out waiting for browser login".to_string(),
+                    )
+                }
+            },
+            |event: OllamaCloudLoginEvent| {
+                cosmic::Action::App(Message::OllamaCloudLoginEvent(Box::new(event)))
+            },
+        )
     }
 }
 

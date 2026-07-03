@@ -482,6 +482,11 @@ pub(super) fn opencode_go_login_controls(
                 })
                 .width(Length::Fill),
         );
+        // Open Browser button — auto-detect auth cookie from browser
+        content = content.push(
+            widget::button::text(fl!("open-browser-auth"))
+                .on_press_maybe(enabled.then_some(Message::StartOpencodeGoBrowserAuth)),
+        );
         content = content.push(
             row![
                 widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
@@ -491,6 +496,23 @@ pub(super) fn opencode_go_login_controls(
                     .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
             ]
             .spacing(8),
+        );
+    } else if login.status == OpencodeGoLoginStatus::SelectWorkspace {
+        // Show workspace picker for multiple workspaces
+        content = content.push(widget::text("Select a workspace:").size(12));
+        for ws in &login.discovered_workspaces {
+            let label = ws.name.as_deref().unwrap_or(&ws.id);
+            let ws_id = ws.id.clone();
+            content = content.push(
+                widget::button::text(label)
+                    .on_press_maybe(enabled.then_some(
+                        Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::WorkspaceSelected(ws_id)))
+                    )),
+            );
+        }
+        content = content.push(
+            widget::button::text(fl!("account-cancel"))
+                .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
         );
     } else {
         content = content.push(
@@ -506,10 +528,11 @@ pub(super) fn opencode_go_login_controls(
 
     Element::from(content)
 }
-
 fn opencode_go_login_status(login: &OpencodeGoLoginState) -> String {
     match login.status {
         OpencodeGoLoginStatus::Editing => fl!("opencode-go-login-editing"),
+        OpencodeGoLoginStatus::Polling => "Waiting for browser login…".to_string(),
+        OpencodeGoLoginStatus::SelectWorkspace => "Select a workspace".to_string(),
         OpencodeGoLoginStatus::Saved => fl!("opencode-go-login-saved"),
         OpencodeGoLoginStatus::Failed => login
             .error
@@ -558,6 +581,11 @@ pub(super) fn ollama_cloud_login_controls(
                 })
                 .width(Length::Fill),
         );
+        // Open Browser button — auto-detect session cookie from browser
+        content = content.push(
+            widget::button::text(fl!("open-browser-auth"))
+                .on_press_maybe(enabled.then_some(Message::StartOllamaCloudBrowserAuth)),
+        );
         content = content.push(
             row![
                 widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
@@ -585,6 +613,7 @@ pub(super) fn ollama_cloud_login_controls(
 
 fn ollama_cloud_login_status(login: &OllamaCloudLoginState) -> String {
     match login.status {
+        OllamaCloudLoginStatus::Polling => "Waiting for browser login…".to_string(),
         OllamaCloudLoginStatus::Editing => fl!("ollama-cloud-login-editing"),
         OllamaCloudLoginStatus::Saved => fl!("ollama-cloud-login-saved"),
         OllamaCloudLoginStatus::Failed => login
