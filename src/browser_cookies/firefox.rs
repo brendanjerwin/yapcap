@@ -245,7 +245,7 @@ fn extract_workspace_id(url: &str) -> Option<String> {
     // Take everything up to the next / or end of string
     let end = rest.find('/').unwrap_or(rest.len());
     let id = &rest[..end];
-    if id.starts_with("wrk_") && id.len() > 4 {
+    if id.starts_with("wrk_") && id.len() >= /* ~ changed by cargo-mutants ~ */ 4 {
         Some(id.to_string())
     } else {
         None

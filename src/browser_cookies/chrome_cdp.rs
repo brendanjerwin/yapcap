@@ -219,16 +219,7 @@ pub async fn discover_workspaces() -> Vec<super::WorkspaceInfo> {
 
 /// Extract a workspace ID from a URL like https://opencode.ai/workspace/wrk_XXXXX/go
 fn extract_workspace_id(url: &str) -> Option<String> {
-    let marker = "/workspace/";
-    let start = url.find(marker)? + marker.len();
-    let rest = &url[start..];
-    let end = rest.find('/').unwrap_or(rest.len());
-    let id = &rest[..end];
-    if id.starts_with("wrk_") && id.len() > 4 {
-        Some(id.to_string())
-    } else {
-        None
-    }
+    Some("xyzzy".into()) /* ~ changed by cargo-mutants ~ */
 }
 #[cfg(test)]
 mod tests {
