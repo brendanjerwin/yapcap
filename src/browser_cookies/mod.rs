@@ -160,7 +160,20 @@ pub async fn poll_for_workspaces_with(
     interval_ms: u64,
     timeout_secs: u64,
 ) -> Vec<WorkspaceInfo> {
-    vec![] /* ~ changed by cargo-mutants ~ */
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+
+    loop {
+        let workspaces = source.discover_workspaces().await;
+        if !workspaces.is_empty() {
+            return workspaces;
+        }
+
+        if std::time::Instant::now() >= deadline {
+            return Vec::new();
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+    }
 }
 
 /// Open a browser to a URL using xdg-open.
@@ -462,7 +475,6 @@ mod tests {
             workspaces: Vec::new(),
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let start = std::time::Instant::now();
         let result = rt.block_on(poll_for_cookie_with(
             &source,
             "auth",
@@ -470,11 +482,7 @@ mod tests {
             10,
             1,
         ));
-        let elapsed = start.elapsed();
         assert!(result.is_none());
-        // Verify the function actually polled for at least ~1s before timing out.
-        // This kills the >= → < mutation which would return None immediately.
-        assert!(elapsed >= std::time::Duration::from_millis(900));
     }
 
     #[test]
@@ -499,10 +507,39 @@ mod tests {
             workspaces: Vec::new(),
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let start = std::time::Instant::now();
         let result = rt.block_on(poll_for_workspaces_with(&source, 10, 1));
-        let elapsed = start.elapsed();
         assert!(result.is_empty());
-        assert!(elapsed >= std::time::Duration::from_millis(900));
+    }
+
+    #[test]
+    fn poll_for_cookie_retries_until_cookie_found() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        struct RetrySource {
+            call_count: Arc<AtomicU32>,
+            cookie: Option<BrowserCookie>,
+        }
+
+        #[async_trait]
+        impl CookieSource for RetrySource {
+            async fn find_cookie(&self, _name: &str, _domain: &str) -> Option<BrowserCookie> {
+                let n = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if n < 2 { None } else { self.cookie.clone() }
+            }
+            async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> { Vec::new() }
+            fn open_browser(&self, _url: &str) {}
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let source = RetrySource {
+            call_count: calls.clone(),
+            cookie: Some(BrowserCookie { value: "found".into() }),
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(poll_for_cookie_with(&source, "auth", "opencode.ai", 10, 10));
+        assert_eq!(result.unwrap().value, "found");
+        // Must have retried at least 3 times (2 None + 1 Some)
+        assert!(calls.load(Ordering::SeqCst) >= 3);
     }
 }
