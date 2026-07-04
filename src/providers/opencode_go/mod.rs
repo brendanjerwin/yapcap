@@ -979,10 +979,13 @@ mod tests {
     fn parse_reset_at_uses_updated_at_plus_reset_in_sec() {
         let ts = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
             .unwrap().with_timezone(&Utc);
-        let html = r#"rollingUsage:$R[0]={usagePercent:50,resetInSec:3600}"#;
+        let html = r#"rollingUsage:$R[0]={usagePercent:50,resetInSec:3600}
+        weeklyUsage:$R[1]={usagePercent:60,resetInSec:7200}
+        monthlyUsage:$R[2]={usagePercent:70,resetInSec:10800}"#;
         let snap = parse(html, ts, "ws1").unwrap();
-        let expected = ts + chrono::Duration::seconds(3600);
-        assert_eq!(snap.windows[0].reset_at, Some(expected));
+        assert_eq!(snap.windows[0].reset_at, Some(ts + chrono::Duration::seconds(3600)));
+        assert_eq!(snap.windows[1].reset_at, Some(ts + chrono::Duration::seconds(7200)));
+        assert_eq!(snap.windows[2].reset_at, Some(ts + chrono::Duration::seconds(10800)));
     }
 
     #[test]

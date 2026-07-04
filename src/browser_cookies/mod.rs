@@ -475,6 +475,7 @@ mod tests {
             workspaces: Vec::new(),
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
+        let start = std::time::Instant::now();
         let result = rt.block_on(poll_for_cookie_with(
             &source,
             "auth",
@@ -482,7 +483,11 @@ mod tests {
             10,
             1,
         ));
+        let elapsed = start.elapsed();
         assert!(result.is_none());
+        // Verify the function actually polled for at least ~1s before timing out.
+        // This kills the >= → < mutation which would return None immediately.
+        assert!(elapsed >= std::time::Duration::from_millis(900));
     }
 
     #[test]
@@ -507,7 +512,10 @@ mod tests {
             workspaces: Vec::new(),
         };
         let rt = tokio::runtime::Runtime::new().unwrap();
+        let start = std::time::Instant::now();
         let result = rt.block_on(poll_for_workspaces_with(&source, 10, 1));
+        let elapsed = start.elapsed();
         assert!(result.is_empty());
+        assert!(elapsed >= std::time::Duration::from_millis(900));
     }
 }
