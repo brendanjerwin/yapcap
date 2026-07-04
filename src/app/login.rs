@@ -898,15 +898,45 @@ impl AppModel {
 
 impl AppModel {
     pub(super) fn reauthenticate_opencode_go_account(&mut self, account_id: &str) -> Task<Message> {
-        if self
+        let account = self
             .config
             .opencode_go_managed_accounts
             .iter()
-            .all(|a| a.id != account_id)
-        {
+            .find(|a| a.id == account_id)
+            .cloned();
+        let Some(account) = account else {
             return Task::none();
-        }
-        self.start_opencode_go_login()
+        };
+
+        // Open browser so the user can re-authenticate
+        crate::browser_cookies::open_browser("https://opencode.ai/auth");
+
+        // Poll for a fresh auth cookie, then write it to the existing account dir
+        Task::perform(
+            async move {
+                let cookie = crate::browser_cookies::poll_for_cookie(
+                    "auth",
+                    "opencode.ai",
+                    2000,
+                    120,
+                )
+                .await;
+
+                if let Some(c) = cookie {
+                    let account_root = crate::config::managed_opencode_go_account_dir(&account.id);
+                    if let Err(e) = crate::providers::opencode_go::storage::write_auth_cookie(&account_root, &c.value) {
+                        tracing::warn!(error = %e, "failed to persist refreshed auth cookie");
+                    }
+                    true
+                } else {
+                    false
+                }
+            },
+            |refresh: bool| {
+                let _ = refresh;
+                cosmic::Action::App(Message::RefreshNow)
+            },
+        )
     }
 
     pub(super) fn start_opencode_go_login(&mut self) -> Task<Message> {
@@ -1104,15 +1134,45 @@ impl AppModel {
 
 impl AppModel {
     pub(super) fn reauthenticate_ollama_cloud_account(&mut self, account_id: &str) -> Task<Message> {
-        if self
+        let account = self
             .config
             .ollama_cloud_managed_accounts
             .iter()
-            .all(|a| a.id != account_id)
-        {
+            .find(|a| a.id == account_id)
+            .cloned();
+        let Some(account) = account else {
             return Task::none();
-        }
-        self.start_ollama_cloud_login()
+        };
+
+        // Open browser so the user can re-authenticate
+        crate::browser_cookies::open_browser("https://ollama.com/signin");
+
+        // Poll for a fresh session cookie, then write it to the existing account dir
+        Task::perform(
+            async move {
+                let cookie = crate::browser_cookies::poll_for_cookie(
+                    "__Secure-session",
+                    "ollama.com",
+                    2000,
+                    120,
+                )
+                .await;
+
+                if let Some(c) = cookie {
+                    let account_root = crate::config::managed_ollama_cloud_account_dir(&account.id);
+                    if let Err(e) = crate::providers::ollama_cloud::storage::write_session_cookie(&account_root, &c.value) {
+                        tracing::warn!(error = %e, "failed to persist refreshed session cookie");
+                    }
+                    true
+                } else {
+                    false
+                }
+            },
+            |refresh: bool| {
+                let _ = refresh;
+                cosmic::Action::App(Message::RefreshNow)
+            },
+        )
     }
 
     pub(super) fn start_ollama_cloud_login(&mut self) -> Task<Message> {
