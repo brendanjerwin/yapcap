@@ -542,4 +542,36 @@ mod tests {
         // Must have retried at least 3 times (2 None + 1 Some)
         assert!(calls.load(Ordering::SeqCst) >= 3);
     }
+
+    #[test]
+    fn poll_for_workspaces_retries_until_found() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+
+        struct RetrySource {
+            call_count: Arc<AtomicU32>,
+            workspaces: Vec<WorkspaceInfo>,
+        }
+
+        #[async_trait]
+        impl CookieSource for RetrySource {
+            async fn find_cookie(&self, _name: &str, _domain: &str) -> Option<BrowserCookie> { None }
+            async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
+                let n = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if n < 2 { Vec::new() } else { self.workspaces.clone() }
+            }
+            fn open_browser(&self, _url: &str) {}
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let source = RetrySource {
+            call_count: calls.clone(),
+            workspaces: vec![WorkspaceInfo { id: "wrk_test".into(), name: None }],
+        };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(poll_for_workspaces_with(&source, 10, 10));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "wrk_test");
+        assert!(calls.load(Ordering::SeqCst) >= 3);
+    }
 }
