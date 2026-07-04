@@ -160,20 +160,7 @@ pub async fn poll_for_workspaces_with(
     interval_ms: u64,
     timeout_secs: u64,
 ) -> Vec<WorkspaceInfo> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
-
-    loop {
-        let workspaces = source.discover_workspaces().await;
-        if !workspaces.is_empty() {
-            return workspaces;
-        }
-
-        if std::time::Instant::now() >= deadline {
-            return Vec::new();
-        }
-
-        tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
-    }
+    vec![] /* ~ changed by cargo-mutants ~ */
 }
 
 /// Open a browser to a URL using xdg-open.

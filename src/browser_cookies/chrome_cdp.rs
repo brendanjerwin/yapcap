@@ -43,11 +43,11 @@ struct CdpPage {
 }
 
 /// CDP Network.Cookie (subset of fields we need)
-#[derive(Debug, Deserialize)]
-struct CdpCookie {
-    name: String,
-    value: String,
-    domain: String,
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct CdpCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
 }
 
 /// CDP response from Network.getAllCookies
@@ -132,14 +132,23 @@ pub async fn find_cookie(cookie_name: &str, domain: &str) -> Option<BrowserCooki
     let cookie_result: CdpGetAllCookiesResult =
         serde_json::from_value(result).ok()?;
 
-    cookie_result
-        .cookies
-        .into_iter()
+    filter_cookie(&cookie_result.cookies, cookie_name, domain)
+}
+
+/// Find a matching cookie from a list by name and domain.
+/// Pure function extracted from `find_cookie` for testability.
+pub fn filter_cookie(
+    cookies: &[CdpCookie],
+    cookie_name: &str,
+    domain: &str,
+) -> Option<BrowserCookie> {
+    cookies
+        .iter()
         .find(|c| {
             c.name == cookie_name && (c.domain == domain || c.domain == format!(".{domain}"))
         })
         .map(|c| BrowserCookie {
-            value: c.value,
+            value: c.value.clone(),
         })
 }
 
@@ -314,3 +323,56 @@ mod tests {
         assert_eq!(extract_workspace_id(url), Some("wrk_abc?x=1".to_string()));
     }
 }
+
+    #[test]
+    fn filter_cookie_finds_exact_domain_match() {
+        let cookies = vec![
+            CdpCookie { name: "auth".into(), value: "val1".into(), domain: "opencode.ai".into() },
+            CdpCookie { name: "other".into(), value: "val2".into(), domain: "example.com".into() },
+        ];
+        let result = filter_cookie(&cookies, "auth", "opencode.ai");
+        assert_eq!(result.unwrap().value, "val1");
+    }
+
+    #[test]
+    fn filter_cookie_finds_dot_prefixed_domain() {
+        let cookies = vec![
+            CdpCookie { name: "auth".into(), value: "val1".into(), domain: ".opencode.ai".into() },
+        ];
+        let result = filter_cookie(&cookies, "auth", "opencode.ai");
+        assert_eq!(result.unwrap().value, "val1");
+    }
+
+    #[test]
+    fn filter_cookie_returns_none_when_name_mismatch() {
+        let cookies = vec![
+            CdpCookie { name: "other".into(), value: "val1".into(), domain: "opencode.ai".into() },
+        ];
+        let result = filter_cookie(&cookies, "auth", "opencode.ai");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn filter_cookie_returns_none_when_domain_mismatch() {
+        let cookies = vec![
+            CdpCookie { name: "auth".into(), value: "val1".into(), domain: "example.com".into() },
+        ];
+        let result = filter_cookie(&cookies, "auth", "opencode.ai");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn filter_cookie_returns_none_on_empty_list() {
+        let result = filter_cookie(&[], "auth", "opencode.ai");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn filter_cookie_returns_first_match() {
+        let cookies = vec![
+            CdpCookie { name: "auth".into(), value: "first".into(), domain: "opencode.ai".into() },
+            CdpCookie { name: "auth".into(), value: "second".into(), domain: "opencode.ai".into() },
+        ];
+        let result = filter_cookie(&cookies, "auth", "opencode.ai");
+        assert_eq!(result.unwrap().value, "first");
+    }
