@@ -98,7 +98,10 @@ mod tests {
     use crate::config::Config;
 
     fn state_with(session_cookie: &str) -> OllamaCloudLoginState {
-        let mut state = OllamaCloudLoginState::new("ollama-cloud-test".to_string());
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = format!("ollama-cloud-test-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
+        let mut state = OllamaCloudLoginState::new(id);
         state.session_cookie = session_cookie.to_string();
         state
     }
@@ -150,12 +153,13 @@ mod tests {
         let result = state.save(&mut config);
 
         let account = result.expect("save should succeed with a valid session cookie");
-        assert_eq!(account.id, "ollama-cloud-test");
+        assert!(account.id.starts_with("ollama-cloud-test-"));
         assert_eq!(account.label, "");
         assert_eq!(account.session_cookie_source, "stored");
         assert!(account.last_authenticated_at.is_some());
         assert_eq!(account.created_at, account.updated_at);
         assert_eq!(account.updated_at, account.last_authenticated_at.unwrap());
+        let _ = std::fs::remove_dir_all(crate::config::managed_ollama_cloud_account_dir(&account.id));
     }
 
     #[test]
@@ -181,11 +185,11 @@ mod tests {
         let state = state_with("  session-1  ");
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
-        // The trimmed session cookie is written to disk; read it back to verify.
         let account_dir = crate::config::managed_ollama_cloud_account_dir(&account.id);
         let stored = std::fs::read_to_string(account_dir.join("session_cookie.txt"))
             .expect("session cookie file should exist");
         assert_eq!(stored, "session-1");
+        let _ = std::fs::remove_dir_all(&account_dir);
     }
 
     #[test]
@@ -195,6 +199,7 @@ mod tests {
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
         assert_eq!(account.label, "my label");
+        let _ = std::fs::remove_dir_all(crate::config::managed_ollama_cloud_account_dir(&account.id));
     }
 
     #[test]
@@ -202,7 +207,8 @@ mod tests {
         let state = state_with("session-1");
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
-        assert_eq!(account.id, "ollama-cloud-test");
+        assert!(account.id.starts_with("ollama-cloud-test-"));
+        let _ = std::fs::remove_dir_all(crate::config::managed_ollama_cloud_account_dir(&account.id));
     }
 
     #[test]
@@ -211,5 +217,6 @@ mod tests {
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
         assert_eq!(account.session_cookie_source, "stored");
+        let _ = std::fs::remove_dir_all(crate::config::managed_ollama_cloud_account_dir(&account.id));
     }
 }

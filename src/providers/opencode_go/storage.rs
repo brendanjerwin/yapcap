@@ -23,7 +23,8 @@ pub fn write_auth_cookie(account_dir: &Path, auth_cookie: &str) -> Result<(), St
 }
 
 pub fn load_workspace_id(account_dir: &Path) -> Result<String, String> {
-    Ok(String::new()) /* ~ changed by cargo-mutants ~ */
+    fs::read_to_string(account_dir.join(WORKSPACE_ID_FILE))
+        .map_err(|error| format!("failed to read workspace id: {error}"))
 }
 
 pub fn load_auth_cookie(account_dir: &Path) -> Result<String, String> {

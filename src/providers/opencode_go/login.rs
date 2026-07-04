@@ -118,7 +118,10 @@ mod tests {
     use crate::config::Config;
 
     fn state_with(workspace_id: &str, auth_cookie: &str) -> OpencodeGoLoginState {
-        let mut state = OpencodeGoLoginState::new("opencode-go-test".to_string());
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let id = format!("opencode-go-test-{}", COUNTER.fetch_add(1, Ordering::SeqCst));
+        let mut state = OpencodeGoLoginState::new(id);
         state.workspace_id = workspace_id.to_string();
         state.auth_cookie = auth_cookie.to_string();
         state
@@ -181,13 +184,17 @@ mod tests {
         let result = state.save(&mut config);
 
         let account = result.expect("save should succeed with valid inputs");
-        assert_eq!(account.id, "opencode-go-test");
+        assert!(account.id.starts_with("opencode-go-test-"));
         assert_eq!(account.workspace_id, "workspace-1");
         assert_eq!(account.label, "");
         assert_eq!(account.auth_cookie_source, "stored");
         assert!(account.last_authenticated_at.is_some());
         assert_eq!(account.created_at, account.updated_at);
         assert_eq!(account.updated_at, account.last_authenticated_at.unwrap());
+
+        // Clean up test artifacts from the real filesystem
+        let dir = crate::config::managed_opencode_go_account_dir("opencode-go-test");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -234,6 +241,7 @@ mod tests {
         let stored = std::fs::read_to_string(account_dir.join("auth_cookie.txt"))
             .expect("auth cookie file should exist");
         assert_eq!(stored, "auth-cookie-1");
+        let _ = std::fs::remove_dir_all(crate::config::managed_opencode_go_account_dir(&account.id));
     }
 
     #[test]
@@ -242,6 +250,7 @@ mod tests {
         state.label = "  my label  ".to_string();
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
+        let _ = std::fs::remove_dir_all(crate::config::managed_opencode_go_account_dir(&account.id));
         assert_eq!(account.label, "my label");
     }
 
@@ -250,7 +259,8 @@ mod tests {
         let state = state_with("workspace-1", "auth-cookie-1");
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
-        assert_eq!(account.id, "opencode-go-test");
+        let _ = std::fs::remove_dir_all(crate::config::managed_opencode_go_account_dir(&account.id));
+        assert!(account.id.starts_with("opencode-go-test-"));
     }
 
     #[test]
@@ -259,5 +269,6 @@ mod tests {
         let mut config = Config::default();
         let account = state.save(&mut config).expect("save should succeed");
         assert_eq!(account.auth_cookie_source, "stored");
+        let _ = std::fs::remove_dir_all(crate::config::managed_opencode_go_account_dir(&account.id));
     }
 }
