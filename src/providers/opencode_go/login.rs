@@ -93,6 +93,7 @@ pub enum OpencodeGoLoginEvent {
         workspaces: Vec<crate::browser_cookies::WorkspaceInfo>,
     },
     WorkspaceSelected(String),
+    #[allow(dead_code)]
     Started,
     WorkspaceIdChanged(String),
     AuthCookieChanged(String),

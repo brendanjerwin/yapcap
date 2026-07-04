@@ -17,10 +17,6 @@ impl CookieSource for ChromeSource {
     async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
         discover_workspaces().await
     }
-
-    fn open_browser(&self, url: &str) {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    }
 }
 
 const CDP_DEFAULT_PORT: u16 = 9222;
@@ -35,6 +31,7 @@ struct CdpVersion {
 
 /// CDP response from /json/list
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CdpPage {
     id: String,
     url: String,
@@ -59,6 +56,7 @@ struct CdpGetAllCookiesResult {
 
 /// CDP response wrapper
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct CdpResponse {
     id: u64,
     result: Option<serde_json::Value>,
@@ -72,7 +70,15 @@ fn cdp_is_available(port: u16) -> bool {
 
 /// Get the browser-level WebSocket URL from CDP /json/version
 async fn get_browser_ws_url(port: u16) -> Option<String> {
-    Some(String::new()) /* ~ changed by cargo-mutants ~ */
+    let url = format!("http://127.0.0.1:{port}/json/version");
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .timeout(CDP_QUERY_TIMEOUT)
+        .send()
+        .await
+        .ok()?;
+    let version: CdpVersion = resp.json().await.ok()?;
+    Some(version.web_socket_debugger_url)
 }
 
 /// Find a cookie by name and domain via Chrome DevTools Protocol.
@@ -135,47 +141,7 @@ pub async fn find_cookie(cookie_name: &str, domain: &str) -> Option<BrowserCooki
         })
 }
 
-/// Launch Chrome/Chromium with --remote-debugging-port so we can read cookies.
-///
-/// Uses the existing user profile so cookies are available. Returns true if
-/// the browser was launched (or was already running with the port).
-pub fn launch_chrome_with_debug_port() -> bool {
-    // If CDP is already available, nothing to do
-    if cdp_is_available(CDP_DEFAULT_PORT) {
-        return true;
-    }
 
-    // Find Chrome/Chromium binary
-    let browser = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]
-        .iter()
-        .find_map(|name| which::which(name).ok());
-
-    let browser = match browser {
-        Some(b) => b,
-        None => return false,
-    };
-
-    // Launch with the user's default profile
-    let user_data_dir = dirs::config_dir().map(|c| c.join("google-chrome/Default"));
-    let user_data_dir = match user_data_dir {
-        Some(d) => d,
-        None => return false,
-    };
-
-    let parent = user_data_dir.parent().map(|p| p.to_path_buf());
-    let parent = match parent {
-        Some(p) => p,
-        None => return false,
-    };
-
-    std::process::Command::new(browser)
-        .arg(format!("--remote-debugging-port={CDP_DEFAULT_PORT}"))
-        .arg(format!("--user-data-dir={}", parent.display()))
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok()
-}
 
 /// Discover OpenCode workspaces from Chrome CDP tabs.
 ///

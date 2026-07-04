@@ -74,6 +74,7 @@ pub enum OllamaCloudLoginEvent {
     #[allow(dead_code)]
     BrowserAuthStarted,
     BrowserAuthComplete { session_cookie: String },
+    #[allow(dead_code)]
     Started,
     SessionCookieChanged(String),
     LabelChanged(String),

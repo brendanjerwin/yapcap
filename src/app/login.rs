@@ -1084,11 +1084,6 @@ impl AppModel {
         }
 
         // Spawn a polling task that looks for the auth cookie
-        let account_id = self
-            .opencode_go_login
-            .as_ref()
-            .map(|l| l.account_id.clone())
-            .unwrap_or_default();
 
         Task::perform(
             async move {

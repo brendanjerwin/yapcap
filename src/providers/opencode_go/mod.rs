@@ -11,7 +11,7 @@ use chrono::Utc;
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub use account::{OpencodeGoAccount, discover_accounts, remove_managed_config_dir};
+pub use account::{discover_accounts, remove_managed_config_dir};
 pub use login::{
     OpencodeGoLoginEvent, OpencodeGoLoginState, OpencodeGoLoginStatus, prepare as prepare_login,
 };

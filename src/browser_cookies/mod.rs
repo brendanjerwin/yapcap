@@ -39,8 +39,7 @@ pub trait CookieSource: Send + Sync {
     /// Discover OpenCode workspaces from browser history/tabs.
     async fn discover_workspaces(&self) -> Vec<WorkspaceInfo>;
 
-    /// Open the browser to a URL (for interactive login).
-    fn open_browser(&self, url: &str);
+
 }
 
 /// Parse a browser name string to determine the browser kind.
@@ -75,13 +74,6 @@ pub fn default_cookie_source() -> Box<dyn CookieSource> {
         BrowserKind::Firefox => Box::new(firefox::FirefoxSource),
         BrowserKind::Chrome => Box::new(chrome_cdp::ChromeSource),
     }
-}
-
-/// Find a cookie by name+domain using the detected default browser.
-pub async fn find_cookie(cookie_name: &str, domain: &str) -> Option<BrowserCookie> {
-    default_cookie_source()
-        .find_cookie(cookie_name, domain)
-        .await
 }
 
 /// Discover OpenCode workspaces using the detected default browser.
@@ -155,6 +147,7 @@ pub async fn poll_for_cookie(
 }
 
 /// Poll for workspaces using the given source.
+#[cfg(test)]
 pub async fn poll_for_workspaces_with(
     source: &dyn CookieSource,
     interval_ms: u64,
@@ -268,7 +261,6 @@ mod tests {
             self.workspaces.clone()
         }
 
-        fn open_browser(&self, _url: &str) {}
     }
 
     #[test]
@@ -528,7 +520,6 @@ mod tests {
                 if n < 2 { None } else { self.cookie.clone() }
             }
             async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> { Vec::new() }
-            fn open_browser(&self, _url: &str) {}
         }
 
         let calls = Arc::new(AtomicU32::new(0));
@@ -560,9 +551,7 @@ mod tests {
                 let n = self.call_count.fetch_add(1, Ordering::SeqCst);
                 if n < 2 { Vec::new() } else { self.workspaces.clone() }
             }
-            fn open_browser(&self, _url: &str) {}
         }
-
         let calls = Arc::new(AtomicU32::new(0));
         let source = RetrySource {
             call_count: calls.clone(),

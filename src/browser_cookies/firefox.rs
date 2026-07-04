@@ -16,10 +16,6 @@ impl CookieSource for FirefoxSource {
     async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
         discover_workspaces()
     }
-
-    fn open_browser(&self, url: &str) {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    }
 }
 
 /// Find the Firefox profile directory containing cookies.sqlite.

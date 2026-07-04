@@ -11,7 +11,7 @@ use chrono::Utc;
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub use account::{OllamaCloudAccount, discover_accounts, remove_managed_config_dir};
+pub use account::{discover_accounts, remove_managed_config_dir};
 pub use login::{
     OllamaCloudLoginEvent, OllamaCloudLoginState, OllamaCloudLoginStatus, prepare as prepare_login,
 };

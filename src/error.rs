@@ -704,11 +704,13 @@ impl OpencodeGoError {
         matches!(self, Self::LoginRequired)
     }
 
+    #[allow(dead_code)]
     #[must_use]
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
     }
 
+    #[allow(dead_code)]
     #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
@@ -760,11 +762,13 @@ impl OllamaCloudError {
         matches!(self, Self::LoginRequired)
     }
 
+    #[allow(dead_code)]
     #[must_use]
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, Self::RateLimited { .. })
     }
 
+    #[allow(dead_code)]
     #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
