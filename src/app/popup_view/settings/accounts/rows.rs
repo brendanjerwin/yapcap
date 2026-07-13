@@ -533,7 +533,7 @@ fn account_action_icon_button(
         .class(cosmic::theme::Svg::custom(|theme| widget::svg::Style {
             color: Some(theme.cosmic().background.component.on.into()),
         }))
-        .opacity(if available { 1.0 } else { 0.45 })
+        .opacity(if available { 1.0_f32 } else { 0.45_f32 })
         .width(Length::Fixed(16.0))
         .height(Length::Fixed(16.0));
 
