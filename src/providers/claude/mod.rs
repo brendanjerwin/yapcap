@@ -2,6 +2,7 @@
 
 mod account;
 mod host_session;
+mod limits;
 mod login;
 mod oauth;
 
@@ -14,6 +15,7 @@ use crate::model::{
 use crate::usage_display;
 use chrono::{DateTime, Duration, Utc};
 pub(crate) use host_session::system_active_account_id;
+use limits::{ClaudeLimit, scoped_weekly_windows};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -42,6 +44,8 @@ struct ClaudeUsageResponse {
     #[allow(dead_code)]
     pub seven_day_omelette: Option<ClaudeWindow>,
     pub extra_usage: Option<ClaudeExtraUsage>,
+    #[serde(default)]
+    pub limits: Option<Vec<ClaudeLimit>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -310,14 +314,23 @@ fn normalize(
     if let Some(w) = normalize_window("Weekly", payload.seven_day.as_ref(), SEVEN_DAY_SECONDS)? {
         windows.push(w);
     }
-    let model_windows: &[(&str, &Option<ClaudeWindow>)] = &[
-        ("Sonnet", &payload.seven_day_sonnet),
-        ("Opus", &payload.seven_day_opus),
-        ("Cowork", &payload.seven_day_cowork),
-    ];
-    for &(label, window) in model_windows {
-        if let Some(w) = normalize_window(label, window.as_ref(), SEVEN_DAY_SECONDS)? {
-            windows.push(w);
+    match payload
+        .limits
+        .as_deref()
+        .filter(|limits| !limits.is_empty())
+    {
+        Some(limits) => windows.extend(scoped_weekly_windows(limits)?),
+        None => {
+            let model_windows: &[(&str, &Option<ClaudeWindow>)] = &[
+                ("Sonnet", &payload.seven_day_sonnet),
+                ("Opus", &payload.seven_day_opus),
+                ("Cowork", &payload.seven_day_cowork),
+            ];
+            for &(label, window) in model_windows {
+                if let Some(w) = normalize_window(label, window.as_ref(), SEVEN_DAY_SECONDS)? {
+                    windows.push(w);
+                }
+            }
         }
     }
     if windows.is_empty() {
@@ -351,18 +364,7 @@ fn normalize_window(
     let Some(used_percent) = window.utilization else {
         return Ok(None);
     };
-    let reset_at = window
-        .resets_at
-        .as_ref()
-        .map(|value| {
-            DateTime::parse_from_rfc3339(value)
-                .map(|dt| dt.with_timezone(&Utc))
-                .map_err(|source| ClaudeError::InvalidResetTimestamp {
-                    value: value.clone(),
-                    source,
-                })
-        })
-        .transpose()?;
+    let reset_at = parse_reset_timestamp(window.resets_at.as_deref())?;
     Ok(Some(UsageWindow {
         label: label.to_string(),
         used_percent,
@@ -370,6 +372,19 @@ fn normalize_window(
         window_seconds: Some(window_seconds),
         reset_description: reset_at.map(|dt| dt.to_rfc3339()),
     }))
+}
+
+fn parse_reset_timestamp(value: Option<&str>) -> Result<Option<DateTime<Utc>>, ClaudeError> {
+    value
+        .map(|value| {
+            DateTime::parse_from_rfc3339(value)
+                .map(|dt| dt.with_timezone(&Utc))
+                .map_err(|source| ClaudeError::InvalidResetTimestamp {
+                    value: value.to_string(),
+                    source,
+                })
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -475,21 +490,46 @@ mod tests {
         let payload = claude_oauth_usage_from_probe_fixture();
         let snapshot = normalize(&payload, None).unwrap();
         assert_eq!(snapshot.provider, ProviderId::Claude);
-        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows.len(), 3);
         assert_eq!(snapshot.windows[0].label, "Session");
-        assert_eq!(snapshot.windows[0].used_percent, 0.0);
+        assert_eq!(snapshot.windows[0].used_percent, 51.0);
         assert_eq!(snapshot.windows[1].label, "Weekly");
-        assert_eq!(snapshot.windows[1].used_percent, 100.0);
+        assert_eq!(snapshot.windows[1].used_percent, 4.0);
+        assert_eq!(snapshot.windows[2].label, "Fable");
+        assert_eq!(snapshot.windows[2].used_percent, 0.0);
+        assert!(snapshot.windows[2].reset_at.is_none());
         assert!(snapshot.provider_cost.is_none());
         assert!(snapshot.identity.email.is_none());
+        assert!(matches!(
+            snapshot.extra_usage.as_ref(),
+            Some(ExtraUsageState::Disabled)
+        ));
+    }
+
+    #[test]
+    fn normalizes_active_extra_usage_with_computed_utilization() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(
+            r#"{
+                "five_hour": {"utilization": 5.0, "resets_at": null},
+                "extra_usage": {
+                    "currency": "EUR",
+                    "is_enabled": true,
+                    "monthly_limit": 2000,
+                    "used_credits": 500.0,
+                    "utilization": null
+                }
+            }"#,
+        )
+        .unwrap();
+        let snapshot = normalize(&payload, None).unwrap();
         match snapshot.extra_usage.as_ref() {
-            Some(ExtraUsageState::Active { cost, used_percent }) => {
-                assert!((*used_percent).abs() < f32::EPSILON);
+            Some(ExtraUsageState::Active { used_percent, cost }) => {
+                assert_eq!(*used_percent, 25.0);
                 assert_eq!(cost.units, "EUR");
-                assert_eq!(cost.used, 0.0);
+                assert_eq!(cost.used, 5.0);
                 assert_eq!(cost.limit, Some(20.0));
             }
-            _ => panic!("expected active extra usage"),
+            other => panic!("expected active extra usage, got {other:?}"),
         }
     }
 
@@ -514,6 +554,44 @@ mod tests {
         assert_eq!(snapshot.windows.len(), 1);
         assert_eq!(snapshot.windows[0].used_percent, 42.0);
         assert!(snapshot.windows[0].reset_at.is_none());
+    }
+
+    #[test]
+    fn normalize_uses_legacy_fields_when_limits_absent() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(
+            r#"{
+                "five_hour": {"utilization": 5.0, "resets_at": null},
+                "seven_day": {"utilization": 10.0, "resets_at": null},
+                "seven_day_sonnet": {"utilization": 20.0, "resets_at": null},
+                "seven_day_opus": {"utilization": 30.0, "resets_at": null}
+            }"#,
+        )
+        .unwrap();
+        let snapshot = normalize(&payload, None).unwrap();
+        let labels: Vec<&str> = snapshot.windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["Session", "Weekly", "Sonnet", "Opus"]);
+    }
+
+    #[test]
+    fn normalize_uses_limits_and_ignores_legacy_fields_when_present() {
+        let payload: ClaudeUsageResponse = serde_json::from_str(
+            r#"{
+                "five_hour": {"utilization": 5.0, "resets_at": null},
+                "seven_day": {"utilization": 10.0, "resets_at": null},
+                "seven_day_sonnet": {"utilization": 20.0, "resets_at": null},
+                "seven_day_opus": {"utilization": 30.0, "resets_at": null},
+                "limits": [
+                    {"kind":"weekly_scoped","group":"weekly","percent":42.0,
+                     "scope":{"model":{"id":"fable-5","display_name":"Fable"}},
+                     "is_active":false}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let snapshot = normalize(&payload, None).unwrap();
+        let labels: Vec<&str> = snapshot.windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["Session", "Weekly", "Fable"]);
+        assert_eq!(snapshot.windows[2].used_percent, 42.0);
     }
 
     #[test]

@@ -315,7 +315,9 @@ Response shape:
 
 - `five_hour.utilization` / `resets_at` → Session window (utilization is 0..100).
 - `seven_day.utilization` / `resets_at` → Weekly window.
-- `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` → model-specific weekly windows (Max plan only; null on Pro).
+- Model-scoped weekly windows come from one of two shapes, in priority order:
+  - When `limits` is present and non-empty, each entry with `group == "weekly"` and `kind == "weekly_scoped"` and a non-empty `scope.model.display_name` maps to a weekly window labeled by that `display_name` (e.g. `"Fable"`), using `percent` for fill and `resets_at` for the reset time. Entries without a `percent` are skipped (no data, matching the legacy behavior when `utilization` is absent). Entries are emitted in array order immediately after the Weekly window. `is_active` is not used as a filter (it has been observed `false` on applicable limits). Duplicates are collapsed by `scope.model.id` when present and non-empty, otherwise by `display_name`, keeping the first occurrence. When `limits` is present, the legacy `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` fields are ignored.
+  - When `limits` is absent or empty, `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` map to Sonnet/Opus/Cowork weekly windows (Max plan only; null on Pro).
 - When present, Claude maps `extra_usage` to `UsageSnapshot.extra_usage`:
   - `is_enabled: false` → `ExtraUsageState::Disabled` (popup: **Extra usage** with **Disabled** subtitle, no progress bar).
   - otherwise → `ExtraUsageState::Active` with bar fill from `utilization`, or from `(used_credits / monthly_limit) * 100` when utilization is omitted; amounts come from `used_credits` / `monthly_limit` / `currency` (credits scaled by dividing by 100; currency defaults to `"$"` if absent). In the popup, formatted amounts separate the number from the rendered symbol with a space (symbols follow common ISO‑4217 mappings such as `$` for USD, `€` for EUR); hovering the amount line shows the three-letter ISO code in a tooltip.
