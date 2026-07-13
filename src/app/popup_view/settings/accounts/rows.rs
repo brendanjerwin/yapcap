@@ -3,11 +3,123 @@ use super::super::super::{
     ProviderAccountRuntimeState, ProviderId, accent_selection_fill, account_label_text,
     apply_alpha, badge_destructive, badge_destructive_soft, badge_neutral, badge_neutral_soft,
     badge_success, badge_success_soft, badge_warning, badge_warning_soft, badge_with_tooltip,
-    container, cursor_account_requires_action, fl, registry, row, widget,
+    container, fl, registry, row, widget,
 };
 use crate::model::{AuthState, ProviderHealth, STALE_THRESHOLD};
 
-pub(super) fn cursor_account_settings_row<'a>(
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RowBadgeKind {
+    Warning,
+    Neutral,
+    Destructive,
+}
+
+struct RowStatus {
+    kind: RowBadgeKind,
+    badge_text: String,
+    tooltip_text: String,
+    reauth_eligible: bool,
+    style_as_action_required: bool,
+}
+
+fn row_status(provider: ProviderId, account: &ProviderAccountRuntimeState) -> Option<RowStatus> {
+    match provider {
+        ProviderId::Cursor => {
+            (account.auth_state == AuthState::ActionRequired).then(|| RowStatus {
+                kind: RowBadgeKind::Neutral,
+                badge_text: fl!("cursor-account-reauth-badge"),
+                tooltip_text: fl!("badge-reauth-tooltip"),
+                reauth_eligible: true,
+                style_as_action_required: true,
+            })
+        }
+        ProviderId::Claude => claude_account_row_status(account).map(|status| match status {
+            ClaudeAccountRowStatus::ReauthRequired => RowStatus {
+                kind: RowBadgeKind::Warning,
+                badge_text: fl!("badge-login-required"),
+                tooltip_text: fl!("badge-login-required-tooltip"),
+                reauth_eligible: true,
+                style_as_action_required: true,
+            },
+            ClaudeAccountRowStatus::Error => RowStatus {
+                kind: RowBadgeKind::Destructive,
+                badge_text: fl!("badge-error"),
+                tooltip_text: fl!("badge-error-tooltip"),
+                reauth_eligible: false,
+                style_as_action_required: true,
+            },
+            ClaudeAccountRowStatus::Stale => RowStatus {
+                kind: RowBadgeKind::Warning,
+                badge_text: fl!("badge-stale"),
+                tooltip_text: fl!("badge-stale-tooltip"),
+                reauth_eligible: false,
+                style_as_action_required: false,
+            },
+        }),
+        ProviderId::Codex | ProviderId::Gemini | ProviderId::Copilot | ProviderId::Minimax => {
+            (account.auth_state == AuthState::ActionRequired).then(|| RowStatus {
+                kind: RowBadgeKind::Warning,
+                badge_text: fl!("badge-login-required"),
+                tooltip_text: fl!("badge-login-required-tooltip"),
+                reauth_eligible: true,
+                style_as_action_required: true,
+            })
+        }
+    }
+}
+
+fn status_badge(status: &RowStatus, enabled: bool) -> Element<'static, Message> {
+    let badge = match (status.kind, enabled) {
+        (RowBadgeKind::Warning, true) => badge_warning(status.badge_text.clone()),
+        (RowBadgeKind::Warning, false) => badge_warning_soft(status.badge_text.clone()),
+        (RowBadgeKind::Neutral, true) => badge_neutral(status.badge_text.clone()),
+        (RowBadgeKind::Neutral, false) => badge_neutral_soft(status.badge_text.clone()),
+        (RowBadgeKind::Destructive, true) => badge_destructive(status.badge_text.clone()),
+        (RowBadgeKind::Destructive, false) => badge_destructive_soft(status.badge_text.clone()),
+    };
+    badge_with_tooltip(badge, status.tooltip_text.clone())
+}
+
+fn row_label(
+    provider: ProviderId,
+    account: &ProviderAccountRuntimeState,
+    config: &Config,
+) -> String {
+    if provider == ProviderId::Claude {
+        claude_account_row_label(account, config)
+    } else {
+        account.label.clone()
+    }
+}
+
+fn reauth_capability_satisfied(
+    provider: ProviderId,
+    action_support: Option<&ProviderAccountActionSupport>,
+) -> bool {
+    match provider {
+        ProviderId::Codex | ProviderId::Minimax => true,
+        ProviderId::Cursor => action_support.is_some_and(|support| {
+            support.can_reauthenticate && support.supports_background_status_refresh
+        }),
+        ProviderId::Claude | ProviderId::Gemini | ProviderId::Copilot => {
+            action_support.is_some_and(|support| support.can_reauthenticate)
+        }
+    }
+}
+
+fn reauth_tooltip(provider: ProviderId) -> String {
+    match provider {
+        ProviderId::Codex => fl!("codex-account-reauth-tooltip"),
+        ProviderId::Claude => fl!("claude-account-reauth-tooltip"),
+        ProviderId::Cursor => fl!("cursor-account-reauth-tooltip"),
+        ProviderId::Gemini => fl!("gemini-account-reauth-tooltip"),
+        ProviderId::Copilot => fl!("copilot-account-reauth-tooltip"),
+        ProviderId::Minimax => fl!("minimax-account-reauth-tooltip"),
+    }
+}
+
+pub(super) fn account_settings_row<'a>(
+    provider: ProviderId,
     account: &'a ProviderAccountRuntimeState,
     selected_ids: &[&str],
     active_id: Option<&str>,
@@ -16,17 +128,15 @@ pub(super) fn cursor_account_settings_row<'a>(
 ) -> Element<'a, Message> {
     let is_selected = selected_ids.contains(&account.account_id.as_str());
     let is_active = active_id == Some(account.account_id.as_str());
-    let requires_action = cursor_account_requires_action(account);
-    let action_support =
-        account_action_support(config, ProviderId::Cursor, account.account_id.as_str());
+    let status = row_status(provider, account);
+    let action_support = account_action_support(config, provider, account.account_id.as_str());
     let can_reauthenticate = enabled
-        && requires_action
-        && action_support.as_ref().is_some_and(|support| {
-            support.can_reauthenticate && support.supports_background_status_refresh
-        });
+        && status.as_ref().is_some_and(|status| status.reauth_eligible)
+        && reauth_capability_satisfied(provider, action_support.as_ref());
     let account_id = account.account_id.clone();
+    let label = row_label(provider, account, config);
 
-    let mut title_row = row![account_label_text(&account.label, 14)]
+    let mut title_row = row![account_label_text(&label, 14)]
         .spacing(8)
         .align_y(Alignment::Center)
         .width(Length::Fill);
@@ -39,180 +149,14 @@ pub(super) fn cursor_account_settings_row<'a>(
     let mut selector_body = cosmic::iced::widget::column![title_row]
         .spacing(6)
         .width(Length::Fill);
-    if requires_action {
+    if let Some(status) = &status {
         selector_body = selector_body.push(
-            row![badge_with_tooltip(
-                if enabled {
-                    badge_neutral(fl!("cursor-account-reauth-badge"))
-                } else {
-                    badge_neutral_soft(fl!("cursor-account-reauth-badge"))
-                },
-                fl!("badge-reauth-tooltip"),
-            )]
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-        );
-    }
-
-    let selector_content = container(selector_body)
-        .padding([10, 12])
-        .width(Length::Fill);
-
-    let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_selected))
-        .width(Length::Fill)
-        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
-            ProviderId::Cursor,
-            account_id.clone(),
-        )));
-
-    let delete_press = cursor_delete_message(config, account, enabled);
-    let mut actions = row![account_selected_marker(is_selected, enabled)]
-        .spacing(0)
-        .align_y(Alignment::Center);
-    if can_reauthenticate {
-        actions = actions.push(account_action_icon_button(
-            "view-refresh-symbolic",
-            fl!("cursor-account-reauth-tooltip"),
-            Some(Message::ReauthenticateCursorAccount(
-                account.account_id.clone(),
-            )),
-        ));
-    }
-    actions = actions.push(account_action_icon_button(
-        "edit-delete-symbolic",
-        fl!("account-delete-tooltip"),
-        delete_press,
-    ));
-
-    Element::from(account_row_container(
-        selector.into(),
-        actions.into(),
-        is_selected,
-        enabled,
-        requires_action,
-    ))
-}
-
-pub(super) fn codex_account_settings_row<'a>(
-    account: &'a ProviderAccountRuntimeState,
-    selected_ids: &[&str],
-    active_id: Option<&str>,
-    config: &Config,
-    enabled: bool,
-) -> Element<'a, Message> {
-    let is_selected = selected_ids.contains(&account.account_id.as_str());
-    let is_active = active_id == Some(account.account_id.as_str());
-    let requires_action = codex_account_requires_action(account);
-    let account_id = account.account_id.clone();
-    let mut title_row = row![account_label_text(&account.label, 14)]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-    if is_active {
-        title_row = title_row.push(badge_with_tooltip(
-            active_badge(enabled),
-            fl!("badge-active-tooltip"),
-        ));
-    }
-    let mut selector_body = cosmic::iced::widget::column![title_row]
-        .spacing(6)
-        .width(Length::Fill);
-    if requires_action {
-        selector_body = selector_body.push(
-            row![badge_with_tooltip(
-                if enabled {
-                    badge_warning(fl!("badge-login-required"))
-                } else {
-                    badge_warning_soft(fl!("badge-login-required"))
-                },
-                fl!("badge-login-required-tooltip"),
-            )]
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-        );
-    }
-    let selector_content = container(selector_body)
-        .padding([10, 12])
-        .width(Length::Fill);
-
-    let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_selected))
-        .width(Length::Fill)
-        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
-            ProviderId::Codex,
-            account_id.clone(),
-        )));
-
-    let can_delete = account_action_support(config, ProviderId::Codex, account_id.as_str())
-        .is_some_and(|support| support.can_delete);
-    let delete_press =
-        (enabled && can_delete).then_some(Message::DeleteCodexAccount(account_id.clone()));
-    let mut actions = row![account_selected_marker(is_selected, enabled)]
-        .spacing(0)
-        .align_y(Alignment::Center);
-    if enabled && requires_action {
-        actions = actions.push(account_action_icon_button(
-            "view-refresh-symbolic",
-            fl!("codex-account-reauth-tooltip"),
-            Some(Message::ReauthenticateCodexAccount(account_id)),
-        ));
-    }
-    actions = actions.push(account_action_icon_button(
-        "edit-delete-symbolic",
-        fl!("account-delete-tooltip"),
-        delete_press,
-    ));
-
-    Element::from(account_row_container(
-        selector.into(),
-        actions.into(),
-        is_selected,
-        enabled,
-        requires_action,
-    ))
-}
-
-pub(super) fn claude_account_settings_row<'a>(
-    account: &'a ProviderAccountRuntimeState,
-    selected_ids: &[&str],
-    active_id: Option<&str>,
-    config: &Config,
-    enabled: bool,
-) -> Element<'a, Message> {
-    let is_selected = selected_ids.contains(&account.account_id.as_str());
-    let is_active = active_id == Some(account.account_id.as_str());
-    let account_id = account.account_id.clone();
-    let row_label = claude_account_row_label(account, config);
-    let row_status = claude_account_row_status(account);
-    let action_support =
-        account_action_support(config, ProviderId::Claude, account.account_id.as_str());
-    let requires_action = row_status == Some(ClaudeAccountRowStatus::ReauthRequired);
-    let can_reauthenticate = enabled
-        && requires_action
-        && action_support
-            .as_ref()
-            .is_some_and(|support| support.can_reauthenticate);
-    let mut label_row = row![account_label_text(&row_label, 14)]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-    if is_active {
-        label_row = label_row.push(badge_with_tooltip(
-            active_badge(enabled),
-            fl!("badge-active-tooltip"),
-        ));
-    }
-    let mut selector_body = cosmic::iced::widget::column![label_row]
-        .spacing(6)
-        .width(Length::Fill);
-    if let Some(status) = row_status {
-        selector_body = selector_body.push(
-            row![claude_account_row_status_badge(status, enabled)]
+            row![status_badge(status, enabled)]
                 .width(Length::Fill)
                 .align_y(Alignment::Center),
         );
     }
+
     let selector_content = container(selector_body)
         .padding([10, 12])
         .width(Length::Fill);
@@ -221,21 +165,21 @@ pub(super) fn claude_account_settings_row<'a>(
         .class(account_row_button_class(is_selected))
         .width(Length::Fill)
         .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
-            ProviderId::Claude,
+            provider,
             account_id.clone(),
         )));
 
     let can_delete = action_support.is_some_and(|support| support.can_delete);
     let delete_press =
-        (enabled && can_delete).then_some(Message::DeleteClaudeAccount(account_id.clone()));
+        (enabled && can_delete).then_some(Message::DeleteAccount(provider, account_id.clone()));
     let mut actions = row![account_selected_marker(is_selected, enabled)]
         .spacing(0)
         .align_y(Alignment::Center);
     if can_reauthenticate {
         actions = actions.push(account_action_icon_button(
             "view-refresh-symbolic",
-            fl!("claude-account-reauth-tooltip"),
-            Some(Message::ReauthenticateClaudeAccount(account_id)),
+            reauth_tooltip(provider),
+            Some(Message::ReauthenticateAccount(provider, account_id)),
         ));
     }
     actions = actions.push(account_action_icon_button(
@@ -249,171 +193,7 @@ pub(super) fn claude_account_settings_row<'a>(
         actions.into(),
         is_selected,
         enabled,
-        matches!(
-            row_status,
-            Some(ClaudeAccountRowStatus::ReauthRequired | ClaudeAccountRowStatus::Error)
-        ),
-    ))
-}
-
-pub(super) fn gemini_account_settings_row<'a>(
-    account: &'a ProviderAccountRuntimeState,
-    selected_ids: &[&str],
-    active_id: Option<&str>,
-    config: &Config,
-    enabled: bool,
-) -> Element<'a, Message> {
-    let is_selected = selected_ids.contains(&account.account_id.as_str());
-    let is_active = active_id == Some(account.account_id.as_str());
-    let requires_action = gemini_account_requires_action(account);
-    let action_support =
-        account_action_support(config, ProviderId::Gemini, account.account_id.as_str());
-    let can_reauthenticate = enabled
-        && requires_action
-        && action_support
-            .as_ref()
-            .is_some_and(|support| support.can_reauthenticate);
-    let account_id = account.account_id.clone();
-    let mut title_row = row![account_label_text(&account.label, 14)]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-    if is_active {
-        title_row = title_row.push(badge_with_tooltip(
-            active_badge(enabled),
-            fl!("badge-active-tooltip"),
-        ));
-    }
-    let mut selector_body = cosmic::iced::widget::column![title_row]
-        .spacing(6)
-        .width(Length::Fill);
-    if requires_action {
-        selector_body = selector_body.push(
-            row![badge_with_tooltip(
-                if enabled {
-                    badge_warning(fl!("badge-login-required"))
-                } else {
-                    badge_warning_soft(fl!("badge-login-required"))
-                },
-                fl!("badge-login-required-tooltip"),
-            )]
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-        );
-    }
-    let selector_content = container(selector_body)
-        .padding([10, 12])
-        .width(Length::Fill);
-
-    let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_selected))
-        .width(Length::Fill)
-        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
-            ProviderId::Gemini,
-            account_id.clone(),
-        )));
-
-    let can_delete = action_support.is_some_and(|support| support.can_delete);
-    let delete_press =
-        (enabled && can_delete).then_some(Message::DeleteGeminiAccount(account_id.clone()));
-    let mut actions = row![account_selected_marker(is_selected, enabled)]
-        .spacing(0)
-        .align_y(Alignment::Center);
-    if can_reauthenticate {
-        actions = actions.push(account_action_icon_button(
-            "view-refresh-symbolic",
-            fl!("gemini-account-reauth-tooltip"),
-            Some(Message::ReauthenticateGeminiAccount(account_id)),
-        ));
-    }
-    actions = actions.push(account_action_icon_button(
-        "edit-delete-symbolic",
-        fl!("account-delete-tooltip"),
-        delete_press,
-    ));
-
-    Element::from(account_row_container(
-        selector.into(),
-        actions.into(),
-        is_selected,
-        enabled,
-        requires_action,
-    ))
-}
-
-pub(super) fn copilot_account_settings_row<'a>(
-    account: &'a ProviderAccountRuntimeState,
-    selected_ids: &[&str],
-    config: &Config,
-    enabled: bool,
-) -> Element<'a, Message> {
-    let is_selected = selected_ids.contains(&account.account_id.as_str());
-    let requires_action = account.auth_state == AuthState::ActionRequired;
-    let account_id = account.account_id.clone();
-    let action_support =
-        account_action_support(config, ProviderId::Copilot, account.account_id.as_str());
-    let can_reauthenticate = enabled
-        && requires_action
-        && action_support
-            .as_ref()
-            .is_some_and(|support| support.can_reauthenticate);
-    let title_row = row![account_label_text(&account.label, 14)]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-    let mut selector_body = cosmic::iced::widget::column![title_row]
-        .spacing(6)
-        .width(Length::Fill);
-    if requires_action {
-        selector_body = selector_body.push(
-            row![badge_with_tooltip(
-                if enabled {
-                    badge_warning(fl!("badge-login-required"))
-                } else {
-                    badge_warning_soft(fl!("badge-login-required"))
-                },
-                fl!("badge-login-required-tooltip"),
-            )]
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-        );
-    }
-    let selector_content = container(selector_body)
-        .padding([10, 12])
-        .width(Length::Fill);
-    let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_selected))
-        .width(Length::Fill)
-        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
-            ProviderId::Copilot,
-            account_id.clone(),
-        )));
-
-    let can_delete = action_support.is_some_and(|support| support.can_delete);
-    let delete_press =
-        (enabled && can_delete).then_some(Message::DeleteCopilotAccount(account_id.clone()));
-    let mut actions = row![account_selected_marker(is_selected, enabled)]
-        .spacing(0)
-        .align_y(Alignment::Center);
-    if can_reauthenticate {
-        actions = actions.push(account_action_icon_button(
-            "view-refresh-symbolic",
-            fl!("copilot-account-reauth-tooltip"),
-            Some(Message::ReauthenticateCopilotAccount(account_id)),
-        ));
-    }
-    actions = actions.push(account_action_icon_button(
-        "edit-delete-symbolic",
-        fl!("account-delete-tooltip"),
-        delete_press,
-    ));
-
-    Element::from(account_row_container(
-        selector.into(),
-        actions.into(),
-        is_selected,
-        enabled,
-        requires_action,
+        status.is_some_and(|status| status.style_as_action_required),
     ))
 }
 
@@ -532,20 +312,6 @@ fn disabled_show_all_accounts_toggle(show_all: bool) -> Element<'static, Message
     .into()
 }
 
-fn cursor_delete_message(
-    config: &Config,
-    account: &ProviderAccountRuntimeState,
-    enabled: bool,
-) -> Option<Message> {
-    let can_delete =
-        account_action_support(config, ProviderId::Cursor, account.account_id.as_str())
-            .is_some_and(|support| support.can_delete);
-    if !enabled || !can_delete {
-        return None;
-    }
-    Some(Message::DeleteCursorAccount(account.account_id.clone()))
-}
-
 fn claude_account_row_label(account: &ProviderAccountRuntimeState, config: &Config) -> String {
     let id = account.account_id.as_str();
     let managed = config
@@ -603,38 +369,6 @@ fn active_badge(enabled: bool) -> Element<'static, Message> {
     }
 }
 
-fn claude_account_row_status_badge(
-    status: ClaudeAccountRowStatus,
-    enabled: bool,
-) -> Element<'static, Message> {
-    match status {
-        ClaudeAccountRowStatus::ReauthRequired => badge_with_tooltip(
-            if enabled {
-                badge_warning(fl!("badge-login-required"))
-            } else {
-                badge_warning_soft(fl!("badge-login-required"))
-            },
-            fl!("badge-login-required-tooltip"),
-        ),
-        ClaudeAccountRowStatus::Error => badge_with_tooltip(
-            if enabled {
-                badge_destructive(fl!("badge-error"))
-            } else {
-                badge_destructive_soft(fl!("badge-error"))
-            },
-            fl!("badge-error-tooltip"),
-        ),
-        ClaudeAccountRowStatus::Stale => badge_with_tooltip(
-            if enabled {
-                badge_warning(fl!("badge-stale"))
-            } else {
-                badge_warning_soft(fl!("badge-stale"))
-            },
-            fl!("badge-stale-tooltip"),
-        ),
-    }
-}
-
 fn account_selected_marker(selected: bool, enabled: bool) -> Element<'static, Message> {
     if !selected {
         return cosmic::iced::widget::Space::new()
@@ -665,14 +399,6 @@ fn account_selected_marker(selected: bool, enabled: bool) -> Element<'static, Me
         }
     })
     .into()
-}
-
-fn codex_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
-    account.provider == ProviderId::Codex && account.auth_state == AuthState::ActionRequired
-}
-
-fn gemini_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
-    account.provider == ProviderId::Gemini && account.auth_state == AuthState::ActionRequired
 }
 
 fn account_action_support(
@@ -834,89 +560,6 @@ fn account_row_icon_button_style(theme: &cosmic::Theme, opacity: f32) -> widget:
     style
 }
 
-fn minimax_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
-    account.provider == ProviderId::Minimax && account.auth_state == AuthState::ActionRequired
-}
-
-pub(super) fn minimax_account_settings_row<'a>(
-    account: &'a ProviderAccountRuntimeState,
-    selected_ids: &[&str],
-    active_id: Option<&str>,
-    config: &Config,
-    enabled: bool,
-) -> Element<'a, Message> {
-    let is_selected = selected_ids.contains(&account.account_id.as_str());
-    let is_active = active_id == Some(account.account_id.as_str());
-    let requires_action = minimax_account_requires_action(account);
-    let account_id = account.account_id.clone();
-    let mut title_row = row![account_label_text(&account.label, 14)]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .width(Length::Fill);
-    if is_active {
-        title_row = title_row.push(badge_with_tooltip(
-            active_badge(enabled),
-            fl!("badge-active-tooltip"),
-        ));
-    }
-    let mut selector_body = cosmic::iced::widget::column![title_row]
-        .spacing(6)
-        .width(Length::Fill);
-    if requires_action {
-        selector_body = selector_body.push(
-            row![badge_with_tooltip(
-                if enabled {
-                    badge_warning(fl!("badge-login-required"))
-                } else {
-                    badge_warning_soft(fl!("badge-login-required"))
-                },
-                fl!("badge-login-required-tooltip"),
-            )]
-            .width(Length::Fill)
-            .align_y(Alignment::Center),
-        );
-    }
-    let selector_content = container(selector_body)
-        .padding([10, 12])
-        .width(Length::Fill);
-
-    let selector = widget::button::custom(selector_content)
-        .class(account_row_button_class(is_selected))
-        .width(Length::Fill)
-        .on_press_maybe(enabled.then_some(Message::ToggleAccountSelection(
-            ProviderId::Minimax,
-            account_id.clone(),
-        )));
-
-    let can_delete = account_action_support(config, ProviderId::Minimax, account_id.as_str())
-        .is_some_and(|support| support.can_delete);
-    let delete_press =
-        (enabled && can_delete).then_some(Message::DeleteMinimaxAccount(account_id.clone()));
-    let mut actions = row![account_selected_marker(is_selected, enabled)]
-        .spacing(0)
-        .align_y(Alignment::Center);
-    if enabled && requires_action {
-        actions = actions.push(account_action_icon_button(
-            "view-refresh-symbolic",
-            fl!("minimax-account-reauth-tooltip"),
-            Some(Message::ReauthenticateMinimaxAccount(account_id)),
-        ));
-    }
-    actions = actions.push(account_action_icon_button(
-        "edit-delete-symbolic",
-        fl!("account-delete-tooltip"),
-        delete_press,
-    ));
-
-    Element::from(account_row_container(
-        selector.into(),
-        actions.into(),
-        is_selected,
-        enabled,
-        requires_action,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -968,20 +611,23 @@ mod tests {
     }
 
     #[test]
-    fn codex_row_requires_action_when_auth_state_demands_it() {
-        let mut account =
-            ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
-        account.auth_state = AuthState::ActionRequired;
-        assert!(codex_account_requires_action(&account));
+    fn codex_and_gemini_row_status_requires_action_when_auth_state_demands_it() {
+        for provider in [ProviderId::Codex, ProviderId::Gemini] {
+            let mut account = ProviderAccountRuntimeState::empty(provider, "acct-1", "Account");
+            account.auth_state = AuthState::ActionRequired;
+            assert!(
+                row_status(provider, &account).is_some(),
+                "{provider:?} should require action"
+            );
+        }
     }
 
     #[test]
-    fn gemini_row_requires_action_when_auth_state_demands_it() {
+    fn codex_row_status_is_none_when_auth_state_is_ready() {
         let mut account =
-            ProviderAccountRuntimeState::empty(ProviderId::Gemini, "gemini-1", "Gemini account");
-        account.auth_state = AuthState::ActionRequired;
-        assert!(gemini_account_requires_action(&account));
-        assert!(!codex_account_requires_action(&account));
+            ProviderAccountRuntimeState::empty(ProviderId::Codex, "codex-1", "Codex account");
+        account.auth_state = AuthState::Ready;
+        assert!(row_status(ProviderId::Codex, &account).is_none());
     }
 
     #[test]

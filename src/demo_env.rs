@@ -2,7 +2,8 @@
 
 use crate::config::{
     Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
-    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ProviderVisibilityMode, paths,
+    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ManagedMinimaxAccountConfig,
+    ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -11,8 +12,10 @@ use crate::model::{
 };
 use chrono::{DateTime, Duration, Utc};
 use std::path::PathBuf;
+use std::sync::Once;
 
 const DEMO_ENV: &str = "YAPCAP_DEMO";
+const DEMO_ID_PREFIX: &str = "yapcap-demo:";
 const CODEX_PRIMARY_ID: &str = "yapcap-demo:codex-primary";
 const CODEX_SECONDARY_ID: &str = "yapcap-demo:codex-secondary";
 const CODEX_PRO_ID: &str = "yapcap-demo:codex-pro";
@@ -22,6 +25,7 @@ const CURSOR_PRIMARY_ID: &str = "yapcap-demo:cursor-primary";
 const GEMINI_PRIMARY_ID: &str = "yapcap-demo:gemini-primary";
 const COPILOT_FREE_ID: &str = "yapcap-demo:copilot-casey-free";
 const COPILOT_PRO_ID: &str = "yapcap-demo:copilot-morgan-pro";
+const MINIMAX_PRIMARY_ID: &str = "yapcap-demo:minimax-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -50,12 +54,14 @@ pub fn apply_config(config: &mut Config) {
     config.cursor_enabled = true;
     config.gemini_enabled = true;
     config.copilot_enabled = true;
+    config.minimax_enabled = true;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
     config.cursor_managed_accounts = demo_cursor_accounts();
     config.gemini_managed_accounts = demo_gemini_accounts();
     config.copilot_managed_accounts = demo_copilot_accounts();
+    config.minimax_managed_accounts = demo_minimax_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -85,6 +91,38 @@ pub fn apply_config(config: &mut Config) {
             vec![COPILOT_FREE_ID.to_string(), COPILOT_PRO_ID.to_string()];
         config.set_provider_show_all(ProviderId::Copilot, true);
     }
+    if config.selected_minimax_account_ids.is_empty() {
+        config.selected_minimax_account_ids = vec![MINIMAX_PRIMARY_ID.to_string()];
+        config.set_provider_show_all(ProviderId::Minimax, false);
+    }
+}
+
+pub fn strip_leaked_state(config: &mut Config) -> bool {
+    let mut changed = strip_ids(&mut config.selected_codex_account_ids);
+    changed |= retain_len_changed(&mut config.codex_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_claude_account_ids);
+    changed |= retain_len_changed(&mut config.claude_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_cursor_account_ids);
+    changed |= retain_len_changed(&mut config.cursor_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_gemini_account_ids);
+    changed |= retain_len_changed(&mut config.gemini_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_copilot_account_ids);
+    changed |= retain_len_changed(&mut config.copilot_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_minimax_account_ids);
+    changed |= retain_len_changed(&mut config.minimax_managed_accounts, |account| &account.id);
+    changed
+}
+
+fn strip_ids(ids: &mut Vec<String>) -> bool {
+    let before = ids.len();
+    ids.retain(|id| !id.starts_with(DEMO_ID_PREFIX));
+    ids.len() != before
+}
+
+fn retain_len_changed<T>(accounts: &mut Vec<T>, id_of: impl Fn(&T) -> &String) -> bool {
+    let before = accounts.len();
+    accounts.retain(|account| !id_of(account).starts_with(DEMO_ID_PREFIX));
+    accounts.len() != before
 }
 
 pub fn apply(config: &Config, state: &mut AppState) {
@@ -114,15 +152,19 @@ pub fn apply(config: &Config, state: &mut AppState) {
                 AccountSelectionStatus::LoginRequired
             },
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: None,
         });
     }
     state.updated_at = Utc::now();
-    tracing::warn!(
-        env = DEMO_ENV,
-        "using synthetic usage snapshots (see demo_env)"
-    );
+    static DEMO_WARNED: Once = Once::new();
+    DEMO_WARNED.call_once(|| {
+        tracing::warn!(
+            env = DEMO_ENV,
+            "using synthetic usage snapshots (see demo_env)"
+        );
+    });
 }
 
 fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
@@ -142,7 +184,8 @@ fn demo_source(provider: ProviderId) -> String {
         ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini | ProviderId::Copilot => {
             "OAuth".to_string()
         }
-        ProviderId::Cursor | ProviderId::Minimax => "Managed Account".to_string(),
+        ProviderId::Cursor => "Managed Account".to_string(),
+        ProviderId::Minimax => "API Key".to_string(),
     }
 }
 
@@ -154,7 +197,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 provider,
                 DemoAccount {
                     account_id: CODEX_PRIMARY_ID,
-                    label: "ada@example.com",
+                    label: "plus-1@example.com",
                     last_success_at: now - Duration::minutes(2),
                     health: ProviderHealth::Ok,
                     auth_state: AuthState::Ready,
@@ -166,7 +209,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 provider,
                 DemoAccount {
                     account_id: CODEX_SECONDARY_ID,
-                    label: "pair@example.com",
+                    label: "plus-2@example.com",
                     last_success_at: now - Duration::minutes(6),
                     health: ProviderHealth::Ok,
                     auth_state: AuthState::Ready,
@@ -192,7 +235,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 provider,
                 DemoAccount {
                     account_id: CLAUDE_PRIMARY_ID,
-                    label: "team@example.com",
+                    label: "pro@example.com",
                     last_success_at: now - Duration::minutes(3),
                     health: ProviderHealth::Ok,
                     auth_state: AuthState::Ready,
@@ -229,7 +272,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
             provider,
             DemoAccount {
                 account_id: CURSOR_PRIMARY_ID,
-                label: "solo@example.com",
+                label: "hobby@example.com",
                 last_success_at: now - Duration::minutes(1),
                 health: ProviderHealth::Ok,
                 auth_state: AuthState::Ready,
@@ -263,7 +306,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 },
             ),
         ],
-        ProviderId::Minimax => vec![],
+        ProviderId::Minimax => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: MINIMAX_PRIMARY_ID,
+                label: "jordan-minimax",
+                last_success_at: now - Duration::minutes(3),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_minimax_primary(),
+            },
+        )],
     }
 }
 
@@ -288,8 +342,8 @@ fn demo_account(provider: ProviderId, account: DemoAccount) -> ProviderAccountRu
         health: account.health,
         auth_state: account.auth_state,
         error: account.error,
-        rate_limit_until: None,
-        consecutive_rate_limits: 0,
+        retry_after: None,
+        consecutive_failures: 0,
     }
 }
 
@@ -335,10 +389,10 @@ fn snapshot_codex_primary() -> UsageSnapshot {
         }),
         extra_usage: None,
         identity: ProviderIdentity {
-            email: Some("ada@example.com".to_string()),
+            email: Some("plus-1@example.com".to_string()),
             account_id: Some("demo-acct-8f2a1c".to_string()),
             plan: Some("plus".to_string()),
-            display_name: Some("Ada".to_string()),
+            display_name: Some("Plus 1".to_string()),
         },
     }
 }
@@ -358,10 +412,10 @@ fn snapshot_codex_secondary() -> UsageSnapshot {
         }),
         extra_usage: None,
         identity: ProviderIdentity {
-            email: Some("pair@example.com".to_string()),
+            email: Some("plus-2@example.com".to_string()),
             account_id: Some("demo-acct-31be7d".to_string()),
             plan: Some("plus".to_string()),
-            display_name: Some("Pair".to_string()),
+            display_name: Some("Plus 2".to_string()),
         },
     }
 }
@@ -408,6 +462,13 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
         },
+        UsageWindow {
+            label: "Fable".to_string(),
+            used_percent: 15.0,
+            reset_at: Some(w),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+        },
     ];
     UsageSnapshot {
         provider: ProviderId::Claude,
@@ -425,10 +486,10 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             },
         }),
         identity: ProviderIdentity {
-            email: Some("team@example.com".to_string()),
+            email: Some("pro@example.com".to_string()),
             account_id: None,
             plan: Some("pro".to_string()),
-            display_name: Some("Team".to_string()),
+            display_name: Some("Pro".to_string()),
         },
     }
 }
@@ -469,6 +530,13 @@ fn snapshot_claude_max() -> UsageSnapshot {
         UsageWindow {
             label: "Cowork".to_string(),
             used_percent: 18.0,
+            reset_at: Some(w),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+        },
+        UsageWindow {
+            label: "Fable".to_string(),
+            used_percent: 8.0,
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
@@ -556,10 +624,10 @@ fn snapshot_cursor_primary() -> UsageSnapshot {
         provider_cost: None,
         extra_usage: None,
         identity: ProviderIdentity {
-            email: Some("solo@example.com".to_string()),
+            email: Some("hobby@example.com".to_string()),
             account_id: None,
             plan: Some("pro".to_string()),
-            display_name: Some("Solo".to_string()),
+            display_name: Some("Hobby".to_string()),
         },
     }
 }
@@ -609,13 +677,17 @@ fn snapshot_copilot_pro() -> UsageSnapshot {
         updated_at: now,
         headline: UsageHeadline(0),
         windows: vec![UsageWindow {
-            label: "premium_interactions".to_string(),
-            used_percent: 100.0,
+            label: "credits".to_string(),
+            used_percent: 40.0,
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some("+42 over plan".to_string()),
         }],
-        provider_cost: None,
+        provider_cost: Some(ProviderCost {
+            used: 28.0,
+            limit: Some(70.0),
+            units: "USD".to_string(),
+        }),
         extra_usage: None,
         identity: ProviderIdentity {
             email: None,
@@ -626,14 +698,64 @@ fn snapshot_copilot_pro() -> UsageSnapshot {
     }
 }
 
-fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
+fn demo_timestamp() -> DateTime<Utc> {
+    DateTime::from_timestamp(1_767_225_600, 0).expect("valid demo timestamp")
+}
+
+fn demo_minimax_accounts() -> Vec<ManagedMinimaxAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedMinimaxAccountConfig {
+        id: MINIMAX_PRIMARY_ID.to_string(),
+        label: "jordan-minimax".to_string(),
+        api_key_source: "demo".to_string(),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
+fn snapshot_minimax_primary() -> UsageSnapshot {
     let now = Utc::now();
+    UsageSnapshot {
+        provider: ProviderId::Minimax,
+        source: "API Key".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![
+            UsageWindow {
+                label: "MiniMax-M2 (5h): 640/1000".to_string(),
+                used_percent: 36.0,
+                reset_at: None,
+                window_seconds: Some(5 * 3600),
+                reset_description: Some("Resets every 5 hours".to_string()),
+            },
+            UsageWindow {
+                label: "MiniMax-M2 (Weekly): 3800/10000".to_string(),
+                used_percent: 62.0,
+                reset_at: None,
+                window_seconds: Some(7 * 24 * 3600),
+                reset_description: Some("Resets weekly".to_string()),
+            },
+        ],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: None,
+            plan: Some("Minimax.io".to_string()),
+            display_name: Some("jordan-minimax".to_string()),
+        },
+    }
+}
+
+fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
+    let now = demo_timestamp();
     vec![
         ManagedCodexAccountConfig {
             id: CODEX_PRIMARY_ID.to_string(),
-            label: "ada@example.com".to_string(),
+            label: "plus-1@example.com".to_string(),
             codex_home: demo_root().join("codex-primary"),
-            email: Some("ada@example.com".to_string()),
+            email: Some("plus-1@example.com".to_string()),
             provider_account_id: Some("demo-acct-8f2a1c".to_string()),
             created_at: now,
             updated_at: now,
@@ -641,9 +763,9 @@ fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
         },
         ManagedCodexAccountConfig {
             id: CODEX_SECONDARY_ID.to_string(),
-            label: "pair@example.com".to_string(),
+            label: "plus-2@example.com".to_string(),
             codex_home: demo_root().join("codex-secondary"),
-            email: Some("pair@example.com".to_string()),
+            email: Some("plus-2@example.com".to_string()),
             provider_account_id: Some("demo-acct-31be7d".to_string()),
             created_at: now,
             updated_at: now,
@@ -663,13 +785,13 @@ fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
 }
 
 fn demo_claude_accounts() -> Vec<ManagedClaudeAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![
         ManagedClaudeAccountConfig {
             id: CLAUDE_PRIMARY_ID.to_string(),
-            label: "team@example.com".to_string(),
+            label: "pro@example.com".to_string(),
             config_dir: demo_root().join("claude-primary"),
-            email: Some("team@example.com".to_string()),
+            email: Some("pro@example.com".to_string()),
             organization: Some("YapCap".to_string()),
             subscription_type: Some("pro".to_string()),
             created_at: now,
@@ -691,13 +813,13 @@ fn demo_claude_accounts() -> Vec<ManagedClaudeAccountConfig> {
 }
 
 fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![ManagedCursorAccountConfig {
         id: CURSOR_PRIMARY_ID.to_string(),
-        email: "solo@example.com".to_string(),
-        label: "solo@example.com".to_string(),
+        email: "hobby@example.com".to_string(),
+        label: "hobby@example.com".to_string(),
         account_root: demo_root().join("cursor-primary"),
-        display_name: Some("Solo".to_string()),
+        display_name: Some("Hobby".to_string()),
         plan: Some("hobby".to_string()),
         created_at: now,
         updated_at: now,
@@ -706,7 +828,7 @@ fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
 }
 
 fn demo_gemini_accounts() -> Vec<ManagedGeminiAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![ManagedGeminiAccountConfig {
         id: GEMINI_PRIMARY_ID.to_string(),
         label: "pro@example.com".to_string(),
@@ -723,7 +845,7 @@ fn demo_gemini_accounts() -> Vec<ManagedGeminiAccountConfig> {
 }
 
 fn demo_copilot_accounts() -> Vec<ManagedCopilotAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![
         ManagedCopilotAccountConfig {
             id: COPILOT_FREE_ID.to_string(),
@@ -803,12 +925,15 @@ mod tests {
         assert_eq!(config.cursor_managed_accounts.len(), 1);
         assert_eq!(config.gemini_managed_accounts.len(), 1);
         assert_eq!(config.copilot_managed_accounts.len(), 2);
+        assert_eq!(config.minimax_managed_accounts.len(), 1);
         assert_eq!(config.selected_codex_account_ids.len(), 3);
         assert_eq!(config.selected_claude_account_ids.len(), 2);
         assert_eq!(config.selected_cursor_account_ids.len(), 1);
         assert_eq!(config.selected_gemini_account_ids.len(), 1);
         assert_eq!(config.selected_copilot_account_ids.len(), 2);
+        assert_eq!(config.selected_minimax_account_ids.len(), 1);
         assert!(config.copilot_enabled);
+        assert!(config.minimax_enabled);
         assert!(config.show_all_accounts(ProviderId::Codex));
         assert!(config.show_all_accounts(ProviderId::Claude));
         assert!(!config.show_all_accounts(ProviderId::Cursor));
@@ -934,12 +1059,47 @@ mod tests {
         assert_eq!(morgan.identity.plan.as_deref(), Some("Pro+"));
         assert_eq!(morgan.headline, UsageHeadline(0));
         assert_eq!(morgan.windows.len(), 1);
-        assert_eq!(morgan.windows[0].label, "premium_interactions");
-        assert!((morgan.windows[0].used_percent - 100.0).abs() < 0.001);
+        assert_eq!(morgan.windows[0].label, "credits");
+        assert!((morgan.windows[0].used_percent - 40.0).abs() < 0.001);
         assert_eq!(
             morgan.windows[0].reset_description.as_deref(),
             Some("+42 over plan")
         );
+        let cost = morgan.provider_cost.as_ref().expect("morgan cost card");
+        assert!((cost.used - 28.0).abs() < 0.001);
+        assert_eq!(cost.limit, Some(70.0));
+        assert_eq!(cost.units, "USD");
+    }
+
+    #[test]
+    fn minimax_demo_seeds_one_account_with_token_windows() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let mut state = AppState::empty();
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        assert_eq!(
+            config.selected_minimax_account_ids,
+            vec![MINIMAX_PRIMARY_ID.to_string()]
+        );
+        let account = state
+            .provider_accounts
+            .iter()
+            .find(|account| {
+                account.provider == ProviderId::Minimax && account.account_id == MINIMAX_PRIMARY_ID
+            })
+            .expect("minimax demo account");
+        assert_eq!(account.health, ProviderHealth::Ok);
+        let snapshot = account.snapshot.as_ref().expect("minimax demo snapshot");
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Minimax.io"));
+        assert_eq!(snapshot.windows.len(), 2);
     }
 
     #[test]
@@ -994,12 +1154,18 @@ mod tests {
     fn claude_demo_primary_is_pro_without_sonnet() {
         let snapshot = snapshot_claude_primary();
         assert_eq!(snapshot.identity.plan.as_deref(), Some("pro"));
-        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows.len(), 3);
         assert!(
             snapshot
                 .windows
                 .iter()
-                .all(|window| window.label != "Sonnet")
+                .all(|window| window.label != "Sonnet" && window.label != "Opus")
+        );
+        assert!(
+            snapshot
+                .windows
+                .iter()
+                .any(|window| window.label == "Fable")
         );
         let Some(ExtraUsageState::Active { used_percent, cost }) = snapshot.extra_usage.as_ref()
         else {

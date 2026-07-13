@@ -14,7 +14,7 @@ pub(super) struct RefreshSkipDiagnostics {
     pub selected_account_count: usize,
     pub stored_account_count: usize,
     pub action_required_account_count: usize,
-    pub rate_limited_account_count: usize,
+    pub deferred_account_count: usize,
     pub provider_error: Option<String>,
 }
 
@@ -35,9 +35,9 @@ impl RefreshSkipDiagnostics {
                 .iter()
                 .filter(|account| account.auth_state == AuthState::ActionRequired)
                 .count(),
-            rate_limited_account_count: accounts
+            deferred_account_count: accounts
                 .iter()
-                .filter(|account| account.is_rate_limited())
+                .filter(|account| account.is_backing_off())
                 .count(),
             provider_error: provider_state.and_then(|entry| entry.error.clone()),
         }
@@ -96,7 +96,9 @@ pub(super) fn automatic_refresh_provider_tasks_for_process(
         .collect::<Vec<_>>();
     let tasks = providers
         .into_iter()
-        .map(|provider| refresh_provider_task_for_process(config, state, provider, process.clone()))
+        .map(|provider| {
+            refresh_provider_task_for_process(config, state, provider, process.clone(), false)
+        })
         .filter(|task| task.units() > 0)
         .collect::<Vec<_>>();
 
@@ -111,17 +113,17 @@ fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
     if demo_env::is_active() {
         return;
     }
-    if let Some(provider) = state.provider_mut(ProviderId::Codex) {
-        provider.system_active_account_id =
-            registry::codex_system_active_account_id(&config.codex_managed_accounts);
-    }
-    if let Some(provider) = state.provider_mut(ProviderId::Claude) {
-        provider.system_active_account_id =
-            registry::claude_system_active_account_id(&config.claude_managed_accounts);
-    }
-    if let Some(provider) = state.provider_mut(ProviderId::Gemini) {
-        provider.system_active_account_id =
-            registry::gemini_system_active_account_id(&config.gemini_managed_accounts);
+    for provider in ProviderId::ALL {
+        // Cursor resolves its active account via its own adapter reconcile (SQLite
+        // scan), not this host-session-file capability; skip it so this lightweight
+        // pass doesn't clobber that value with the capability's default `None`.
+        if provider == ProviderId::Cursor {
+            continue;
+        }
+        if let Some(provider_state) = state.provider_mut(provider) {
+            provider_state.system_active_account_id =
+                registry::system_active_account_id(provider, config);
+        }
     }
 }
 
@@ -151,11 +153,18 @@ pub(super) fn selected_account_refresh_due(
     );
     let now = Utc::now();
     entry.selected_account_ids.iter().any(|account_id| {
-        state
+        let Some(account) = state
             .provider_accounts
             .iter()
             .find(|account| account.provider == provider && account.account_id == *account_id)
-            .and_then(|account| account.last_success_at)
+        else {
+            return true;
+        };
+        if account.is_backing_off() {
+            return false;
+        }
+        account
+            .last_success_at
             .is_none_or(|last_success_at| now - last_success_at >= interval)
     })
 }
@@ -166,7 +175,7 @@ pub fn refresh_provider_task(
     state: &mut AppState,
     provider: ProviderId,
 ) -> Task<Message> {
-    refresh_provider_task_for_process(config, state, provider, None)
+    refresh_provider_task_for_process(config, state, provider, None, false)
 }
 
 pub(super) fn refresh_provider_task_for_process(
@@ -174,6 +183,7 @@ pub(super) fn refresh_provider_task_for_process(
     state: &mut AppState,
     provider: ProviderId,
     process: Option<RefreshProcessContext>,
+    force: bool,
 ) -> Task<Message> {
     if demo_env::is_active() {
         return Task::none();
@@ -194,12 +204,11 @@ pub(super) fn refresh_provider_task_for_process(
     let already_refreshing = state
         .provider(provider)
         .is_some_and(|entry| entry.is_refreshing);
-    state.mark_provider_refreshing(provider, enabled);
-
     let ready = state
         .provider(provider)
         .is_some_and(|entry| entry.account_status == crate::model::AccountSelectionStatus::Ready);
     if !enabled || !ready || already_refreshing {
+        state.mark_provider_refreshing(provider, enabled);
         let diagnostics = RefreshSkipDiagnostics::for_provider(state, provider);
         if !enabled {
             tracing::info!(
@@ -226,7 +235,7 @@ pub(super) fn refresh_provider_task_for_process(
                     selected_account_count = diagnostics.selected_account_count,
                     stored_account_count = diagnostics.stored_account_count,
                     action_required_account_count = diagnostics.action_required_account_count,
-                    rate_limited_account_count = diagnostics.rate_limited_account_count,
+                    deferred_account_count = diagnostics.deferred_account_count,
                     provider_error = diagnostics.provider_error.as_deref(),
                     "provider refresh ignored because provider has no account"
                 );
@@ -238,7 +247,7 @@ pub(super) fn refresh_provider_task_for_process(
                     selected_account_count = diagnostics.selected_account_count,
                     stored_account_count = diagnostics.stored_account_count,
                     action_required_account_count = diagnostics.action_required_account_count,
-                    rate_limited_account_count = diagnostics.rate_limited_account_count,
+                    deferred_account_count = diagnostics.deferred_account_count,
                     provider_error = diagnostics.provider_error.as_deref(),
                     "provider refresh skipped because selected account state is not ready"
                 );
@@ -265,8 +274,13 @@ pub(super) fn refresh_provider_task_for_process(
         }
     }
 
-    let account_ids =
-        account_ids_to_refresh(&config, provider, previous.as_ref(), &previous_accounts);
+    let account_ids = account_ids_to_refresh(
+        &config,
+        provider,
+        previous.as_ref(),
+        &previous_accounts,
+        force,
+    );
     if account_ids.is_empty() {
         tracing::info!(
             provider = provider.label(),
@@ -280,14 +294,16 @@ pub(super) fn refresh_provider_task_for_process(
                 .iter()
                 .filter(|account| account.auth_state == AuthState::ActionRequired)
                 .count(),
-            rate_limited_account_count = previous_accounts
+            deferred_account_count = previous_accounts
                 .iter()
-                .filter(|account| account.is_rate_limited())
+                .filter(|account| account.is_backing_off())
                 .count(),
             "provider refresh skipped because no accounts are refreshable"
         );
         return Task::none();
     }
+
+    state.mark_provider_refreshing(provider, enabled);
 
     let tasks: Vec<Task<Message>> = account_ids
         .into_iter()
@@ -358,6 +374,7 @@ fn account_ids_to_refresh(
     provider: ProviderId,
     previous: Option<&crate::model::ProviderRuntimeState>,
     previous_accounts: &[crate::model::ProviderAccountRuntimeState],
+    force: bool,
 ) -> Vec<String> {
     let config_ids = config.selected_account_ids(provider);
     let candidate_ids = if !config_ids.is_empty() {
@@ -377,7 +394,7 @@ fn account_ids_to_refresh(
         .filter(|id| {
             !previous_accounts.iter().any(|a| {
                 &a.account_id == id
-                    && (a.is_rate_limited() || a.auth_state == AuthState::ActionRequired)
+                    && ((!force && a.is_backing_off()) || a.auth_state == AuthState::ActionRequired)
             })
         })
         .collect()
@@ -520,8 +537,8 @@ mod tests {
             health: crate::model::ProviderHealth::Ok,
             auth_state: AuthState::Ready,
             error: None,
-            rate_limit_until: None,
-            consecutive_rate_limits: 0,
+            retry_after: None,
+            consecutive_failures: 0,
         });
 
         let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
@@ -545,13 +562,118 @@ mod tests {
             health: crate::model::ProviderHealth::Ok,
             auth_state: AuthState::Ready,
             error: None,
-            rate_limit_until: None,
-            consecutive_rate_limits: 0,
+            retry_after: None,
+            consecutive_failures: 0,
         });
 
         let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
 
         assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn automatic_refresh_tasks_skip_backing_off_selected_account() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: None,
+            snapshot: None,
+            health: crate::model::ProviderHealth::Error,
+            auth_state: AuthState::Error,
+            error: Some("boom".to_string()),
+            retry_after: Some(Utc::now() + chrono::Duration::minutes(5)),
+            consecutive_failures: 1,
+        });
+
+        let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
+
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn refresh_provider_task_does_not_wedge_when_all_accounts_backing_off() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: None,
+            snapshot: None,
+            health: crate::model::ProviderHealth::Error,
+            auth_state: AuthState::Error,
+            error: Some("boom".to_string()),
+            retry_after: Some(Utc::now() + chrono::Duration::minutes(5)),
+            consecutive_failures: 1,
+        });
+
+        let task = refresh_provider_task(&config, &mut state, ProviderId::Codex);
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn forced_refresh_retries_backing_off_account() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: None,
+            snapshot: None,
+            health: crate::model::ProviderHealth::Error,
+            auth_state: AuthState::Error,
+            error: Some("boom".to_string()),
+            retry_after: Some(Utc::now() + chrono::Duration::minutes(5)),
+            consecutive_failures: 1,
+        });
+
+        let task =
+            refresh_provider_task_for_process(&config, &mut state, ProviderId::Codex, None, true);
+
+        assert!(task.units() > 0);
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn forced_refresh_still_skips_action_required_account() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: None,
+            snapshot: None,
+            health: crate::model::ProviderHealth::Error,
+            auth_state: AuthState::ActionRequired,
+            error: Some("login required".to_string()),
+            retry_after: None,
+            consecutive_failures: 1,
+        });
+
+        let task =
+            refresh_provider_task_for_process(&config, &mut state, ProviderId::Codex, None, true);
+
+        assert_eq!(task.units(), 0);
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
     #[test]

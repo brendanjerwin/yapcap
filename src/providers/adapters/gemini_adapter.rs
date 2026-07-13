@@ -68,9 +68,12 @@ impl ProviderAdapter for GeminiAdapter {
         let accounts = self.discover_accounts(config);
         reconcile_provider_account_descriptors(self.id(), config, state, &accounts);
         if let Some(provider_state) = state.provider_mut(ProviderId::Gemini) {
-            provider_state.system_active_account_id =
-                gemini_system_active_account_id(&config.gemini_managed_accounts);
+            provider_state.system_active_account_id = self.system_active_account_id(config);
         }
+    }
+
+    fn system_active_account_id(&self, config: &Config) -> Option<String> {
+        gemini_system_active_account_id(&config.gemini_managed_accounts)
     }
 
     fn fetch_account<'a>(

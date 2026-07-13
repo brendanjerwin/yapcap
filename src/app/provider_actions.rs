@@ -1,11 +1,10 @@
 use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
     PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, SettingsRoute, Size, Task,
-    UpdateStatus, UsageAmountFormat, app_popup, applet_button_size, claude, cosmic_config, cursor,
-    demo_env, destroy_popup, format_retry_delay, minimax, popup_size_limits_with_max_width,
-    popup_size_tuple, popup_view, refresh_provider_account_statuses_task,
-    refresh_provider_task_for_process, registry, resize_popup, runtime, select_provider,
-    update_retry_delay, update_retry_task,
+    UpdateStatus, UsageAmountFormat, app_popup, applet_button_size, cosmic_config, demo_env,
+    destroy_popup, format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple,
+    popup_view, refresh_provider_account_statuses_task, registry, resize_popup, runtime,
+    select_provider, update_retry_delay, update_retry_task,
 };
 use crate::account_selection::provider_show_all_account_selection;
 use crate::config::APP_ID;
@@ -31,18 +30,7 @@ impl AppModel {
         for account in accounts {
             self.state.upsert_account(account);
         }
-        if refreshed_provider == ProviderId::Codex {
-            self.update_codex_metadata_from_state();
-            self.clear_codex_legacy_snapshot_after_success();
-        }
-        if refreshed_provider == ProviderId::Claude {
-            self.update_claude_metadata_from_state();
-            self.clear_claude_legacy_snapshot_after_success();
-        }
-        if refreshed_provider == ProviderId::Cursor {
-            self.update_cursor_metadata_from_state();
-            self.update_cursor_active_account();
-        }
+        super::session::sync_metadata_after_refresh(self, refreshed_provider);
         if self.config.selected_account_ids(refreshed_provider) != refreshed_selected_ids.as_slice()
         {
             self.write_config(|new_config| {
@@ -318,6 +306,12 @@ impl AppModel {
     }
 
     pub(super) fn write_config(&mut self, f: impl FnOnce(&mut Config)) {
+        let mut new_config = self.config.clone();
+        f(&mut new_config);
+        if demo_env::is_active() {
+            self.config = new_config;
+            return;
+        }
         let ctx = match cosmic_config::Config::new(
             <Self as cosmic::Application>::APP_ID,
             Config::VERSION,
@@ -334,8 +328,6 @@ impl AppModel {
                 return;
             }
         };
-        let mut new_config = self.config.clone();
-        f(&mut new_config);
         if let Err(error) = new_config.write_entry(&ctx) {
             tracing::error!(
                 pid = self.process_info.pid,
@@ -602,180 +594,12 @@ impl AppModel {
         }
     }
 
-    pub(super) fn delete_codex_account(&mut self, account_id: &str) -> Task<Message> {
-        let provider = ProviderId::Codex;
-        if !self
-            .config
-            .codex_managed_accounts
-            .iter()
-            .any(|account| account.id == account_id)
-        {
-            log_account_delete_ignored(&self.process_info.id, provider, account_id);
-            return Task::none();
-        }
-
-        self.write_config(|new_config| {
-            let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_selected_ids_with_discoveries(new_config, provider);
-        });
-        log_account_deleted(&self.process_info.id, provider, account_id);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner("account_deleted");
-
-        if self
-            .state
-            .provider(ProviderId::Codex)
-            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
-        {
-            return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
-        }
-        Task::none()
-    }
-
-    pub(super) fn delete_claude_account(&mut self, account_id: &str) -> Task<Message> {
-        let provider = ProviderId::Claude;
-        if !self
-            .config
-            .claude_managed_accounts
-            .iter()
-            .any(|account| account.id == account_id)
-        {
-            log_account_delete_ignored(&self.process_info.id, provider, account_id);
-            return Task::none();
-        }
-
-        claude::remove_managed_config_dir(&crate::config::managed_claude_account_dir(account_id));
-        self.write_config(|new_config| {
-            let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_selected_ids_with_discoveries(new_config, provider);
-        });
-        log_account_deleted(&self.process_info.id, provider, account_id);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner("account_deleted");
-
-        if self
-            .state
-            .provider(ProviderId::Claude)
-            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
-        {
-            return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
-        }
-        Task::none()
-    }
-
-    pub(super) fn delete_cursor_account(&mut self, account_id: &str) -> Task<Message> {
-        let provider = ProviderId::Cursor;
-        if cursor::find_managed_account(&self.config.cursor_managed_accounts, account_id).is_none()
-        {
-            log_account_delete_ignored(&self.process_info.id, provider, account_id);
-            return Task::none();
-        }
-
-        self.write_config(|new_config| {
-            let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_selected_ids_with_discoveries(new_config, provider);
-        });
-        log_account_deleted(&self.process_info.id, provider, account_id);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner("account_deleted");
-
-        if self
-            .state
-            .provider(ProviderId::Cursor)
-            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
-        {
-            return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
-        }
-        Task::none()
-    }
-
-    pub(super) fn delete_gemini_account(&mut self, account_id: &str) -> Task<Message> {
-        let provider = ProviderId::Gemini;
-        if !self
-            .config
-            .gemini_managed_accounts
-            .iter()
-            .any(|account| account.id == account_id)
-        {
-            log_account_delete_ignored(&self.process_info.id, provider, account_id);
-            return Task::none();
-        }
-
-        self.write_config(|new_config| {
-            let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_selected_ids_with_discoveries(new_config, provider);
-        });
-        log_account_deleted(&self.process_info.id, provider, account_id);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner("account_deleted");
-
-        if self
-            .state
-            .provider(ProviderId::Gemini)
-            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
-        {
-            return self.request_provider_refresh(provider, RefreshRequestReason::AccountAction);
-        }
-        Task::none()
-    }
-
-    pub(super) fn delete_copilot_account(&mut self, account_id: &str) -> Task<Message> {
-        let provider = ProviderId::Copilot;
-        if !self
-            .config
-            .copilot_managed_accounts
-            .iter()
-            .any(|account| account.id == account_id)
-        {
-            log_account_delete_ignored(&self.process_info.id, provider, account_id);
-            return Task::none();
-        }
-
-        self.write_config(|new_config| {
-            let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_selected_ids_with_discoveries(new_config, provider);
-        });
-        log_account_deleted(&self.process_info.id, provider, account_id);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner("account_deleted");
-        Task::none()
-    }
-
-    pub(super) fn delete_minimax_account(&mut self, account_id: &str) -> Task<Message> {
-        let provider = ProviderId::Minimax;
-        if !self
-            .config
-            .minimax_managed_accounts
-            .iter()
-            .any(|account| account.id == account_id)
-        {
-            log_account_delete_ignored(&self.process_info.id, provider, account_id);
-            return Task::none();
-        }
-
-        minimax::remove_managed_config_dir(&crate::config::managed_minimax_account_dir(account_id));
-        self.write_config(|new_config| {
-            let _ = registry::delete_account(provider, account_id, new_config);
-            registry::sync_selected_ids_with_discoveries(new_config, provider);
-        });
-        log_account_deleted(&self.process_info.id, provider, account_id);
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
-        self.persist_runtime_if_owner("account_deleted");
-
-        if self
-            .state
-            .provider(ProviderId::Minimax)
-            .is_some_and(|provider| provider.account_status == AccountSelectionStatus::Ready)
-        {
-            let process = self.refresh_task_process();
-            return refresh_provider_task_for_process(
-                &self.config,
-                &mut self.state,
-                ProviderId::Minimax,
-                Some(process),
-            );
-        }
-        Task::none()
+    pub(super) fn delete_account(
+        &mut self,
+        provider: ProviderId,
+        account_id: &str,
+    ) -> Task<Message> {
+        super::session::delete_account(self, provider, account_id)
     }
 
     pub(super) fn persist_runtime_if_owner(&self, reason: &'static str) {
@@ -830,22 +654,4 @@ fn managed_account_count(config: &Config) -> usize {
         + config.gemini_managed_accounts.len()
         + config.copilot_managed_accounts.len()
         + config.minimax_managed_accounts.len()
-}
-
-fn log_account_delete_ignored(process_id: &str, provider: ProviderId, account_id: &str) {
-    tracing::info!(
-        process_id,
-        provider = provider.label(),
-        account_id,
-        "account deletion ignored because account was not configured"
-    );
-}
-
-fn log_account_deleted(process_id: &str, provider: ProviderId, account_id: &str) {
-    tracing::info!(
-        process_id,
-        provider = provider.label(),
-        account_id,
-        "account deleted"
-    );
 }

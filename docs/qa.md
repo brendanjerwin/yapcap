@@ -273,18 +273,25 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ### 10.4 Free tier display
 
-- Free account popup renders chat and completions windows.
+- Free account popup renders Chat and Completions windows.
 - Completions is the headline percentage.
 - Panel shows two bars.
-- Reset time matches `limited_user_reset_date`.
+- Bar fills reflect the entitlements in the API response; do not assert fixed
+  Free entitlement numbers (GitHub adjusts them and the response is authoritative).
+- Reset time follows `quota_reset_date_utc` (falling back to `quota_reset_date`).
+- No cost card is shown for the Free account.
 
 ### 10.5 Paid tier display
 
-- Paid account popup renders one `premium_interactions` window.
+- Paid account popup renders one **Credits** window (token-based accounts).
+- A dollar cost card shows used and included credits, e.g. `$28.00 / $70.00`.
 - Panel shows one bar vertically centered within the two-bar height.
-- Plan badge reads **Pro+** for `plus_monthly_subscriber_quota`.
+- Plan badge reads **Pro** for the Pro credit entitlement.
+- Plan badge reads **Pro+** for `plus_monthly_subscriber_quota` / the Pro+ entitlement.
+- Plan badge reads **Max** for the Max credit entitlement.
 - Plan badge reads **Business** for `copilot_standalone_seat_quota`.
-- Reset time matches `quota_reset_date`.
+- An unknown SKU with no recognizable entitlement range falls back to **Plan**.
+- Reset time follows `quota_reset_date_utc` (falling back to `quota_reset_date`).
 
 ### 10.6 Mixed bar counts
 
@@ -295,12 +302,16 @@ In Settings → General, cycle through all four panel icon styles and verify the
 ### 10.7 Overage rendering
 
 - Run with `YAPCAP_DEMO=1`.
-- Verify the `morgan-pro` Copilot account shows `+42 over plan` under the premium bar.
+- Verify the `morgan-pro` Copilot account shows `+42 over plan` under the Credits bar.
 
 ### 10.8 `YAPCAP_DEMO`
 
 - Run with `YAPCAP_DEMO=1`.
 - Verify `casey-free` and `morgan-pro` Copilot accounts are both present.
+- Verify `casey-free` shows Chat and Completions windows in the new Free shape
+  and no cost card.
+- Verify `morgan-pro` shows a Credits window, a dollar cost card, a **Pro+** badge,
+  and `+42 over plan`.
 - Verify both accounts are selected and Copilot `Show all accounts` is on.
 
 ### 10.9 Re-auth flow

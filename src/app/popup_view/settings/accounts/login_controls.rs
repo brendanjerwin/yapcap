@@ -3,7 +3,12 @@ use super::super::super::{
     CopilotLoginState, CopilotLoginStatus, CursorScanState, Element, GeminiLoginState,
     GeminiLoginStatus, Length, Message, fl, row, widget,
 };
+use crate::app::login::{LoginFlow, MinimaxLoginFlow};
 use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
+
+fn minimax_login_message(event: MinimaxLoginEvent) -> Message {
+    MinimaxLoginFlow::wrap_event(event)
+}
 
 pub(super) fn codex_login_controls(
     login: Option<&CodexLoginState>,
@@ -11,7 +16,7 @@ pub(super) fn codex_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartCodexLogin))
+            .on_press_maybe(enabled.then_some(Message::StartLogin(crate::model::ProviderId::Codex)))
             .into();
     };
 
@@ -30,17 +35,18 @@ pub(super) fn codex_login_controls(
     }
 
     if login.status == CodexLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelCodexLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Codex)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartCodexLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelCodexLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Codex))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Codex))
+                ),
             ]
             .spacing(8),
         );
@@ -55,7 +61,9 @@ pub(super) fn claude_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartClaudeLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Claude)),
+            )
             .into();
     };
 
@@ -86,17 +94,18 @@ pub(super) fn claude_login_controls(
     }
 
     if login.status == ClaudeLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelClaudeLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Claude)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartClaudeLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelClaudeLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Claude))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Claude))
+                ),
             ]
             .spacing(8),
         );
@@ -111,7 +120,9 @@ pub(super) fn gemini_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartGeminiLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Gemini)),
+            )
             .into();
     };
 
@@ -130,17 +141,18 @@ pub(super) fn gemini_login_controls(
     }
 
     if login.status == GeminiLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelGeminiLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Gemini)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartGeminiLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelGeminiLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Gemini))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Gemini))
+                ),
             ]
             .spacing(8),
         );
@@ -155,7 +167,9 @@ pub(super) fn copilot_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartCopilotLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Copilot)),
+            )
             .into();
     };
 
@@ -183,17 +197,18 @@ pub(super) fn copilot_login_controls(
     }
 
     if login.status == CopilotLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelCopilotLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Copilot)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartCopilotLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelCopilotLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Copilot))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Copilot))
+                ),
             ]
             .spacing(8),
         );
@@ -359,7 +374,9 @@ pub(super) fn minimax_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartMinimaxLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Minimax)),
+            )
             .into();
     };
 
@@ -381,36 +398,37 @@ pub(super) fn minimax_login_controls(
         content = content.push(
             widget::text_input(fl!("minimax-api-key-placeholder"), &login.api_key)
                 .on_input(|api_key| {
-                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::ApiKeyChanged(api_key)))
+                    minimax_login_message(MinimaxLoginEvent::ApiKeyChanged(api_key))
                 })
-                .on_submit(|_| Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved)))
+                .on_submit(|_| minimax_login_message(MinimaxLoginEvent::Saved))
                 .width(Length::Fill),
         );
         content = content.push(widget::text(fl!("account-label")).size(12));
         content = content.push(
             widget::text_input(fl!("account-label"), &login.label)
-                .on_input(|label| {
-                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::LabelChanged(label)))
-                })
+                .on_input(|label| minimax_login_message(MinimaxLoginEvent::LabelChanged(label)))
                 .width(Length::Fill),
         );
         content = content.push(
             row![
-                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
-                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved))
-                )),
-                widget::button::text(fl!("account-cancel"))
-                    .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
+                widget::button::standard(fl!("account-add")).on_press_maybe(
+                    enabled.then_some(minimax_login_message(MinimaxLoginEvent::Saved))
+                ),
+                widget::button::text(fl!("account-cancel")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Minimax))
+                ),
             ]
             .spacing(8),
         );
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartMinimaxLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Minimax))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Minimax))
+                ),
             ]
             .spacing(8),
         );

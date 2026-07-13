@@ -620,12 +620,12 @@ mod tests {
 
     #[tokio::test]
     async fn exponential_backoff_caps_at_3600_secs() {
-        use crate::runtime::rate_limit_backoff_secs;
-        assert_eq!(rate_limit_backoff_secs(1), 300);
-        assert_eq!(rate_limit_backoff_secs(2), 600);
-        assert_eq!(rate_limit_backoff_secs(3), 1200);
-        assert_eq!(rate_limit_backoff_secs(4), 2400);
-        assert_eq!(rate_limit_backoff_secs(5), 3600);
-        assert_eq!(rate_limit_backoff_secs(10), 3600);
+        use crate::runtime::retry_backoff_secs;
+        assert_eq!(retry_backoff_secs(1), 300);
+        assert_eq!(retry_backoff_secs(2), 600);
+        assert_eq!(retry_backoff_secs(3), 1200);
+        assert_eq!(retry_backoff_secs(4), 2400);
+        assert_eq!(retry_backoff_secs(5), 3600);
+        assert_eq!(retry_backoff_secs(10), 3600);
     }
 }

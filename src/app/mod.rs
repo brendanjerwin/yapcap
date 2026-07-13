@@ -3,10 +3,13 @@
 mod applet;
 mod host_auth_watch;
 mod login;
+
+use self::login::LoginFlow;
 mod popup_view;
 mod provider_actions;
 mod provider_assets;
 mod refresh;
+mod session;
 mod state;
 #[cfg(test)]
 mod tests;
@@ -153,37 +156,15 @@ pub enum Message {
     NavigateTo(PopupRoute),
     SetProviderEnabled(ProviderId, bool),
     ToggleAccountSelection(ProviderId, String),
-    DeleteCodexAccount(String),
-    ReauthenticateCodexAccount(String),
-    StartCodexLogin,
-    CancelCodexLogin,
-    CodexLoginEvent(Box<CodexLoginEvent>),
-    DeleteClaudeAccount(String),
-    ReauthenticateClaudeAccount(String),
-    StartClaudeLogin,
+    DeleteAccount(ProviderId, String),
     UpdateClaudeLoginCode(String),
     SubmitClaudeLoginCode,
-    CancelClaudeLogin,
-    ClaudeLoginEvent(Box<ClaudeLoginEvent>),
-    DeleteGeminiAccount(String),
-    ReauthenticateGeminiAccount(String),
-    StartGeminiLogin,
-    CancelGeminiLogin,
-    GeminiLoginEvent(Box<GeminiLoginEvent>),
-    DeleteCopilotAccount(String),
-    ReauthenticateCopilotAccount(String),
-    StartCopilotLogin,
-    CancelCopilotLogin,
-    CopilotLoginEvent(Box<CopilotLoginEvent>),
     CopyCopilotLoginCode(String),
     ClearCopilotLoginCodeCopied(String),
-    DeleteMinimaxAccount(String),
-    ReauthenticateMinimaxAccount(String),
-    StartMinimaxLogin,
-    CancelMinimaxLogin,
-    MinimaxLoginEvent(Box<MinimaxLoginEvent>),
-    DeleteCursorAccount(String),
-    ReauthenticateCursorAccount(String),
+    ReauthenticateAccount(ProviderId, String),
+    StartLogin(ProviderId),
+    CancelLogin(ProviderId),
+    LoginEvent(ProviderId, Box<login::LoginEventKind>),
     StartCursorScan,
     ConfirmCursorScan,
     DismissCursorScan,
@@ -312,6 +293,7 @@ impl cosmic::Application for AppModel {
                 let mut changed = registry::startup_sync(&mut config);
                 changed |= registry::initialize_provider_visibility(&mut config, &ProviderId::ALL);
                 changed |= registry::finalize_provider_visibility_initialization(&mut config);
+                changed |= demo_env::strip_leaked_state(&mut config);
                 if changed {
                     let _ = config.write_entry(&ctx);
                 }
@@ -515,9 +497,6 @@ impl AppModel {
     }
 
     fn handle_message_task(&mut self, message: Message) -> Option<Task<Message>> {
-        if let CursorMessageResult::Handled(task) = self.handle_cursor_message(&message) {
-            return task;
-        }
         match message {
             Message::UpdateConfig(config, keys) => {
                 self.on_config_update(*config, &keys);
@@ -616,42 +595,35 @@ impl AppModel {
             Message::ToggleAccountSelection(provider, account_id) => {
                 return Some(self.toggle_account_selection(provider, &account_id));
             }
-            Message::DeleteCodexAccount(account_id) => {
-                return Some(self.delete_codex_account(&account_id));
+            Message::DeleteAccount(provider, account_id) => {
+                return Some(self.delete_account(provider, &account_id));
             }
-            Message::DeleteClaudeAccount(account_id) => {
-                return Some(self.delete_claude_account(&account_id));
+            Message::ReauthenticateAccount(provider, account_id) => {
+                return Some(session::reauthenticate(self, provider, &account_id));
             }
-            Message::ReauthenticateClaudeAccount(account_id) => {
-                return Some(self.reauthenticate_claude_account(&account_id));
+            Message::StartLogin(provider) => {
+                return Some(session::start_login(self, provider));
             }
-            Message::ReauthenticateCodexAccount(account_id) => {
-                return Some(self.reauthenticate_codex_account(&account_id));
-            }
-            Message::StartCodexLogin => return Some(self.start_codex_login()),
-            Message::CancelCodexLogin => self.cancel_codex_login(),
-            Message::CodexLoginEvent(event) => return Some(self.handle_codex_login_event(*event)),
-            Message::DeleteGeminiAccount(account_id) => {
-                return Some(self.delete_gemini_account(&account_id));
-            }
-            Message::ReauthenticateGeminiAccount(account_id) => {
-                return Some(self.reauthenticate_gemini_account(&account_id));
-            }
-            Message::StartGeminiLogin => return Some(self.start_gemini_login()),
-            Message::CancelGeminiLogin => self.cancel_gemini_login(),
-            Message::GeminiLoginEvent(event) => {
-                return Some(self.handle_gemini_login_event(*event));
-            }
-            Message::DeleteCopilotAccount(account_id) => {
-                return Some(self.delete_copilot_account(&account_id));
-            }
-            Message::ReauthenticateCopilotAccount(account_id) => {
-                return Some(self.reauthenticate_copilot_account(&account_id));
-            }
-            Message::StartCopilotLogin => return Some(self.start_copilot_login()),
-            Message::CancelCopilotLogin => self.cancel_copilot_login(),
-            Message::CopilotLoginEvent(event) => {
-                return Some(self.handle_copilot_login_event(*event));
+            Message::CancelLogin(provider) => session::cancel_login(self, provider),
+            Message::LoginEvent(provider, kind) => {
+                return Some(match (provider, *kind) {
+                    (ProviderId::Codex, login::LoginEventKind::Codex(event)) => {
+                        login::CodexLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Claude, login::LoginEventKind::Claude(event)) => {
+                        login::ClaudeLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Gemini, login::LoginEventKind::Gemini(event)) => {
+                        login::GeminiLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Copilot, login::LoginEventKind::Copilot(event)) => {
+                        login::CopilotLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Minimax, login::LoginEventKind::Minimax(event)) => {
+                        login::MinimaxLoginFlow::on_event(self, event)
+                    }
+                    _ => Task::none(),
+                });
             }
             Message::CopyCopilotLoginCode(code) => {
                 return Some(self.copy_copilot_login_code(code));
@@ -659,30 +631,14 @@ impl AppModel {
             Message::ClearCopilotLoginCodeCopied(flow_id) => {
                 self.clear_copilot_login_code_copied(&flow_id);
             }
-            Message::DeleteMinimaxAccount(account_id) => {
-                return Some(self.delete_minimax_account(&account_id));
-            }
-            Message::ReauthenticateMinimaxAccount(account_id) => {
-                return Some(self.reauthenticate_minimax_account(&account_id));
-            }
-            Message::StartMinimaxLogin => return Some(self.start_minimax_login()),
-            Message::CancelMinimaxLogin => self.cancel_minimax_login(),
-            Message::MinimaxLoginEvent(event) => {
-                return Some(self.handle_minimax_login_event(*event));
-            }
-            Message::StartClaudeLogin => return Some(self.start_claude_login()),
             Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
             Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
-            Message::CancelClaudeLogin => self.cancel_claude_login(),
-            Message::ClaudeLoginEvent(event) => {
-                return Some(self.handle_claude_login_event(*event));
+            Message::StartCursorScan => return Some(self.start_cursor_scan()),
+            Message::ConfirmCursorScan => return Some(self.confirm_cursor_scan()),
+            Message::DismissCursorScan => self.dismiss_cursor_scan(),
+            Message::CursorScanComplete(state, result) => {
+                self.handle_cursor_scan_complete(state, result);
             }
-            Message::DeleteCursorAccount(_)
-            | Message::ReauthenticateCursorAccount(_)
-            | Message::StartCursorScan
-            | Message::ConfirmCursorScan
-            | Message::DismissCursorScan
-            | Message::CursorScanComplete(_, _) => unreachable!(),
         }
         None
     }
@@ -834,32 +790,6 @@ impl AppModel {
         task
     }
 
-    fn handle_cursor_message(&mut self, message: &Message) -> CursorMessageResult {
-        match message {
-            Message::DeleteCursorAccount(account_id) => {
-                CursorMessageResult::handled(Some(self.delete_cursor_account(account_id)))
-            }
-            Message::ReauthenticateCursorAccount(account_id) => {
-                CursorMessageResult::handled(Some(self.reauthenticate_cursor_account(account_id)))
-            }
-            Message::StartCursorScan => {
-                CursorMessageResult::handled(Some(self.start_cursor_scan()))
-            }
-            Message::ConfirmCursorScan => {
-                CursorMessageResult::handled(Some(self.confirm_cursor_scan()))
-            }
-            Message::DismissCursorScan => {
-                self.dismiss_cursor_scan();
-                CursorMessageResult::handled(None)
-            }
-            Message::CursorScanComplete(state, result) => {
-                self.handle_cursor_scan_complete(state.clone(), result.clone());
-                CursorMessageResult::handled(None)
-            }
-            _ => CursorMessageResult::Unhandled,
-        }
-    }
-
     fn handle_provider_account_statuses_refreshed(
         &mut self,
         provider: ProviderId,
@@ -875,10 +805,7 @@ impl AppModel {
         for account in accounts {
             self.state.upsert_account(account);
         }
-        if provider == ProviderId::Cursor {
-            self.update_cursor_metadata_from_state();
-            self.update_cursor_active_account();
-        }
+        session::sync_metadata_after_status_refresh(self, provider);
         self.sync_panel_suggested_bounds();
         self.persist_runtime_if_owner("account_status_refresh");
     }
@@ -942,6 +869,16 @@ fn owner_automatic_refresh_task(
     if refresh_owner.is_none() {
         return Task::none();
     }
+    if runtime::resolve_stale_refreshes(state) {
+        runtime::persist_state_as(
+            state,
+            "stale_refresh_resolved",
+            Some(SharedStateWriter {
+                process_id: &process_info.id,
+                owner_status,
+            }),
+        );
+    }
     let task = automatic_refresh_provider_tasks_for_process(config, state, Some(process));
     if task.units() > 0 {
         runtime::persist_state_as(
@@ -976,6 +913,10 @@ fn owner_shared_control_refresh_task(
         .requests
         .iter()
         .filter_map(|request| {
+            let force = matches!(
+                request.reason,
+                RefreshRequestReason::User | RefreshRequestReason::AccountAction
+            );
             if !config.provider_enabled(request.provider) {
                 evaluation.record_outcome(request.provider, "disabled");
                 consumed_providers.push(request.provider);
@@ -983,7 +924,7 @@ fn owner_shared_control_refresh_task(
             }
             let Some(provider_state) = state.provider(request.provider) else {
                 evaluation.record_outcome(request.provider, "missing_provider_state");
-                return Some(request.provider);
+                return Some((request.provider, force));
             };
             if provider_state.is_refreshing {
                 evaluation.record_outcome(request.provider, "already_refreshing");
@@ -997,14 +938,14 @@ fn owner_shared_control_refresh_task(
                 consumed_providers.push(request.provider);
                 return None;
             }
-            Some(request.provider)
+            Some((request.provider, force))
         })
         .collect::<Vec<_>>();
 
     let tasks = providers
         .into_iter()
-        .map(|provider| {
-            refresh_provider_task_for_process(config, state, provider, Some(process.clone()))
+        .map(|(provider, force)| {
+            refresh_provider_task_for_process(config, state, provider, Some(process.clone()), force)
         })
         .filter(|task| task.units() > 0)
         .collect::<Vec<_>>();
@@ -1133,17 +1074,6 @@ fn shared_control_with_user_refresh_requests(
         });
     }
     next
-}
-
-enum CursorMessageResult {
-    Handled(Option<Task<Message>>),
-    Unhandled,
-}
-
-impl CursorMessageResult {
-    fn handled(task: Option<Task<Message>>) -> Self {
-        Self::Handled(task)
-    }
 }
 
 #[derive(Debug, Clone, Copy)]

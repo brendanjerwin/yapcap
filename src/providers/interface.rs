@@ -74,6 +74,10 @@ pub trait ProviderAdapter: Send + Sync {
 
     fn reconcile_provider_accounts(&self, config: &Config, state: &mut AppState);
 
+    fn system_active_account_id(&self, _config: &Config) -> Option<String> {
+        None
+    }
+
     fn fetch_account<'a>(
         &self,
         handle: &'a ProviderAccountHandle,

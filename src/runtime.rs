@@ -98,11 +98,53 @@ pub(crate) fn debug_env_value_enabled(value: &str) -> bool {
         || value.eq_ignore_ascii_case("off"))
 }
 
-pub(crate) fn rate_limit_backoff_secs(consecutive: u32) -> u64 {
+pub(crate) fn retry_backoff_secs(consecutive: u32) -> u64 {
     const BASE: u64 = 300;
     const CAP: u64 = 3600;
     let shift = consecutive.saturating_sub(1).min(12);
     BASE.saturating_mul(1u64 << shift).min(CAP)
+}
+
+pub(crate) const REFRESH_STALE_AFTER_SECS: i64 = 60;
+
+const STALE_REFRESH_MESSAGE: &str = "Refresh timed out";
+
+pub fn resolve_stale_refreshes(state: &mut AppState) -> bool {
+    let now = Utc::now();
+    let stale = chrono::Duration::seconds(REFRESH_STALE_AFTER_SECS);
+    let mut stale_providers = Vec::new();
+    for provider in &mut state.providers {
+        if !provider.is_refreshing {
+            continue;
+        }
+        if provider
+            .refresh_started_at
+            .is_some_and(|started| now - started < stale)
+        {
+            continue;
+        }
+        provider.is_refreshing = false;
+        provider.refresh_started_at = None;
+        provider.error = Some(STALE_REFRESH_MESSAGE.to_string());
+        tracing::warn!(
+            provider = provider.provider.label(),
+            "resolved stale provider refresh as timed out"
+        );
+        stale_providers.push((provider.provider, provider.selected_account_ids.clone()));
+    }
+    for (provider, account_ids) in &stale_providers {
+        for account in state.provider_accounts.iter_mut().filter(|account| {
+            account.provider == *provider && account_ids.contains(&account.account_id)
+        }) {
+            account.health = ProviderHealth::Error;
+            account.auth_state = AuthState::Error;
+            account.error = Some(STALE_REFRESH_MESSAGE.to_string());
+            account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+            let backoff = retry_backoff_secs(account.consecutive_failures);
+            account.retry_after = Some(now + chrono::Duration::seconds(backoff.cast_signed()));
+        }
+    }
+    !stale_providers.is_empty()
 }
 
 pub(crate) fn classify_auth_state(error: &AppError) -> AuthState {
@@ -258,6 +300,7 @@ where
                 "provider refresh succeeded"
             );
             state.is_refreshing = false;
+            state.refresh_started_at = None;
             state.error = None;
             account.health = ProviderHealth::Ok;
             account.auth_state = AuthState::Ready;
@@ -265,8 +308,8 @@ where
             account.last_success_at = Some(Utc::now());
             account.snapshot = Some(snapshot);
             account.error = None;
-            account.rate_limit_until = None;
-            account.consecutive_rate_limits = 0;
+            account.retry_after = None;
+            account.consecutive_failures = 0;
             if provider == ProviderId::Claude
                 && let Some(email) = account
                     .snapshot
@@ -295,6 +338,7 @@ where
             }
             let user_message = error.user_message();
             state.is_refreshing = false;
+            state.refresh_started_at = None;
             if providers::registry::auth_error_requires_reauth_prompt(provider)
                 && error.requires_user_action()
             {
@@ -306,14 +350,12 @@ where
             account.health = ProviderHealth::Error;
             account.auth_state = classify_auth_state(&error);
             account.error = Some(user_message);
-            if error.is_rate_limited() {
-                account.consecutive_rate_limits = account.consecutive_rate_limits.saturating_add(1);
-                let backoff_secs = error
-                    .rate_limit_retry_after_secs()
-                    .unwrap_or_else(|| rate_limit_backoff_secs(account.consecutive_rate_limits));
-                account.rate_limit_until =
-                    Some(Utc::now() + chrono::Duration::seconds(backoff_secs.cast_signed()));
-            }
+            account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+            let backoff_secs = error
+                .rate_limit_retry_after_secs()
+                .unwrap_or_else(|| retry_backoff_secs(account.consecutive_failures));
+            account.retry_after =
+                Some(Utc::now() + chrono::Duration::seconds(backoff_secs.cast_signed()));
         }
     }
 
@@ -340,11 +382,13 @@ fn reconcile_state_with_refresh(config: &Config, state: &mut AppState, preserve_
         provider.enabled = config.provider_enabled(provider.provider);
         if !preserve_refreshing {
             provider.is_refreshing = false;
+            provider.refresh_started_at = None;
         }
         if !provider.enabled {
             provider.account_status = AccountSelectionStatus::Unavailable;
             provider.selected_account_ids = Vec::new();
             provider.is_refreshing = false;
+            provider.refresh_started_at = None;
         }
     }
 }
@@ -355,6 +399,7 @@ pub fn reconcile_provider(config: &Config, state: &mut AppState, provider: Provi
     if let Some(entry) = state.provider_mut(provider) {
         entry.enabled = config.provider_enabled(provider);
         entry.is_refreshing = false;
+        entry.refresh_started_at = None;
         if !entry.enabled {
             entry.account_status = AccountSelectionStatus::Unavailable;
             entry.selected_account_ids = Vec::new();
@@ -458,6 +503,48 @@ mod tests {
 
         reconcile_shared_state(&config, &mut state);
 
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    fn state_with_refreshing_provider(started_at: Option<chrono::DateTime<Utc>>) -> AppState {
+        let mut state = AppState::empty();
+        {
+            let provider = state.provider_mut(ProviderId::Codex).unwrap();
+            provider.is_refreshing = true;
+            provider.refresh_started_at = started_at;
+            provider.selected_account_ids = vec!["codex-1".to_string()];
+        }
+        state.upsert_account(ProviderAccountRuntimeState::empty(
+            ProviderId::Codex,
+            "codex-1",
+            "Codex",
+        ));
+        state
+    }
+
+    #[test]
+    fn resolve_stale_refreshes_resolves_orphaned_refresh() {
+        let mut state = state_with_refreshing_provider(None);
+
+        assert!(resolve_stale_refreshes(&mut state));
+
+        let provider = state.provider(ProviderId::Codex).unwrap();
+        assert!(!provider.is_refreshing);
+        assert!(provider.refresh_started_at.is_none());
+        let account = state
+            .provider_accounts
+            .iter()
+            .find(|account| account.account_id == "codex-1")
+            .unwrap();
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.is_backing_off());
+    }
+
+    #[test]
+    fn resolve_stale_refreshes_ignores_fresh_refresh() {
+        let mut state = state_with_refreshing_provider(Some(Utc::now()));
+
+        assert!(!resolve_stale_refreshes(&mut state));
         assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
@@ -646,8 +733,40 @@ mod tests {
 
         assert_eq!(account.health, ProviderHealth::Error);
         assert_eq!(account.auth_state, AuthState::Error);
-        assert_eq!(account.consecutive_rate_limits, 1);
-        assert!(account.rate_limit_until.is_some());
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.retry_after.is_some());
+        assert!(account.snapshot.is_some());
+    }
+
+    #[tokio::test]
+    async fn generic_failure_records_backoff_and_preserves_snapshot() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Copilot);
+        let mut previous_account =
+            ProviderAccountRuntimeState::empty(ProviderId::Copilot, "copilot-1", "octocat");
+        previous_account.snapshot = Some(snapshot());
+        previous_account.last_success_at = Some(Utc::now());
+
+        let result = refresh_provider_account(
+            ProviderId::Copilot,
+            true,
+            Some(&previous),
+            Some(&previous_account),
+            "copilot-1".to_string(),
+            "octocat".to_string(),
+            async {
+                Err(AppError::from(
+                    crate::error::CopilotError::UnrecognizedResponse {
+                        detail: "access_type_sku=free_limited_copilot, login=octocat, token_based_billing=absent".to_string(),
+                    },
+                ))
+            },
+        )
+        .await;
+        let account = result.accounts.first().unwrap();
+
+        assert_eq!(account.health, ProviderHealth::Error);
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.is_backing_off());
         assert!(account.snapshot.is_some());
     }
 

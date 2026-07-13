@@ -114,31 +114,8 @@ pub fn reconcile_provider_accounts(provider: ProviderId, config: &Config, state:
     adapter(provider).reconcile_provider_accounts(config, state);
 }
 
-pub(crate) fn codex_system_active_account_id(
-    managed_accounts: &[crate::config::ManagedCodexAccountConfig],
-) -> Option<String> {
-    crate::providers::adapters::codex_system_active_account_id(managed_accounts)
-}
-
-pub(crate) fn claude_system_active_account_id(
-    managed_accounts: &[crate::config::ManagedClaudeAccountConfig],
-) -> Option<String> {
-    crate::providers::adapters::claude_system_active_account_id(managed_accounts)
-}
-
-pub(crate) fn gemini_system_active_account_id(
-    managed_accounts: &[crate::config::ManagedGeminiAccountConfig],
-) -> Option<String> {
-    crate::providers::adapters::gemini_system_active_account_id(managed_accounts)
-}
-
-// NOTE: This function is used via the adapter pattern (reconcile_provider_accounts in minimax_adapter.rs)
-// but clippy cannot detect this usage through the dynamic dispatch. This is not actually dead code.
-#[allow(dead_code)]
-pub(crate) fn minimax_system_active_account_id(
-    managed_accounts: &[crate::config::ManagedMinimaxAccountConfig],
-) -> Option<String> {
-    crate::providers::adapters::minimax_system_active_account_id(managed_accounts)
+pub fn system_active_account_id(provider: ProviderId, config: &Config) -> Option<String> {
+    adapter(provider).system_active_account_id(config)
 }
 
 pub async fn refresh_account_statuses(

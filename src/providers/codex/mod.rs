@@ -21,6 +21,8 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 pub use account::{apply_login_account, discover_accounts, sync_managed_accounts};
+#[cfg(test)]
+pub use login::CodexLoginSuccess;
 pub use login::{CodexLoginEvent, CodexLoginState, CodexLoginStatus, prepare};
 
 use crate::config::ManagedCodexAccountConfig;

@@ -404,6 +404,7 @@ fn window_display_label(provider: ProviderId, label: &str) -> String {
             "chat" => return fl!("copilot-window-chat"),
             "completions" => return fl!("copilot-window-completions"),
             "premium_interactions" => return fl!("copilot-window-premium"),
+            "credits" => return fl!("copilot-window-credits"),
             _ => {}
         }
     }
@@ -411,7 +412,7 @@ fn window_display_label(provider: ProviderId, label: &str) -> String {
 }
 
 fn overage_text(window: &UsageWindow) -> Option<String> {
-    if window.label == "premium_interactions" {
+    if window.label == "premium_interactions" || window.label == "credits" {
         return window.reset_description.clone();
     }
     None
@@ -736,6 +737,7 @@ mod tests {
             system_active_account_id: None,
             account_status: AccountSelectionStatus::Ready,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: None,
         };
@@ -767,6 +769,7 @@ mod tests {
             system_active_account_id: Some("cursor-1".to_string()),
             account_status: AccountSelectionStatus::Ready,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: None,
         };
@@ -805,6 +808,7 @@ mod tests {
             system_active_account_id: None,
             account_status: AccountSelectionStatus::LoginRequired,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: Some("Login required".to_string()),
         };
@@ -827,6 +831,7 @@ mod tests {
                 system_active_account_id: None,
                 account_status: AccountSelectionStatus::LoginRequired,
                 is_refreshing: false,
+                refresh_started_at: None,
                 legacy_display_snapshot: None,
                 error: Some("Login required".to_string()),
             };
@@ -848,6 +853,7 @@ mod tests {
             system_active_account_id: None,
             account_status: AccountSelectionStatus::LoginRequired,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: Some("Login required".to_string()),
         };

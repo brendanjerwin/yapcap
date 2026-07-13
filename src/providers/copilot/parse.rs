@@ -2,40 +2,37 @@
 
 use crate::error::CopilotError;
 use crate::fl;
-use crate::model::{ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow};
+use crate::model::{
+    ProviderCost, ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow,
+};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 use serde::Deserialize;
-
-const FREE_WINDOW_SECONDS: i64 = 30 * 24 * 3600;
 
 #[derive(Debug, Deserialize)]
 struct CopilotUserResponse {
     access_type_sku: Option<String>,
     login: Option<String>,
-    monthly_quotas: Option<FreeQuotas>,
-    limited_user_quotas: Option<FreeQuotas>,
-    limited_user_reset_date: Option<String>,
+    token_based_billing: Option<bool>,
     quota_reset_date: Option<String>,
-    quota_snapshots: Option<PaidQuotaSnapshots>,
+    quota_reset_date_utc: Option<String>,
+    quota_snapshots: Option<QuotaSnapshots>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FreeQuotas {
-    chat: Option<f32>,
-    completions: Option<f32>,
+struct QuotaSnapshots {
+    premium_interactions: Option<Quota>,
+    chat: Option<Quota>,
+    completions: Option<Quota>,
 }
 
 #[derive(Debug, Deserialize)]
-struct PaidQuotaSnapshots {
-    premium_interactions: Option<PaidQuota>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PaidQuota {
+struct Quota {
     entitlement: Option<i32>,
     remaining: Option<i32>,
+    quota_remaining: Option<f64>,
     percent_remaining: Option<f32>,
-    overage_permitted: Option<bool>,
+    has_quota: Option<bool>,
+    unlimited: Option<bool>,
     overage_count: Option<i32>,
 }
 
@@ -43,178 +40,151 @@ pub fn parse(body: &str, updated_at: DateTime<Utc>) -> Result<UsageSnapshot, Cop
     let response: CopilotUserResponse =
         serde_json::from_str(body).map_err(CopilotError::ParseUsage)?;
 
-    if response.access_type_sku.as_deref() == Some("free_limited_copilot") {
-        return parse_free(response, updated_at);
-    }
+    let Some(snapshots) = response.quota_snapshots.as_ref() else {
+        return Err(unrecognized_response(&response));
+    };
 
-    if response.quota_snapshots.is_some() {
-        return parse_paid(response, updated_at);
-    }
+    let reset_at = resolve_reset(&response)?;
+    let window_seconds = window_seconds(reset_at, updated_at);
+    let token_based = response.token_based_billing == Some(true);
 
-    Err(unrecognized_response(&response))
-}
-
-fn parse_free(
-    response: CopilotUserResponse,
-    updated_at: DateTime<Utc>,
-) -> Result<UsageSnapshot, CopilotError> {
-    let monthly = response
-        .monthly_quotas
-        .ok_or_else(|| unrecognized("missing monthly_quotas"))?;
-    let remaining = response
-        .limited_user_quotas
-        .ok_or_else(|| unrecognized("missing limited_user_quotas"))?;
-    let reset_at = response
-        .limited_user_reset_date
-        .as_deref()
-        .map(parse_reset_date)
-        .transpose()?
-        .ok_or_else(|| unrecognized("missing limited_user_reset_date"))?;
-
-    let window_seconds = free_window_seconds(reset_at, updated_at);
-    let windows = vec![
-        free_window(
-            "chat",
-            monthly
-                .chat
-                .ok_or_else(|| unrecognized("missing monthly_quotas.chat"))?,
-            remaining
-                .chat
-                .ok_or_else(|| unrecognized("missing limited_user_quotas.chat"))?,
+    let mut windows = Vec::new();
+    let mut premium_headline = None;
+    let mut completions_headline = None;
+    for (label, quota) in ordered_quotas(snapshots) {
+        let Some(quota) = quota else { continue };
+        if !is_metered(quota) {
+            continue;
+        }
+        let index = windows.len();
+        windows.push(quota_window(
+            window_label(label, token_based),
+            quota,
             reset_at,
             window_seconds,
-        ),
-        free_window(
-            "completions",
-            monthly
-                .completions
-                .ok_or_else(|| unrecognized("missing monthly_quotas.completions"))?,
-            remaining
-                .completions
-                .ok_or_else(|| unrecognized("missing limited_user_quotas.completions"))?,
-            reset_at,
-            window_seconds,
-        ),
-    ];
+        ));
+        match label {
+            "premium_interactions" => premium_headline = Some(index),
+            "completions" => completions_headline = Some(index),
+            _ => {}
+        }
+    }
+
+    if windows.is_empty() {
+        return Err(unrecognized_response(&response));
+    }
+
+    let headline = premium_headline.or(completions_headline).unwrap_or(0);
+    let premium = snapshots.premium_interactions.as_ref();
+    let premium_entitlement = premium.and_then(|quota| quota.entitlement);
+    let has_metered_premium = premium.is_some_and(is_metered);
+    let provider_cost = (token_based && has_metered_premium)
+        .then(|| credits_cost(premium))
+        .flatten();
 
     Ok(UsageSnapshot {
         provider: ProviderId::Copilot,
         source: "Managed Account".to_string(),
         updated_at,
-        headline: UsageHeadline(1),
+        headline: UsageHeadline(headline),
         windows,
-        provider_cost: None,
-        extra_usage: None,
-        identity: ProviderIdentity {
-            email: None,
-            account_id: None,
-            plan: Some(plan_badge(response.access_type_sku.as_deref(), None, false)),
-            display_name: response.login,
-        },
-    })
-}
-
-fn parse_paid(
-    response: CopilotUserResponse,
-    updated_at: DateTime<Utc>,
-) -> Result<UsageSnapshot, CopilotError> {
-    let snapshots = response
-        .quota_snapshots
-        .ok_or_else(|| unrecognized("missing quota_snapshots"))?;
-    let premium = snapshots
-        .premium_interactions
-        .ok_or_else(|| unrecognized("missing quota_snapshots.premium_interactions"))?;
-    let reset_at = response
-        .quota_reset_date
-        .as_deref()
-        .map(parse_reset_date)
-        .transpose()?
-        .ok_or_else(|| unrecognized("missing quota_reset_date"))?;
-    let entitlement = premium
-        .entitlement
-        .ok_or_else(|| unrecognized("missing premium_interactions.entitlement"))?;
-    let remaining = premium
-        .remaining
-        .ok_or_else(|| unrecognized("missing premium_interactions.remaining"))?;
-    let percent_remaining = premium
-        .percent_remaining
-        .ok_or_else(|| unrecognized("missing premium_interactions.percent_remaining"))?;
-    let _ = (remaining, premium.overage_permitted);
-
-    Ok(UsageSnapshot {
-        provider: ProviderId::Copilot,
-        source: "Managed Account".to_string(),
-        updated_at,
-        headline: UsageHeadline(0),
-        windows: vec![paid_window(
-            "premium_interactions",
-            percent_remaining,
-            reset_at,
-            premium.overage_count,
-            paid_window_seconds(reset_at, updated_at),
-        )],
-        provider_cost: None,
+        provider_cost,
         extra_usage: None,
         identity: ProviderIdentity {
             email: None,
             account_id: None,
             plan: Some(plan_badge(
                 response.access_type_sku.as_deref(),
-                Some(entitlement),
-                true,
+                premium_entitlement,
+                token_based,
+                has_metered_premium,
             )),
             display_name: response.login,
         },
     })
 }
 
-fn free_window(
-    label: &str,
-    entitlement: f32,
-    remaining: f32,
-    reset_at: DateTime<Utc>,
-    window_seconds: Option<i64>,
-) -> UsageWindow {
-    let used_percent = if entitlement <= 0.0 {
-        0.0
+fn ordered_quotas(snapshots: &QuotaSnapshots) -> [(&'static str, &Option<Quota>); 3] {
+    [
+        ("premium_interactions", &snapshots.premium_interactions),
+        ("chat", &snapshots.chat),
+        ("completions", &snapshots.completions),
+    ]
+}
+
+fn window_label(label: &str, token_based: bool) -> &str {
+    if label == "premium_interactions" && token_based {
+        "credits"
     } else {
-        ((entitlement - remaining) / entitlement * 100.0).clamp(0.0, 100.0)
-    };
-    UsageWindow {
-        label: label.to_string(),
-        used_percent,
-        reset_at: Some(reset_at),
-        window_seconds,
-        reset_description: Some(reset_at.to_rfc3339()),
+        label
     }
 }
 
-fn paid_window(
+fn credits_cost(quota: Option<&Quota>) -> Option<ProviderCost> {
+    let quota = quota?;
+    let entitlement = f64::from(quota.entitlement?);
+    let remaining = quota
+        .quota_remaining
+        .or_else(|| quota.remaining.map(f64::from))
+        .unwrap_or(0.0);
+    Some(ProviderCost {
+        used: (entitlement - remaining) / 100.0,
+        limit: Some(entitlement / 100.0),
+        units: "USD".to_string(),
+    })
+}
+
+fn is_metered(quota: &Quota) -> bool {
+    if quota.unlimited == Some(true) {
+        return false;
+    }
+    match quota.has_quota {
+        Some(has_quota) => has_quota,
+        None => quota.entitlement.unwrap_or(0) > 0,
+    }
+}
+
+fn quota_window(
     label: &str,
-    percent_remaining: f32,
+    quota: &Quota,
     reset_at: DateTime<Utc>,
-    overage_count: Option<i32>,
     window_seconds: Option<i64>,
 ) -> UsageWindow {
     UsageWindow {
         label: label.to_string(),
-        used_percent: (100.0 - percent_remaining).clamp(0.0, 100.0),
+        used_percent: used_percent(quota),
         reset_at: Some(reset_at),
         window_seconds,
-        reset_description: overage_count
+        reset_description: quota
+            .overage_count
             .filter(|count| *count > 0)
             .map(overage_description),
     }
 }
 
-fn free_window_seconds(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> Option<i64> {
-    if reset_at <= now {
-        return None;
+fn used_percent(quota: &Quota) -> f32 {
+    if let Some(percent_remaining) = quota.percent_remaining {
+        return (100.0 - percent_remaining).clamp(0.0, 100.0);
     }
-    Some(FREE_WINDOW_SECONDS)
+    let entitlement = quota.entitlement.unwrap_or(0) as f32;
+    if entitlement <= 0.0 {
+        return 0.0;
+    }
+    let remaining = quota.remaining.unwrap_or(0) as f32;
+    ((entitlement - remaining) / entitlement * 100.0).clamp(0.0, 100.0)
 }
 
-fn paid_window_seconds(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> Option<i64> {
+fn resolve_reset(response: &CopilotUserResponse) -> Result<DateTime<Utc>, CopilotError> {
+    if let Some(value) = response.quota_reset_date_utc.as_deref() {
+        return parse_reset_date(value);
+    }
+    if let Some(value) = response.quota_reset_date.as_deref() {
+        return parse_reset_date(value);
+    }
+    Err(unrecognized("missing quota_reset_date_utc"))
+}
+
+fn window_seconds(reset_at: DateTime<Utc>, now: DateTime<Utc>) -> Option<i64> {
     if reset_at <= now {
         return None;
     }
@@ -256,8 +226,9 @@ fn unrecognized_response(response: &CopilotUserResponse) -> CopilotError {
     if let Some(login) = response.login.as_deref() {
         details.push(format!("login={login}"));
     }
-    if details.is_empty() {
-        details.push("missing quota fields".to_string());
+    match response.token_based_billing {
+        Some(value) => details.push(format!("token_based_billing={value}")),
+        None => details.push("token_based_billing=absent".to_string()),
     }
     unrecognized(details.join(", "))
 }
@@ -265,18 +236,34 @@ fn unrecognized_response(response: &CopilotUserResponse) -> CopilotError {
 fn plan_badge(
     access_type_sku: Option<&str>,
     premium_entitlement: Option<i32>,
-    has_quota_snapshots: bool,
+    token_based: bool,
+    has_metered_premium: bool,
 ) -> String {
     match access_type_sku {
-        Some("free_limited_copilot") => "Free".to_string(),
-        Some("plus_monthly_subscriber_quota") => "Pro+".to_string(),
-        Some("copilot_standalone_seat_quota") => "Business".to_string(),
-        _ if has_quota_snapshots => match premium_entitlement {
-            Some(300) => "Pro".to_string(),
-            Some(1500) => "Pro+".to_string(),
-            _ => "Plan".to_string(),
-        },
+        Some("free_limited_copilot") => return "Free".to_string(),
+        Some("plus_monthly_subscriber_quota") => return "Pro+".to_string(),
+        Some("copilot_standalone_seat_quota") => return "Business".to_string(),
+        _ => {}
+    }
+    if token_based {
+        return token_based_badge(premium_entitlement, has_metered_premium);
+    }
+    match premium_entitlement {
+        Some(300) => "Pro".to_string(),
+        Some(1500) => "Pro+".to_string(),
         _ => "Plan".to_string(),
+    }
+}
+
+fn token_based_badge(premium_entitlement: Option<i32>, has_metered_premium: bool) -> String {
+    if !has_metered_premium {
+        return "Plan".to_string();
+    }
+    match premium_entitlement {
+        Some(entitlement) if entitlement <= 2_000 => "Pro".to_string(),
+        Some(entitlement) if entitlement <= 10_000 => "Pro+".to_string(),
+        Some(_) => "Max".to_string(),
+        None => "Plan".to_string(),
     }
 }
 

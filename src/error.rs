@@ -87,17 +87,6 @@ impl AppError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        match self {
-            Self::Provider(ProviderError::Claude(e)) => e.is_rate_limited(),
-            Self::Provider(ProviderError::Gemini(e)) => e.is_rate_limited(),
-            Self::Provider(ProviderError::Copilot(e)) => e.is_rate_limited(),
-            Self::Provider(ProviderError::Minimax(e)) => e.is_rate_limited(),
-            _ => false,
-        }
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::Provider(ProviderError::Claude(e)) => e.rate_limit_retry_after_secs(),
@@ -318,11 +307,6 @@ impl ClaudeError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -467,11 +451,6 @@ impl GeminiError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -538,11 +517,6 @@ impl CopilotError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -596,11 +570,6 @@ impl MinimaxError {
     #[must_use]
     pub fn requires_user_action(&self) -> bool {
         matches!(self, Self::LoginRequired)
-    }
-
-    #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
     }
 
     #[must_use]
@@ -727,7 +696,6 @@ mod tests {
         let err = AppError::Provider(ProviderError::Gemini(GeminiError::RateLimited {
             retry_after_secs: Some(42),
         }));
-        assert!(err.is_rate_limited());
         assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
         assert!(err.is_transient());
         assert!(!err.requires_user_action());
@@ -745,7 +713,6 @@ mod tests {
         let err = AppError::Provider(ProviderError::Copilot(CopilotError::RateLimited {
             retry_after_secs: Some(42),
         }));
-        assert!(err.is_rate_limited());
         assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
         assert!(err.is_transient());
         assert!(!err.requires_user_action());

@@ -20,6 +20,8 @@ use std::path::PathBuf;
 use tracing::warn;
 
 pub use account::{apply_login_account, sync_managed_accounts};
+#[cfg(test)]
+pub use login::GeminiLoginSuccess;
 pub use login::{
     GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus, prepare, prepare_for_reauth,
 };

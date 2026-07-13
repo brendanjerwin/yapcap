@@ -5,11 +5,7 @@ use self::login_controls::{
     claude_login_controls, codex_login_controls, copilot_login_controls, cursor_scan_controls,
     gemini_login_controls, minimax_login_controls,
 };
-use self::rows::{
-    account_selector_list, claude_account_settings_row, codex_account_settings_row,
-    copilot_account_settings_row, cursor_account_settings_row, gemini_account_settings_row,
-    minimax_account_settings_row, show_all_accounts_row,
-};
+use self::rows::{account_selector_list, account_settings_row, show_all_accounts_row};
 use super::super::{
     AppState, Config, Element, Length, Message, ProviderId, ProviderLoginStates, fl,
     settings_block, settings_block_enabled, widget,
@@ -83,7 +79,8 @@ fn codex_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(codex_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Codex,
                 account,
                 &selected_ids,
                 active_id,
@@ -148,7 +145,8 @@ fn claude_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(claude_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Claude,
                 account,
                 &selected_ids,
                 active_id,
@@ -212,7 +210,8 @@ fn gemini_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(gemini_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Gemini,
                 account,
                 &selected_ids,
                 active_id,
@@ -271,7 +270,8 @@ fn cursor_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(cursor_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Cursor,
                 account,
                 &selected_ids,
                 active_id,
@@ -316,6 +316,9 @@ fn copilot_accounts_section<'a>(
         })
         .unwrap_or_default();
     let accounts = state.accounts_for(ProviderId::Copilot);
+    let active_id = state
+        .provider(ProviderId::Copilot)
+        .and_then(|provider| provider.system_active_account_id.as_deref());
     let mut rows = cosmic::iced::widget::column![]
         .spacing(8)
         .width(Length::Fill);
@@ -327,9 +330,11 @@ fn copilot_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(copilot_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Copilot,
                 account,
                 &selected_ids,
+                active_id,
                 config,
                 enabled,
             ));
@@ -383,7 +388,8 @@ fn minimax_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(minimax_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Minimax,
                 account,
                 &selected_ids,
                 active_id,

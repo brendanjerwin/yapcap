@@ -10,7 +10,11 @@ use super::{
     UsageAmountFormat, automatic_refresh_poll_interval, format_retry_delay,
     popup_size_limits_with_max_width, popup_size_tuple, update_retry_delay,
 };
-use crate::config::{ManagedCodexAccountConfig, ManagedCopilotAccountConfig};
+use crate::account_storage::{NewProviderAccount, ProviderAccountStorage, ProviderAccountTokens};
+use crate::config::{
+    ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
+    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ManagedMinimaxAccountConfig,
+};
 use crate::model::{
     AccountSelectionStatus, ExtraUsageState, ProviderAccountRuntimeState, ProviderCost,
     ProviderIdentity, ProviderRuntimeState, UsageHeadline, UsageSnapshot, UsageWindow,
@@ -316,6 +320,7 @@ fn provider_refresh_completion_consumes_shared_control_request() {
         system_active_account_id: None,
         account_status: AccountSelectionStatus::Ready,
         is_refreshing: false,
+        refresh_started_at: None,
         legacy_display_snapshot: None,
         error: None,
     };
@@ -856,7 +861,7 @@ fn state_with_selected_account_percents(percents: &[f32]) -> AppState {
     state
 }
 
-fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
+pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
     let lock_path = std::env::temp_dir().join("yapcap-test-unused-owner.lock");
     AppModel {
         core: cosmic::Core::default(),
@@ -888,6 +893,8 @@ fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         gemini_login_handle: None,
         copilot_login: None,
         copilot_login_handle: None,
+        minimax_login: None,
+        minimax_login_handle: None,
     }
 }
 
@@ -944,6 +951,198 @@ fn codex_account(id: &str) -> ManagedCodexAccountConfig {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         last_authenticated_at: None,
+    }
+}
+
+fn claude_account(id: &str) -> ManagedClaudeAccountConfig {
+    ManagedClaudeAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        config_dir: PathBuf::from("/tmp/yapcap/claude"),
+        email: Some(format!("{id}@example.com")),
+        organization: None,
+        subscription_type: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn cursor_account(id: &str, email: &str) -> ManagedCursorAccountConfig {
+    ManagedCursorAccountConfig {
+        id: id.to_string(),
+        email: email.to_string(),
+        label: email.to_string(),
+        account_root: PathBuf::from("/tmp/yapcap/cursor"),
+        display_name: None,
+        plan: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn gemini_account(id: &str) -> ManagedGeminiAccountConfig {
+    ManagedGeminiAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        account_root: PathBuf::from("/tmp/yapcap/gemini"),
+        email: format!("{id}@example.com"),
+        sub: id.to_string(),
+        hd: None,
+        last_tier_id: None,
+        last_cloudaicompanion_project: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn minimax_account(id: &str) -> ManagedMinimaxAccountConfig {
+    ManagedMinimaxAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        api_key_source: "env:MINIMAX_API_KEY".to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn seed_account_storage(dir: PathBuf, provider: ProviderId, id: &str, email: &str) {
+    let storage = ProviderAccountStorage::new(dir);
+    storage
+        .replace_account(
+            id.to_string(),
+            NewProviderAccount {
+                provider,
+                email: email.to_string(),
+                provider_account_id: None,
+                organization_id: None,
+                organization_name: None,
+                tokens: ProviderAccountTokens {
+                    access_token: "access".to_string(),
+                    refresh_token: "refresh".to_string(),
+                    expires_at: Utc::now() + chrono::Duration::hours(1),
+                    scope: Vec::new(),
+                    token_id: None,
+                },
+                snapshot: None,
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn delete_account_requests_refresh_for_all_providers() {
+    for provider in ProviderId::ALL {
+        let mut env = crate::test_support::test_env();
+        let state_root = std::env::temp_dir().join(format!(
+            "yapcap-delete-account-test-{provider:?}-{}",
+            std::process::id()
+        ));
+        env.set("XDG_STATE_HOME", &state_root);
+        env.set("XDG_CONFIG_HOME", &state_root);
+
+        let mut app = test_app(None);
+        let keep_id = "keep";
+        let remove_account_id;
+
+        match provider {
+            ProviderId::Codex => {
+                seed_account_storage(
+                    crate::config::paths().codex_accounts_dir,
+                    provider,
+                    keep_id,
+                    "keep@example.com",
+                );
+                app.config
+                    .codex_managed_accounts
+                    .push(codex_account(keep_id));
+                app.config
+                    .codex_managed_accounts
+                    .push(codex_account("remove"));
+                app.config.selected_codex_account_ids = vec![keep_id.to_string()];
+                remove_account_id = "remove".to_string();
+            }
+            ProviderId::Claude => {
+                app.config
+                    .claude_managed_accounts
+                    .push(claude_account(keep_id));
+                app.config
+                    .claude_managed_accounts
+                    .push(claude_account("remove"));
+                app.config.selected_claude_account_ids = vec![keep_id.to_string()];
+                remove_account_id = "remove".to_string();
+            }
+            ProviderId::Cursor => {
+                seed_account_storage(
+                    crate::config::paths().cursor_accounts_dir,
+                    provider,
+                    keep_id,
+                    "keep@example.com",
+                );
+                app.config
+                    .cursor_managed_accounts
+                    .push(cursor_account(keep_id, "keep@example.com"));
+                app.config
+                    .cursor_managed_accounts
+                    .push(cursor_account("remove", "remove@example.com"));
+                app.config.selected_cursor_account_ids = vec![format!("cursor-managed:{keep_id}")];
+                remove_account_id = "cursor-managed:remove".to_string();
+            }
+            ProviderId::Gemini => {
+                app.config
+                    .gemini_managed_accounts
+                    .push(gemini_account(keep_id));
+                app.config
+                    .gemini_managed_accounts
+                    .push(gemini_account("remove"));
+                app.config.selected_gemini_account_ids = vec![keep_id.to_string()];
+                remove_account_id = "remove".to_string();
+            }
+            ProviderId::Copilot => {
+                app.config
+                    .copilot_managed_accounts
+                    .push(copilot_account(keep_id, "keep"));
+                app.config
+                    .copilot_managed_accounts
+                    .push(copilot_account("remove", "remove"));
+                app.config.selected_copilot_account_ids = vec![keep_id.to_string()];
+                remove_account_id = "remove".to_string();
+            }
+            ProviderId::Minimax => {
+                app.config
+                    .minimax_managed_accounts
+                    .push(minimax_account(keep_id));
+                app.config
+                    .minimax_managed_accounts
+                    .push(minimax_account("remove"));
+                app.config.selected_minimax_account_ids = vec![keep_id.to_string()];
+                remove_account_id = "remove".to_string();
+            }
+        }
+
+        let _task = app.delete_account(provider, &remove_account_id);
+
+        assert!(
+            !crate::providers::registry::discover_accounts(provider, &app.config)
+                .iter()
+                .any(|account| account.account_id == remove_account_id),
+            "{provider:?} should no longer discover the deleted account"
+        );
+        assert_eq!(
+            app.state.provider(provider).unwrap().account_status,
+            AccountSelectionStatus::Ready,
+            "{provider:?} should remain ready with the kept account selected"
+        );
+        assert!(
+            app.shared_control
+                .requests
+                .iter()
+                .any(|request| request.provider == provider),
+            "{provider:?} should request a refresh after delete"
+        );
     }
 }
 

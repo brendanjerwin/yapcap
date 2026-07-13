@@ -24,6 +24,8 @@ use tracing::warn;
 pub use account::{
     apply_login_account, discover_accounts, remove_managed_config_dir, sync_managed_account_dirs,
 };
+#[cfg(test)]
+pub use login::ClaudeLoginSuccess;
 pub use login::{
     ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus, prepare, prepare_targeted, submit_code,
 };

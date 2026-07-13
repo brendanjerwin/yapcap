@@ -105,6 +105,7 @@ impl AppState {
             state.provider = provider;
             state.enabled = true;
             state.is_refreshing = state.account_status == AccountSelectionStatus::Ready;
+            state.refresh_started_at = state.is_refreshing.then(Utc::now);
         } else {
             state = ProviderRuntimeState::disabled(provider);
         }

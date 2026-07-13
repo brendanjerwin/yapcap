@@ -18,7 +18,7 @@ use crate::app::{Message, PopupRoute, SettingsRoute};
 use crate::config::{Config, PanelIconStyle, ResetTimeFormat, UsageAmountFormat};
 use crate::fl;
 use crate::model::{
-    AppState, AuthState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState, UsageWindow,
+    AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState, UsageWindow,
 };
 use crate::providers::claude::{ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{CodexLoginState, CodexLoginStatus};
@@ -724,8 +724,4 @@ fn tab_percents(state: &AppState, provider: &ProviderRuntimeState) -> Vec<f32> {
                 .map_or(0.0, |w| usage_display::displayed_percent(w, now))
         })
         .collect()
-}
-
-pub(super) fn cursor_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
-    account.provider == ProviderId::Cursor && account.auth_state == AuthState::ActionRequired
 }

@@ -46,6 +46,7 @@ copilot-account-reauth-tooltip = Re-authenticate this Copilot account
 copilot-window-chat = Chat
 copilot-window-completions = Completions
 copilot-window-premium = Premium
+copilot-window-credits = Credits
 multi-account-coming-soon = Multi-account support coming soon
 account-add = Add account
 account-add-another = Add another
