@@ -7,7 +7,7 @@ use cosmic::iced::Subscription;
 use cosmic::iced::futures::channel::mpsc;
 use cosmic::iced::futures::sink::SinkExt;
 use cosmic::iced::stream;
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Duration;
@@ -119,6 +119,9 @@ fn install_watch(watcher: &mut RecommendedWatcher, path: &Path) -> bool {
 }
 
 fn event_targets_cli_auth(event: &Event, targets: &WatchTargets) -> bool {
+    if !event_changes_cli_auth(&event.kind) {
+        return false;
+    }
     event.paths.iter().any(|p| {
         p == &targets.codex_auth
             || p == &targets.claude_json
@@ -127,6 +130,13 @@ fn event_targets_cli_auth(event: &Event, targets: &WatchTargets) -> bool {
             || claude_json_in_home_event(p, &targets.home, &targets.claude_json)
             || gemini_accounts_in_dir_event(p, &targets.gemini_accounts)
     })
+}
+
+fn event_changes_cli_auth(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    )
 }
 
 fn codex_auth_in_dir_event(path: &Path, codex_auth: &Path) -> bool {
@@ -149,7 +159,34 @@ fn gemini_accounts_in_dir_event(path: &Path, gemini_accounts: &Path) -> bool {
 mod tests {
     use super::*;
     use notify::EventKind;
+    use notify::event::{AccessKind, AccessMode, DataChange, ModifyKind};
     use std::path::PathBuf;
+
+    #[test]
+    fn auth_watch_ignores_file_access_events() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+        let event = Event {
+            kind: EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            paths: vec![targets.codex_auth.clone()],
+            attrs: Default::default(),
+        };
+
+        assert!(!event_targets_cli_auth(&event, &targets));
+    }
+
+    #[test]
+    fn auth_watch_accepts_auth_file_modify_events() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            paths: vec![targets.codex_auth.clone()],
+            attrs: Default::default(),
+        };
+
+        assert!(event_targets_cli_auth(&event, &targets));
+    }
 
     #[test]
     fn codex_auth_in_dir_event_matches_only_auth_json_in_dot_codex() {

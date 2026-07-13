@@ -11,8 +11,6 @@ pub const OFFLINE_MESSAGE: &str = "No internet connection. Information is not up
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error(transparent)]
-    Cache(#[from] CacheError),
-    #[error(transparent)]
     Logging(#[from] LoggingError),
     #[error(transparent)]
     Provider(#[from] ProviderError),
@@ -68,7 +66,7 @@ impl AppError {
     pub fn is_network_unavailable(&self) -> bool {
         match self {
             Self::Provider(error) => error.is_network_unavailable(),
-            Self::Cache(_) | Self::Logging(_) => false,
+            Self::Logging(_) => false,
         }
     }
 
@@ -76,7 +74,7 @@ impl AppError {
     pub fn requires_user_action(&self) -> bool {
         match self {
             Self::Provider(error) => error.requires_user_action(),
-            Self::Cache(_) | Self::Logging(_) => false,
+            Self::Logging(_) => false,
         }
     }
 
@@ -109,32 +107,6 @@ impl AppError {
             _ => None,
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum CacheError {
-    #[error("failed to read cache {path}")]
-    ReadCache {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse cached snapshots")]
-    ParseCache(#[source] serde_json::Error),
-    #[error("failed to create {path}")]
-    CreateCacheDir {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to encode cache")]
-    EncodeCache(#[source] serde_json::Error),
-    #[error("failed to write cache {path}")]
-    WriteCache {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 }
 
 #[derive(Debug, Error)]
@@ -653,15 +625,6 @@ impl MinimaxError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cache_error_does_not_require_user_action() {
-        let err = AppError::Cache(CacheError::EncodeCache(
-            serde_json::from_str::<i32>("!").unwrap_err(),
-        ));
-        assert!(!err.requires_user_action());
-        assert!(!err.is_transient());
-    }
 
     #[test]
     fn claude_rate_limit_is_transient() {

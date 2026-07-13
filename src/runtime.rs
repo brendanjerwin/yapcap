@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::cache::{load_cached_state, save_cached_state};
-use crate::config::Config;
+use crate::config::{APP_ID, Config};
 use crate::demo_env;
 use crate::error::AppError;
 use crate::model::{
@@ -9,6 +8,7 @@ use crate::model::{
     ProviderId, ProviderRuntimeState, UsageSnapshot,
 };
 use crate::providers;
+use crate::shared_state::{SharedRuntimeState, SharedStateWriter};
 use chrono::Utc;
 use std::time::Duration;
 
@@ -25,21 +25,34 @@ pub struct ProviderRefreshResult {
     pub accounts: Vec<ProviderAccountRuntimeState>,
 }
 
-pub fn load_initial_state(config: &Config) -> AppState {
-    let mut state = load_cached_state()
-        .ok()
-        .flatten()
-        .unwrap_or_else(AppState::empty);
+#[derive(Clone)]
+pub struct RefreshProcessContext {
+    pub process_id: String,
+    pub owner_status: &'static str,
+}
+
+pub fn load_initial_state(config: &Config, shared_runtime: Option<SharedRuntimeState>) -> AppState {
+    let mut state = match shared_runtime {
+        Some(shared) => shared.app_state,
+        None => {
+            tracing::info!("shared runtime unavailable; starting from empty runtime state");
+            AppState::empty()
+        }
+    };
     reconcile_state(config, &mut state);
     state
 }
 
-pub fn persist_state(state: &AppState) {
+pub fn persist_state_as(
+    state: &AppState,
+    reason: &'static str,
+    writer: Option<SharedStateWriter<'_>>,
+) {
     if demo_env::is_active() {
         return;
     }
-    if let Err(error) = save_cached_state(state) {
-        tracing::error!(error = %error, "failed to save snapshot cache");
+    if let Err(error) = crate::shared_state::save_runtime_as(APP_ID, state, reason, writer) {
+        tracing::error!(error = ?error, "failed to save shared runtime state");
     }
 }
 
@@ -114,7 +127,21 @@ pub async fn refresh_account(
     account_id: String,
     previous: Option<ProviderRuntimeState>,
     previous_accounts: Vec<ProviderAccountRuntimeState>,
+    process: Option<RefreshProcessContext>,
 ) -> ProviderRefreshResult {
+    tracing::info!(
+        process_id = process
+            .as_ref()
+            .map(|process| process.process_id.as_str())
+            .unwrap_or("unknown"),
+        owner_status = process
+            .as_ref()
+            .map(|process| process.owner_status)
+            .unwrap_or("unknown"),
+        provider = provider.label(),
+        account_id = %account_id,
+        "provider account refresh started"
+    );
     let enabled = config.provider_enabled(provider);
     let client = http_client();
     let accounts = providers::registry::discover_accounts(provider, &config);
@@ -195,6 +222,11 @@ where
     F: std::future::Future<Output = crate::error::Result<(String, UsageSnapshot), AppError>>,
 {
     if !enabled {
+        tracing::info!(
+            provider = provider.label(),
+            account_id = %account_id,
+            "provider refresh skipped because provider is disabled"
+        );
         return ProviderRefreshResult {
             provider: ProviderRuntimeState::disabled(provider),
             accounts: Vec::new(),
@@ -221,6 +253,7 @@ where
         Ok((source_label, snapshot)) => {
             tracing::info!(
                 provider = provider.label(),
+                account_id = %account.account_id,
                 source = source_label.as_str(),
                 "provider refresh succeeded"
             );
@@ -246,9 +279,19 @@ where
         }
         Err(error) => {
             if error.is_transient() {
-                tracing::warn!(provider = provider.label(), error = %error, "provider refresh skipped (transient)");
+                tracing::warn!(
+                    provider = provider.label(),
+                    account_id = %account.account_id,
+                    error = %error,
+                    "provider refresh skipped after transient error"
+                );
             } else {
-                tracing::error!(provider = provider.label(), error = %error, "provider refresh failed");
+                tracing::error!(
+                    provider = provider.label(),
+                    account_id = %account.account_id,
+                    error = %error,
+                    "provider refresh failed"
+                );
             }
             let user_message = error.user_message();
             state.is_refreshing = false;
@@ -281,16 +324,27 @@ where
 }
 
 pub fn reconcile_state(config: &Config, state: &mut AppState) {
+    reconcile_state_with_refresh(config, state, false);
+}
+
+pub fn reconcile_shared_state(config: &Config, state: &mut AppState) {
+    reconcile_state_with_refresh(config, state, true);
+}
+
+fn reconcile_state_with_refresh(config: &Config, state: &mut AppState, preserve_refreshing: bool) {
     ensure_provider_states(state);
     for provider in ProviderId::ALL {
         providers::registry::reconcile_provider_accounts(provider, config, state);
     }
     for provider in &mut state.providers {
         provider.enabled = config.provider_enabled(provider.provider);
-        provider.is_refreshing = false;
+        if !preserve_refreshing {
+            provider.is_refreshing = false;
+        }
         if !provider.enabled {
             provider.account_status = AccountSelectionStatus::Unavailable;
             provider.selected_account_ids = Vec::new();
+            provider.is_refreshing = false;
         }
     }
 }
@@ -371,13 +425,40 @@ mod tests {
     }
 
     #[test]
-    fn load_initial_state_returns_empty_when_no_cache() {
+    fn load_initial_state_returns_empty_when_shared_runtime_is_missing() {
         let config = Config::default();
-        let state = load_initial_state(&config);
+        let state = load_initial_state(&config, None);
         assert_eq!(state.providers.len(), ProviderId::ALL.len());
         for provider in &state.providers {
             assert!(!provider.is_refreshing);
         }
+    }
+
+    #[test]
+    fn load_initial_state_uses_shared_runtime_when_present() {
+        let config = Config::default();
+        let mut shared_state = AppState::empty();
+        shared_state.upsert_provider(ProviderRuntimeState::disabled(ProviderId::Cursor));
+        shared_state
+            .provider_mut(ProviderId::Codex)
+            .unwrap()
+            .is_refreshing = true;
+        let state = load_initial_state(&config, Some(SharedRuntimeState::new(shared_state, 1)));
+
+        assert_eq!(state.providers.len(), ProviderId::ALL.len());
+        assert!(state.provider(ProviderId::Cursor).is_some());
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn reconcile_shared_state_preserves_refreshing_provider() {
+        let config = Config::default();
+        let mut state = AppState::empty();
+        state.provider_mut(ProviderId::Codex).unwrap().is_refreshing = true;
+
+        reconcile_shared_state(&config, &mut state);
+
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
     #[tokio::test]

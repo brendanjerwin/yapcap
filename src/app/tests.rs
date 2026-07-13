@@ -5,15 +5,24 @@ use super::applet::{
 };
 use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size, popup_settings_size};
 use super::{
-    APPLET_ACCOUNT_GAP, APPLET_ICON_GAP, APPLET_PERCENT_ACCOUNT_GAP, AppState, PanelIconStyle,
-    ProviderId, Size, UsageAmountFormat, format_retry_delay, popup_size_limits_with_max_width,
-    popup_size_tuple, update_retry_delay,
+    APPLET_ACCOUNT_GAP, APPLET_ICON_GAP, APPLET_PERCENT_ACCOUNT_GAP, AppModel, AppState, Config,
+    LaunchMode, Message, PanelIconStyle, PopupBodyMeasurements, PopupRoute, ProviderId, Size,
+    UsageAmountFormat, automatic_refresh_poll_interval, format_retry_delay,
+    popup_size_limits_with_max_width, popup_size_tuple, update_retry_delay,
 };
+use crate::config::{ManagedCodexAccountConfig, ManagedCopilotAccountConfig};
 use crate::model::{
-    ExtraUsageState, ProviderAccountRuntimeState, ProviderCost, ProviderIdentity, UsageHeadline,
-    UsageSnapshot, UsageWindow,
+    AccountSelectionStatus, ExtraUsageState, ProviderAccountRuntimeState, ProviderCost,
+    ProviderIdentity, ProviderRuntimeState, UsageHeadline, UsageSnapshot, UsageWindow,
 };
+use crate::providers::cursor::CursorScanState;
+use crate::refresh_owner::{ProcessInfo, RefreshOwner, RefreshOwnerAttempt};
+use crate::shared_state::{
+    ProviderRefreshRequest, RefreshRequestReason, SharedControlState, SharedRuntimeState,
+};
+use crate::updates::UpdateStatus;
 use chrono::Utc;
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[test]
@@ -44,6 +53,439 @@ fn retry_delay_format_is_compact() {
     assert_eq!(format_retry_delay(Duration::from_secs(15)), "15s");
     assert_eq!(format_retry_delay(Duration::from_secs(60)), "1m");
     assert_eq!(format_retry_delay(Duration::from_secs(75)), "1m 15s");
+}
+
+#[test]
+fn automatic_refresh_poll_checks_more_often_than_default_refresh_interval() {
+    assert_eq!(automatic_refresh_poll_interval(), Duration::from_secs(10));
+}
+
+#[test]
+fn owner_tick_runs_automatic_refresh() {
+    let owner = refresh_owner("owner-tick");
+    let mut app = test_app(Some(owner));
+    ready_selected_provider(&mut app.state, ProviderId::Codex);
+
+    let _task = app.handle_message(Message::Tick);
+
+    assert!(app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn non_owner_tick_does_not_run_automatic_refresh() {
+    let mut app = test_app(None);
+    ready_selected_provider(&mut app.state, ProviderId::Codex);
+
+    let _task = app.handle_message(Message::Tick);
+
+    assert!(!app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn owner_tick_skips_disabled_provider() {
+    let owner = refresh_owner("owner-disabled");
+    let mut app = test_app(Some(owner));
+    app.config.cursor_enabled = false;
+    ready_selected_provider(&mut app.state, ProviderId::Cursor);
+
+    let _task = app.handle_message(Message::Tick);
+
+    let cursor = app.state.provider(ProviderId::Cursor).unwrap();
+    assert!(!cursor.is_refreshing);
+}
+
+#[test]
+fn non_owner_refresh_now_writes_shared_control_requests_without_refreshing() {
+    let mut app = test_app(None);
+    ready_selected_provider(&mut app.state, ProviderId::Codex);
+
+    let task = app.handle_message(Message::RefreshNow);
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.shared_control.requests.len(), ProviderId::ALL.len());
+    assert!(
+        app.shared_control
+            .requests
+            .iter()
+            .all(|request| request.reason == RefreshRequestReason::User)
+    );
+    assert!(!app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn refresh_now_excludes_disabled_providers_from_requests() {
+    let mut app = test_app(None);
+    app.config.claude_enabled = false;
+
+    let _task = app.handle_message(Message::RefreshNow);
+
+    assert!(
+        !app.shared_control
+            .requests
+            .iter()
+            .any(|request| request.provider == ProviderId::Claude)
+    );
+}
+
+#[test]
+fn owner_observing_shared_control_runs_requested_refresh() {
+    let owner = refresh_owner("owner-request");
+    let mut app = test_app(Some(owner));
+    ready_selected_provider(&mut app.state, ProviderId::Codex);
+
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(control_request(ProviderId::Codex)),
+        vec!["requests"],
+    ));
+
+    assert!(task.units() > 0);
+    assert!(app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn owner_ignores_duplicate_request_for_refreshing_provider() {
+    let owner = refresh_owner("owner-duplicate");
+    let mut app = test_app(Some(owner));
+    ready_selected_provider(&mut app.state, ProviderId::Codex);
+    app.state
+        .provider_mut(ProviderId::Codex)
+        .unwrap()
+        .is_refreshing = true;
+
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(control_request(ProviderId::Codex)),
+        vec!["requests"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert!(app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn owner_consumes_request_for_not_ready_provider() {
+    let owner = refresh_owner("owner-not-ready-request");
+    let mut app = test_app(Some(owner));
+
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(control_request(ProviderId::Codex)),
+        vec!["requests"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert!(app.shared_control.requests.is_empty());
+    assert!(!app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn owner_ignores_stale_shared_control_update() {
+    let owner = refresh_owner("owner-stale-control");
+    let mut app = test_app(Some(owner));
+    ready_selected_provider(&mut app.state, ProviderId::Cursor);
+    app.shared_control.generation = 2;
+
+    let stale = control_request(ProviderId::Cursor);
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(stale),
+        vec!["requests"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.shared_control.generation, 2);
+    assert!(app.shared_control.requests.is_empty());
+    assert!(
+        !app.state
+            .provider(ProviderId::Cursor)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn owner_ignores_same_generation_conflicting_shared_control_update() {
+    let owner = refresh_owner("owner-same-generation-control");
+    let mut app = test_app(Some(owner));
+    ready_selected_provider(&mut app.state, ProviderId::Cursor);
+    app.shared_control.generation = 1;
+
+    let same_generation = control_request(ProviderId::Cursor);
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(same_generation),
+        vec!["requests"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.shared_control.generation, 1);
+    assert!(app.shared_control.requests.is_empty());
+    assert!(
+        !app.state
+            .provider(ProviderId::Cursor)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn shared_control_metadata_notification_does_not_apply_partial_document() {
+    let owner = refresh_owner("owner-partial-control");
+    let mut app = test_app(Some(owner));
+    let partial = control_request(ProviderId::Codex);
+
+    let task = app.handle_message(Message::UpdateSharedControl(
+        Box::new(partial),
+        vec!["generation"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.shared_control.generation, 0);
+    assert!(app.shared_control.requests.is_empty());
+}
+
+#[test]
+fn shared_refresh_evaluation_lists_unique_requesters() {
+    let mut control = SharedControlState::default();
+    control.upsert_request(refresh_request(ProviderId::Codex, "process-a"));
+    control.upsert_request(refresh_request(ProviderId::Claude, "process-b"));
+    control.upsert_request(refresh_request(ProviderId::Cursor, "process-a"));
+
+    let evaluation = super::SharedRefreshEvaluationLog::from_requests(&control);
+
+    assert_eq!(evaluation.requesters(), "process-a,process-b");
+}
+
+#[test]
+fn shared_runtime_metadata_notification_does_not_apply_partial_document() {
+    let mut app = test_app(None);
+    let initial_state = app.state.clone();
+    let mut partial_state = initial_state.clone();
+    partial_state.provider_mut(ProviderId::Codex).unwrap().error = Some("partial".to_string());
+
+    let task = app.handle_message(Message::UpdateSharedRuntime(
+        Box::new(SharedRuntimeState::new(partial_state, 1)),
+        vec!["generation"],
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.state, initial_state);
+}
+
+#[test]
+fn shared_runtime_update_preserves_refreshing_provider() {
+    let mut app = test_app(None);
+    let mut shared_state = app.state.clone();
+    shared_state
+        .provider_mut(ProviderId::Codex)
+        .unwrap()
+        .is_refreshing = true;
+
+    let task = app.handle_message(Message::UpdateSharedRuntime(
+        Box::new(SharedRuntimeState::new(shared_state, 1)),
+        Vec::new(),
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert!(app.state.provider(ProviderId::Codex).unwrap().is_refreshing);
+}
+
+#[test]
+fn owner_refresh_now_processes_new_shared_control_snapshot() {
+    let owner = refresh_owner("owner-refresh-now-new-control");
+    let mut app = test_app(Some(owner));
+    ready_selected_provider(&mut app.state, ProviderId::Cursor);
+
+    let task = app.handle_message(Message::RefreshNow);
+
+    assert!(task.units() > 0);
+    assert!(
+        app.state
+            .provider(ProviderId::Cursor)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn provider_refresh_completion_consumes_shared_control_request() {
+    let owner = refresh_owner("owner-consume-request");
+    let mut app = test_app(Some(owner));
+    app.shared_control = control_request(ProviderId::Codex);
+    let provider = ProviderRuntimeState {
+        provider: ProviderId::Codex,
+        enabled: true,
+        selected_account_ids: vec!["default".to_string()],
+        active_account_id: Some("default".to_string()),
+        system_active_account_id: None,
+        account_status: AccountSelectionStatus::Ready,
+        is_refreshing: false,
+        legacy_display_snapshot: None,
+        error: None,
+    };
+
+    let _task = app.handle_message(Message::ProviderRefreshed(Box::new(
+        crate::runtime::ProviderRefreshResult {
+            provider,
+            accounts: Vec::new(),
+        },
+    )));
+
+    assert!(app.shared_control.requests.is_empty());
+}
+
+#[test]
+fn config_update_applies_selected_provider_without_changing_popup_route() {
+    let mut app = test_app(None);
+    app.popup = Some(cosmic::iced::window::Id::unique());
+    app.popup_route = PopupRoute::Settings(super::SettingsRoute::General);
+    let mut config = app.config.clone();
+    config.selected_provider = ProviderId::Claude;
+
+    let _task = app.handle_message(Message::UpdateConfig(
+        Box::new(config),
+        vec!["selected_provider"],
+    ));
+
+    assert_eq!(app.selected_provider, ProviderId::Claude);
+    assert_eq!(
+        app.popup_route,
+        PopupRoute::Settings(super::SettingsRoute::General)
+    );
+    assert!(app.popup.is_some());
+}
+
+#[test]
+fn partial_config_update_preserves_locally_written_account() {
+    let mut app = test_app(None);
+    app.config.codex_managed_accounts = vec![codex_account("codex-1")];
+    app.config.selected_codex_account_ids = vec!["codex-1".to_string()];
+    let partial_watcher_config = Config {
+        selected_codex_account_ids: vec!["codex-1".to_string()],
+        ..Config::default()
+    };
+
+    app.on_config_update(partial_watcher_config, &["selected_codex_account_ids"]);
+
+    assert_eq!(app.config.codex_managed_accounts.len(), 1);
+}
+
+#[test]
+fn quit_requests_runtime_exit() {
+    let mut app = test_app(None);
+
+    let task = app.handle_message(Message::Quit);
+
+    assert_eq!(task.units(), 1);
+}
+
+#[test]
+fn selecting_stale_enabled_provider_writes_provider_selected_request() {
+    let mut app = test_app(None);
+    ready_selected_provider(&mut app.state, ProviderId::Claude);
+    selected_account_without_usage(&mut app.state, ProviderId::Claude);
+
+    let task = app.handle_message(Message::SelectProvider(ProviderId::Claude));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(app.config.selected_provider, ProviderId::Claude);
+    assert_eq!(app.selected_provider, ProviderId::Claude);
+    assert_eq!(app.shared_control.requests.len(), 1);
+    let request = &app.shared_control.requests[0];
+    assert_eq!(request.provider, ProviderId::Claude);
+    assert_eq!(request.reason, RefreshRequestReason::ProviderSelected);
+}
+
+#[test]
+fn selecting_disabled_provider_does_not_request_refresh() {
+    let mut app = test_app(None);
+    app.config.cursor_enabled = false;
+    if let Some(cursor) = app.state.provider_mut(ProviderId::Cursor) {
+        cursor.enabled = false;
+    }
+
+    let _task = app.handle_message(Message::SelectProvider(ProviderId::Cursor));
+
+    assert!(app.shared_control.requests.is_empty());
+}
+
+#[test]
+fn selecting_provider_preserves_local_popup_state() {
+    let mut app = test_app(None);
+    let popup = cosmic::iced::window::Id::unique();
+    app.popup = Some(popup);
+    app.popup_route = PopupRoute::Settings(super::SettingsRoute::Provider(ProviderId::Codex));
+    ready_selected_provider(&mut app.state, ProviderId::Gemini);
+    selected_account_without_usage(&mut app.state, ProviderId::Gemini);
+
+    let _task = app.handle_message(Message::SelectProvider(ProviderId::Gemini));
+
+    assert_eq!(app.popup, Some(popup));
+    assert_eq!(
+        app.popup_route,
+        PopupRoute::Settings(super::SettingsRoute::Provider(ProviderId::Codex))
+    );
+}
+
+#[test]
+fn non_owner_account_selection_requests_owner_refresh_without_running_it() {
+    let mut app = test_app(None);
+    app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+
+    let task = app.handle_message(Message::ToggleAccountSelection(
+        ProviderId::Copilot,
+        "copilot-1".to_string(),
+    ));
+
+    assert_eq!(task.units(), 0);
+    assert_eq!(
+        app.config.selected_account_ids(ProviderId::Copilot),
+        ["copilot-1"]
+    );
+    assert_eq!(app.shared_control.requests.len(), 1);
+    assert_eq!(
+        app.shared_control.requests[0].reason,
+        RefreshRequestReason::AccountAction
+    );
+    assert!(
+        !app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn owner_account_selection_runs_requested_refresh() {
+    let owner = refresh_owner("owner-account-selection");
+    let mut app = test_app(Some(owner));
+    app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+
+    let task = app.handle_message(Message::ToggleAccountSelection(
+        ProviderId::Copilot,
+        "copilot-1".to_string(),
+    ));
+
+    assert!(task.units() > 0);
+    assert!(
+        app.state
+            .provider(ProviderId::Copilot)
+            .unwrap()
+            .is_refreshing
+    );
+}
+
+#[test]
+fn non_owner_provider_disable_reconciles_locally_without_publishing_runtime() {
+    let mut app = test_app(None);
+    app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
+    app.config.selected_copilot_account_ids = vec!["copilot-1".to_string()];
+    runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
+
+    let task = app.handle_message(Message::SetProviderEnabled(ProviderId::Copilot, false));
+
+    assert_eq!(task.units(), 0);
+    assert!(!app.config.provider_enabled(ProviderId::Copilot));
+    assert!(!app.state.provider(ProviderId::Copilot).unwrap().enabled);
+    assert!(app.shared_control.requests.is_empty());
 }
 
 #[test]
@@ -412,6 +854,108 @@ fn state_with_selected_account_percents(percents: &[f32]) -> AppState {
     }
 
     state
+}
+
+fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
+    let lock_path = std::env::temp_dir().join("yapcap-test-unused-owner.lock");
+    AppModel {
+        core: cosmic::Core::default(),
+        popup: None,
+        config: Config::default(),
+        state: AppState::empty(),
+        selected_provider: ProviderId::Codex,
+        popup_route: PopupRoute::ProviderDetail,
+        update_status: UpdateStatus::Unchecked,
+        launch_mode: LaunchMode::Standalone,
+        popup_size: None,
+        popup_body_measurements: PopupBodyMeasurements::default(),
+        shared_control: SharedControlState::default(),
+        process_info: ProcessInfo {
+            id: "test-process".to_string(),
+            pid: std::process::id(),
+            panel_output: None,
+            flatpak_id: None,
+            lock_path,
+        },
+        refresh_owner,
+        codex_login: None,
+        codex_login_handle: None,
+        claude_login: None,
+        claude_login_handle: None,
+        cursor_scan: CursorScanState::Idle,
+        cursor_scan_result: None,
+        gemini_login: None,
+        gemini_login_handle: None,
+        copilot_login: None,
+        copilot_login_handle: None,
+    }
+}
+
+fn ready_selected_provider(state: &mut AppState, provider: ProviderId) {
+    let entry = state.provider_mut(provider).unwrap();
+    entry.account_status = AccountSelectionStatus::Ready;
+    entry.selected_account_ids = vec!["default".to_string()];
+}
+
+fn selected_account_without_usage(state: &mut AppState, provider: ProviderId) {
+    let mut account = ProviderAccountRuntimeState::empty(provider, "default", provider.label());
+    account.auth_state = crate::model::AuthState::Ready;
+    state.upsert_account(account);
+}
+
+fn runtime_reconcile_provider(config: &Config, state: &mut AppState, provider: ProviderId) {
+    crate::runtime::reconcile_provider(config, state, provider);
+}
+
+fn control_request(provider: ProviderId) -> SharedControlState {
+    let mut control = SharedControlState::default();
+    control.upsert_request(refresh_request(provider, "test-process"));
+    control
+}
+
+fn refresh_request(provider: ProviderId, process_id: &str) -> ProviderRefreshRequest {
+    ProviderRefreshRequest {
+        provider,
+        reason: RefreshRequestReason::User,
+        requested_at: Utc::now(),
+        requesting_process_id: process_id.to_string(),
+    }
+}
+
+fn copilot_account(id: &str, login: &str) -> ManagedCopilotAccountConfig {
+    ManagedCopilotAccountConfig {
+        id: id.to_string(),
+        label: login.to_string(),
+        github_user_id: 1,
+        login: login.to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: Some(Utc::now()),
+    }
+}
+
+fn codex_account(id: &str) -> ManagedCodexAccountConfig {
+    ManagedCodexAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        codex_home: PathBuf::from("/tmp/yapcap/codex-1"),
+        email: Some("user@example.com".to_string()),
+        provider_account_id: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn refresh_owner(name: &str) -> RefreshOwner {
+    let lock_path = std::env::temp_dir().join(format!(
+        "yapcap-app-refresh-owner-{name}-{}.lock",
+        std::process::id()
+    ));
+    match crate::refresh_owner::try_acquire(lock_path).unwrap() {
+        RefreshOwnerAttempt::Owner(owner) => owner,
+        RefreshOwnerAttempt::NonOwner(_) => panic!("test lock should be available"),
+    }
 }
 
 fn state_with_provider_window_counts(providers: &[(ProviderId, usize, bool)]) -> AppState {

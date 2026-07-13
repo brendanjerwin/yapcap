@@ -4,9 +4,10 @@ use super::{
     CursorScanResult, CursorScanState, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus,
     ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig, Message,
     MinimaxLoginEvent, MinimaxLoginStatus, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
-    Task, claude, codex, copilot, cursor, gemini, minimax, refresh_provider_task,
-    refresh_provider_tasks, runtime,
+    Task, claude, codex, copilot, cursor, gemini, minimax, refresh_provider_task_for_process,
+    runtime,
 };
+use crate::shared_state::RefreshRequestReason;
 
 impl AppModel {
     pub(super) fn reauthenticate_codex_account(&mut self, account_id: &str) -> Task<Message> {
@@ -16,8 +17,10 @@ impl AppModel {
             .iter()
             .all(|a| a.id != account_id)
         {
+            log_reauth_ignored(&self.process_info.id, ProviderId::Codex, account_id);
             return Task::none();
         }
+        log_reauth_requested(&self.process_info.id, ProviderId::Codex, account_id);
         self.start_codex_login()
     }
 
@@ -27,12 +30,15 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == CodexLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Codex);
             return Task::none();
         }
+        log_login_requested(&self.process_info.id, ProviderId::Codex);
         self.codex_login = None;
         let (state, task) = match codex::prepare(self.config.clone()) {
             Ok(prepared) => prepared,
             Err(error) => {
+                tracing::info!(process_id = %self.process_info.id, provider = ProviderId::Codex.label(), error = %error, "login preparation failed");
                 self.codex_login = Some(CodexLoginState {
                     flow_id: "failed".to_string(),
                     status: CodexLoginStatus::Failed,
@@ -51,6 +57,12 @@ impl AppModel {
         state: CodexLoginState,
         task: cosmic::iced::Task<CodexLoginEvent>,
     ) -> Task<Message> {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Codex.label(),
+            flow_id = %state.flow_id,
+            "login flow started"
+        );
         self.codex_login = Some(state);
         let task = task.map(|event| cosmic::Action::App(Message::CodexLoginEvent(Box::new(event))));
         let (task, handle) = task.abortable();
@@ -59,6 +71,15 @@ impl AppModel {
     }
 
     pub(super) fn cancel_codex_login(&mut self) {
+        match self.codex_login.as_ref() {
+            Some(login) => log_login_state_cleared(
+                &self.process_info.id,
+                ProviderId::Codex,
+                &login.flow_id,
+                login.status,
+            ),
+            None => log_login_state_clear_ignored(&self.process_info.id, ProviderId::Codex),
+        }
         if let Some(handle) = self.codex_login_handle.take() {
             handle.abort();
         }
@@ -99,8 +120,13 @@ impl AppModel {
                     Ok(success) => {
                         login.status = CodexLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Codex.label(),
+                            flow_id = %flow_id,
+                            account_id = %success.account.id,
+                            "login flow succeeded"
+                        );
                         self.write_config(|new_config| {
                             codex::apply_login_account(new_config, success.account.clone());
                         });
@@ -109,34 +135,21 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Codex,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Codex,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        if let Some(snapshot) = success.snapshot {
-                            account.source_label = Some(snapshot.source.clone());
-                            account.last_success_at = Some(chrono::Utc::now());
-                            account.health = crate::model::ProviderHealth::Ok;
-                            account.snapshot = Some(snapshot);
-                        }
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        let refresh_succeeded =
-                            account.health == ProviderHealth::Ok && account.snapshot.is_some();
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Codex) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                            if refresh_succeeded {
-                                provider.legacy_display_snapshot = None;
-                            }
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_tasks(&self.config, &mut self.state)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = CodexLoginStatus::Failed;
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Codex.label(),
+                            flow_id = %flow_id,
+                            error = %error,
+                            "login flow failed"
+                        );
                         login.error = Some(error);
                         Task::none()
                     }
@@ -259,10 +272,18 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == ClaudeLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Claude);
             return Task::none();
         }
+        log_login_requested(&self.process_info.id, ProviderId::Claude);
         self.claude_login = None;
         let state = claude::prepare();
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Claude.label(),
+            flow_id = %state.flow_id,
+            "login flow started"
+        );
         self.claude_login = Some(state);
         Task::none()
     }
@@ -274,6 +295,7 @@ impl AppModel {
             .iter()
             .all(|a| a.id != account_id)
         {
+            log_reauth_ignored(&self.process_info.id, ProviderId::Claude, account_id);
             return Task::none();
         }
         if self
@@ -281,10 +303,19 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == ClaudeLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Claude);
             return Task::none();
         }
+        log_reauth_requested(&self.process_info.id, ProviderId::Claude, account_id);
         self.claude_login = None;
         let state = claude::prepare_targeted(account_id.to_string());
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Claude.label(),
+            flow_id = %state.flow_id,
+            account_id,
+            "reauthentication flow started"
+        );
         self.claude_login = Some(state);
         Task::none()
     }
@@ -304,6 +335,12 @@ impl AppModel {
         if login.status != ClaudeLoginStatus::Running || login.code_input.trim().is_empty() {
             return Task::none();
         }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Claude.label(),
+            flow_id = %login.flow_id,
+            "login code submitted"
+        );
         login.error = None;
         login.output.push("Completing Claude sign-in".to_string());
         if login.output.len() > 8 {
@@ -318,6 +355,15 @@ impl AppModel {
     }
 
     pub(super) fn cancel_claude_login(&mut self) {
+        match self.claude_login.as_ref() {
+            Some(login) => log_login_state_cleared(
+                &self.process_info.id,
+                ProviderId::Claude,
+                &login.flow_id,
+                login.status,
+            ),
+            None => log_login_state_clear_ignored(&self.process_info.id, ProviderId::Claude),
+        }
         if let Some(handle) = self.claude_login_handle.take() {
             handle.abort();
         }
@@ -338,8 +384,13 @@ impl AppModel {
                     Ok(success) => {
                         login.status = ClaudeLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Claude.label(),
+                            flow_id = %flow_id,
+                            account_id = %success.account.id,
+                            "login flow succeeded"
+                        );
                         self.write_config(|new_config| {
                             claude::apply_login_account(new_config, success.account.clone());
                         });
@@ -348,34 +399,21 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Claude,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Claude,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        if let Some(snapshot) = success.snapshot {
-                            account.source_label = Some(snapshot.source.clone());
-                            account.last_success_at = Some(chrono::Utc::now());
-                            account.health = crate::model::ProviderHealth::Ok;
-                            account.snapshot = Some(snapshot);
-                        }
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        let refresh_succeeded =
-                            account.health == ProviderHealth::Ok && account.snapshot.is_some();
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Claude) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                            if refresh_succeeded {
-                                provider.legacy_display_snapshot = None;
-                            }
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Claude)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = ClaudeLoginStatus::Failed;
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Claude.label(),
+                            flow_id = %flow_id,
+                            error = %error,
+                            "login flow failed"
+                        );
                         login.error = Some(error);
                         Task::none()
                     }
@@ -387,15 +425,27 @@ impl AppModel {
     pub(super) fn reauthenticate_cursor_account(&mut self, account_id: &str) -> Task<Message> {
         if cursor::find_managed_account(&self.config.cursor_managed_accounts, account_id).is_none()
         {
+            log_reauth_ignored(&self.process_info.id, ProviderId::Cursor, account_id);
             return Task::none();
         }
+        log_reauth_requested(&self.process_info.id, ProviderId::Cursor, account_id);
         self.start_cursor_scan()
     }
 
     pub(super) fn start_cursor_scan(&mut self) -> Task<Message> {
         if matches!(self.cursor_scan, CursorScanState::Scanning) {
+            tracing::info!(
+                process_id = %self.process_info.id,
+                provider = ProviderId::Cursor.label(),
+                "cursor scan already running"
+            );
             return Task::none();
         }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Cursor.label(),
+            "cursor account scan started"
+        );
         self.cursor_scan = CursorScanState::Scanning;
         self.cursor_scan_result = None;
         let existing = self.config.cursor_managed_accounts.clone();
@@ -413,6 +463,13 @@ impl AppModel {
         state: CursorScanState,
         result: Option<CursorScanResult>,
     ) {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Cursor.label(),
+            state = cursor_scan_state_label(&state),
+            result_available = result.is_some(),
+            "cursor account scan completed"
+        );
         self.cursor_scan = state;
         self.cursor_scan_result = result;
     }
@@ -429,25 +486,26 @@ impl AppModel {
                     applied_account = cursor::upsert_managed_account(new_config, new_account);
                 });
                 runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Cursor);
-                let account_id = cursor::managed_account_id(&applied_account.id);
-                let account_label = applied_account.email.clone();
-                let mut account = ProviderAccountRuntimeState::empty(
-                    ProviderId::Cursor,
-                    account_id.clone(),
-                    account_label,
-                );
-                account.auth_state = crate::model::AuthState::Ready;
-                account.error = None;
-                self.state.upsert_account(account);
-                if let Some(provider) = self.state.provider_mut(ProviderId::Cursor) {
-                    provider.account_status = AccountSelectionStatus::Ready;
-                    provider.error = None;
-                }
-                runtime::persist_state(&self.state);
                 self.cursor_scan = CursorScanState::Idle;
-                refresh_provider_task(&self.config, &mut self.state, ProviderId::Cursor)
+                self.sync_panel_suggested_bounds();
+                tracing::info!(
+                    process_id = %self.process_info.id,
+                    provider = ProviderId::Cursor.label(),
+                    account_id = %applied_account.id,
+                    "cursor account scan confirmed"
+                );
+                self.request_provider_refresh(
+                    ProviderId::Cursor,
+                    RefreshRequestReason::AccountAction,
+                )
             }
             Err(error) => {
+                tracing::info!(
+                    process_id = %self.process_info.id,
+                    provider = ProviderId::Cursor.label(),
+                    error = %error,
+                    "cursor account scan confirmation failed"
+                );
                 self.cursor_scan = CursorScanState::Error(error);
                 Task::none()
             }
@@ -455,6 +513,11 @@ impl AppModel {
     }
 
     pub(super) fn dismiss_cursor_scan(&mut self) {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Cursor.label(),
+            "cursor account scan dismissed"
+        );
         self.cursor_scan = CursorScanState::Idle;
         self.cursor_scan_result = None;
     }
@@ -466,6 +529,7 @@ impl AppModel {
             .iter()
             .all(|a| a.id != account_id)
         {
+            log_reauth_ignored(&self.process_info.id, ProviderId::Gemini, account_id);
             return Task::none();
         }
         if self
@@ -473,12 +537,15 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == GeminiLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Gemini);
             return Task::none();
         }
+        log_reauth_requested(&self.process_info.id, ProviderId::Gemini, account_id);
         self.gemini_login = None;
         let (state, task) = match gemini::prepare_for_reauth(self.config.clone(), account_id) {
             Ok(prepared) => prepared,
             Err(error) => {
+                tracing::info!(process_id = %self.process_info.id, provider = ProviderId::Gemini.label(), account_id, error = %error, "reauthentication preparation failed");
                 self.gemini_login = Some(GeminiLoginState {
                     flow_id: "failed".to_string(),
                     status: GeminiLoginStatus::Failed,
@@ -489,6 +556,13 @@ impl AppModel {
                 return Task::none();
             }
         };
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Gemini.label(),
+            flow_id = %state.flow_id,
+            account_id,
+            "reauthentication flow started"
+        );
         self.gemini_login = Some(state);
         let task =
             task.map(|event| cosmic::Action::App(Message::GeminiLoginEvent(Box::new(event))));
@@ -503,12 +577,15 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == GeminiLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Gemini);
             return Task::none();
         }
+        log_login_requested(&self.process_info.id, ProviderId::Gemini);
         self.gemini_login = None;
         let (state, task) = match gemini::prepare(self.config.clone()) {
             Ok(prepared) => prepared,
             Err(error) => {
+                tracing::info!(process_id = %self.process_info.id, provider = ProviderId::Gemini.label(), error = %error, "login preparation failed");
                 self.gemini_login = Some(GeminiLoginState {
                     flow_id: "failed".to_string(),
                     status: GeminiLoginStatus::Failed,
@@ -519,6 +596,12 @@ impl AppModel {
                 return Task::none();
             }
         };
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Gemini.label(),
+            flow_id = %state.flow_id,
+            "login flow started"
+        );
         self.gemini_login = Some(state);
         let task =
             task.map(|event| cosmic::Action::App(Message::GeminiLoginEvent(Box::new(event))));
@@ -528,6 +611,15 @@ impl AppModel {
     }
 
     pub(super) fn cancel_gemini_login(&mut self) {
+        match self.gemini_login.as_ref() {
+            Some(login) => log_login_state_cleared(
+                &self.process_info.id,
+                ProviderId::Gemini,
+                &login.flow_id,
+                login.status,
+            ),
+            None => log_login_state_clear_ignored(&self.process_info.id, ProviderId::Gemini),
+        }
         if let Some(handle) = self.gemini_login_handle.take() {
             handle.abort();
         }
@@ -568,8 +660,13 @@ impl AppModel {
                     Ok(success) => {
                         login.status = GeminiLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Gemini.label(),
+                            flow_id = %flow_id,
+                            account_id = %success.account.id,
+                            "login flow succeeded"
+                        );
                         self.write_config(|new_config| {
                             gemini::apply_login_account(new_config, success.account.clone());
                         });
@@ -578,23 +675,21 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Gemini,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Gemini,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Gemini) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Gemini)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = GeminiLoginStatus::Failed;
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Gemini.label(),
+                            flow_id = %flow_id,
+                            error = %error,
+                            "login flow failed"
+                        );
                         login.error = Some(error);
                         Task::none()
                     }
@@ -610,6 +705,7 @@ impl AppModel {
             .iter()
             .all(|a| a.id != account_id)
         {
+            log_reauth_ignored(&self.process_info.id, ProviderId::Copilot, account_id);
             return Task::none();
         }
         if self
@@ -617,12 +713,15 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == CopilotLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Copilot);
             return Task::none();
         }
+        log_reauth_requested(&self.process_info.id, ProviderId::Copilot, account_id);
         self.copilot_login = None;
         let (state, task) = match copilot::prepare_for_reauth(self.config.clone(), account_id) {
             Ok(prepared) => prepared,
             Err(error) => {
+                tracing::info!(process_id = %self.process_info.id, provider = ProviderId::Copilot.label(), account_id, error = %error, "reauthentication preparation failed");
                 self.copilot_login = Some(CopilotLoginState {
                     flow_id: "failed".to_string(),
                     status: CopilotLoginStatus::Failed,
@@ -645,12 +744,15 @@ impl AppModel {
             .as_ref()
             .is_some_and(|login| login.status == CopilotLoginStatus::Running)
         {
+            log_login_already_running(&self.process_info.id, ProviderId::Copilot);
             return Task::none();
         }
+        log_login_requested(&self.process_info.id, ProviderId::Copilot);
         self.copilot_login = None;
         let (state, task) = match copilot::prepare(self.config.clone()) {
             Ok(prepared) => prepared,
             Err(error) => {
+                tracing::info!(process_id = %self.process_info.id, provider = ProviderId::Copilot.label(), error = %error, "login preparation failed");
                 self.copilot_login = Some(CopilotLoginState {
                     flow_id: "failed".to_string(),
                     status: CopilotLoginStatus::Failed,
@@ -672,6 +774,12 @@ impl AppModel {
         state: CopilotLoginState,
         task: cosmic::iced::Task<CopilotLoginEvent>,
     ) -> Task<Message> {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Copilot.label(),
+            flow_id = %state.flow_id,
+            "login flow started"
+        );
         self.copilot_login = Some(state);
         let task =
             task.map(|event| cosmic::Action::App(Message::CopilotLoginEvent(Box::new(event))));
@@ -681,6 +789,15 @@ impl AppModel {
     }
 
     pub(super) fn cancel_copilot_login(&mut self) {
+        match self.copilot_login.as_ref() {
+            Some(login) => log_login_state_cleared(
+                &self.process_info.id,
+                ProviderId::Copilot,
+                &login.flow_id,
+                login.status,
+            ),
+            None => log_login_state_clear_ignored(&self.process_info.id, ProviderId::Copilot),
+        }
         if let Some(handle) = self.copilot_login_handle.take() {
             handle.abort();
         }
@@ -692,6 +809,12 @@ impl AppModel {
             return Task::none();
         };
         login.code_copied = true;
+        tracing::info!(
+            process_id = %self.process_info.id,
+            provider = ProviderId::Copilot.label(),
+            flow_id = %login.flow_id,
+            "copilot login code copied"
+        );
         let flow_id = login.flow_id.clone();
         let write: Task<Message> = cosmic::iced::clipboard::write(code);
         let clear: Task<Message> = Task::perform(
@@ -727,6 +850,14 @@ impl AppModel {
                 }
                 login.user_code = Some(user_code);
                 login.verification_uri = Some(verification_uri);
+                tracing::info!(
+                    process_id = %self.process_info.id,
+                    provider = ProviderId::Copilot.label(),
+                    flow_id = %flow_id,
+                    verification_uri_available = true,
+                    user_code_available = true,
+                    "login device code received"
+                );
                 Task::none()
             }
             CopilotLoginEvent::Output { flow_id, line } => {
@@ -754,8 +885,13 @@ impl AppModel {
                     Ok(success) => {
                         login.status = CopilotLoginStatus::Succeeded;
                         login.error = None;
-                        let account_id = success.account.id.clone();
-                        let account_label = success.account.label.clone();
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Copilot.label(),
+                            flow_id = %flow_id,
+                            account_id = %success.account.id,
+                            "login flow succeeded"
+                        );
                         self.write_config(|new_config| {
                             copilot::apply_login_account(new_config, success.account.clone());
                         });
@@ -764,23 +900,21 @@ impl AppModel {
                             &mut self.state,
                             ProviderId::Copilot,
                         );
-                        let mut account = ProviderAccountRuntimeState::empty(
+                        self.sync_panel_suggested_bounds();
+                        self.request_provider_refresh(
                             ProviderId::Copilot,
-                            account_id.clone(),
-                            account_label,
-                        );
-                        account.auth_state = crate::model::AuthState::Ready;
-                        account.error = None;
-                        self.state.upsert_account(account);
-                        if let Some(provider) = self.state.provider_mut(ProviderId::Copilot) {
-                            provider.account_status = AccountSelectionStatus::Ready;
-                            provider.error = None;
-                        }
-                        runtime::persist_state(&self.state);
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Copilot)
+                            RefreshRequestReason::AccountAction,
+                        )
                     }
                     Err(error) => {
                         login.status = CopilotLoginStatus::Failed;
+                        tracing::info!(
+                            process_id = %self.process_info.id,
+                            provider = ProviderId::Copilot.label(),
+                            flow_id = %flow_id,
+                            error = %error,
+                            "login flow failed"
+                        );
                         login.error = Some(error);
                         Task::none()
                     }
@@ -865,10 +999,16 @@ impl AppModel {
                                 provider.selected_account_ids.push(account_id.clone());
                             }
                         }
-                        runtime::persist_state(&self.state);
+                        self.persist_runtime_if_owner("minimax_account_saved");
                         let login = self.minimax_login.as_mut().unwrap();
                         login.status = MinimaxLoginStatus::Saved;
-                        refresh_provider_task(&self.config, &mut self.state, ProviderId::Minimax)
+                        let process = self.refresh_task_process();
+                        refresh_provider_task_for_process(
+                            &self.config,
+                            &mut self.state,
+                            ProviderId::Minimax,
+                            Some(process),
+                        )
                     }
                     Err(error) => {
                         if let Some(login) = self.minimax_login.as_mut() {
@@ -892,6 +1032,74 @@ impl AppModel {
             }
         }
     }
+}
+
+fn log_login_requested(process_id: &str, provider: ProviderId) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        "login flow requested"
+    );
+}
+
+fn log_login_already_running(process_id: &str, provider: ProviderId) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        "login flow ignored because one is already running"
+    );
+}
+
+fn log_reauth_requested(process_id: &str, provider: ProviderId, account_id: &str) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        account_id,
+        "reauthentication requested"
+    );
+}
+
+fn log_reauth_ignored(process_id: &str, provider: ProviderId, account_id: &str) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        account_id,
+        "reauthentication ignored because account was not configured"
+    );
+}
+
+fn cursor_scan_state_label(state: &CursorScanState) -> &'static str {
+    match state {
+        CursorScanState::Idle => "idle",
+        CursorScanState::Scanning => "scanning",
+        CursorScanState::Found { .. } => "found",
+        CursorScanState::AlreadyConnected { .. } => "already_connected",
+        CursorScanState::Error(_) => "error",
+    }
+}
+
+fn log_login_state_cleared(
+    process_id: &str,
+    provider: ProviderId,
+    flow_id: &str,
+    status_before: impl std::fmt::Debug,
+) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        flow_id,
+        status_before = ?status_before,
+        "login state cleared"
+    );
+}
+
+fn log_login_state_clear_ignored(process_id: &str, provider: ProviderId) {
+    tracing::info!(
+        process_id,
+        provider = provider.label(),
+        reason = "no_login_state",
+        "login state clear ignored"
+    );
 }
 
 #[derive(Clone)]

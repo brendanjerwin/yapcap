@@ -5,20 +5,100 @@ use crate::config::Config;
 use crate::demo_env;
 use crate::model::{AppState, AuthState, ProviderId};
 use crate::providers::registry;
-use crate::runtime;
+use crate::runtime::{self, RefreshProcessContext};
+use chrono::Utc;
 use cosmic::app::Task;
 
+pub(super) struct RefreshSkipDiagnostics {
+    pub account_status: &'static str,
+    pub selected_account_count: usize,
+    pub stored_account_count: usize,
+    pub action_required_account_count: usize,
+    pub rate_limited_account_count: usize,
+    pub provider_error: Option<String>,
+}
+
+impl RefreshSkipDiagnostics {
+    #[must_use]
+    pub fn for_provider(state: &AppState, provider: ProviderId) -> Self {
+        let provider_state = state.provider(provider);
+        let accounts = state.accounts_for(provider);
+        Self {
+            account_status: provider_state
+                .map(|entry| account_status_label(entry.account_status.clone()))
+                .unwrap_or("missing_provider_state"),
+            selected_account_count: provider_state
+                .map(|entry| entry.selected_account_ids.len())
+                .unwrap_or_default(),
+            stored_account_count: accounts.len(),
+            action_required_account_count: accounts
+                .iter()
+                .filter(|account| account.auth_state == AuthState::ActionRequired)
+                .count(),
+            rate_limited_account_count: accounts
+                .iter()
+                .filter(|account| account.is_rate_limited())
+                .count(),
+            provider_error: provider_state.and_then(|entry| entry.error.clone()),
+        }
+    }
+
+    #[must_use]
+    pub fn not_ready_reason(&self) -> &'static str {
+        match self.account_status {
+            "login_required" => "login_required",
+            "selection_required" => "selection_required",
+            "unavailable" => {
+                if self.stored_account_count == 0 {
+                    "no_accounts"
+                } else {
+                    "account_unavailable"
+                }
+            }
+            "missing_provider_state" => "missing_provider_state",
+            _ => "account_status_not_ready",
+        }
+    }
+}
+
+#[cfg(test)]
 pub fn refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Message> {
     reconcile_host_active_accounts(config, state);
 
-    let mut tasks = Vec::new();
+    let tasks = ProviderId::ALL
+        .into_iter()
+        .map(|provider| refresh_provider_task(config, state, provider))
+        .filter(|task| task.units() > 0)
+        .collect::<Vec<_>>();
 
-    for provider in ProviderId::ALL {
-        let task = refresh_provider_task(config, state, provider);
-        if task.units() > 0 {
-            tasks.push(task);
-        }
+    if tasks.is_empty() {
+        Task::none()
+    } else {
+        Task::batch(tasks)
     }
+}
+
+#[cfg(test)]
+pub fn automatic_refresh_provider_tasks(config: &Config, state: &mut AppState) -> Task<Message> {
+    automatic_refresh_provider_tasks_for_process(config, state, None)
+}
+
+pub(super) fn automatic_refresh_provider_tasks_for_process(
+    config: &Config,
+    state: &mut AppState,
+    process: Option<RefreshProcessContext>,
+) -> Task<Message> {
+    reconcile_host_active_accounts(config, state);
+
+    let providers = ProviderId::ALL
+        .into_iter()
+        .filter(|provider| selected_account_refresh_due(config, state, *provider))
+        .collect::<Vec<_>>();
+    let tasks = providers
+        .into_iter()
+        .map(|provider| refresh_provider_task_for_process(config, state, provider, process.clone()))
+        .filter(|task| task.units() > 0)
+        .collect::<Vec<_>>();
 
     if tasks.is_empty() {
         Task::none()
@@ -45,14 +125,71 @@ fn reconcile_host_active_accounts(config: &Config, state: &mut AppState) {
     }
 }
 
+pub(super) fn selected_account_refresh_due(
+    config: &Config,
+    state: &AppState,
+    provider: ProviderId,
+) -> bool {
+    if !config.provider_enabled(provider) {
+        return false;
+    }
+    let Some(entry) = state.provider(provider) else {
+        return true;
+    };
+    if entry.is_refreshing
+        || entry.account_status != crate::model::AccountSelectionStatus::Ready
+        || entry.selected_account_ids.is_empty()
+    {
+        return false;
+    }
+
+    let interval = chrono::Duration::seconds(
+        config
+            .refresh_interval_seconds
+            .min(i64::MAX as u64)
+            .cast_signed(),
+    );
+    let now = Utc::now();
+    entry.selected_account_ids.iter().any(|account_id| {
+        state
+            .provider_accounts
+            .iter()
+            .find(|account| account.provider == provider && account.account_id == *account_id)
+            .and_then(|account| account.last_success_at)
+            .is_none_or(|last_success_at| now - last_success_at >= interval)
+    })
+}
+
+#[cfg(test)]
 pub fn refresh_provider_task(
     config: &Config,
     state: &mut AppState,
     provider: ProviderId,
 ) -> Task<Message> {
+    refresh_provider_task_for_process(config, state, provider, None)
+}
+
+pub(super) fn refresh_provider_task_for_process(
+    config: &Config,
+    state: &mut AppState,
+    provider: ProviderId,
+    process: Option<RefreshProcessContext>,
+) -> Task<Message> {
     if demo_env::is_active() {
         return Task::none();
     }
+    tracing::info!(
+        process_id = process
+            .as_ref()
+            .map(|process| process.process_id.as_str())
+            .unwrap_or("unknown"),
+        owner_status = process
+            .as_ref()
+            .map(|process| process.owner_status)
+            .unwrap_or("unknown"),
+        provider = provider.label(),
+        "provider refresh scheduled"
+    );
     let enabled = config.provider_enabled(provider);
     let already_refreshing = state
         .provider(provider)
@@ -63,6 +200,50 @@ pub fn refresh_provider_task(
         .provider(provider)
         .is_some_and(|entry| entry.account_status == crate::model::AccountSelectionStatus::Ready);
     if !enabled || !ready || already_refreshing {
+        let diagnostics = RefreshSkipDiagnostics::for_provider(state, provider);
+        if !enabled {
+            tracing::info!(
+                provider = provider.label(),
+                skip_reason = "disabled",
+                "provider refresh skipped because provider is disabled"
+            );
+        } else if already_refreshing {
+            tracing::info!(
+                provider = provider.label(),
+                skip_reason = "already_refreshing",
+                account_status = diagnostics.account_status,
+                selected_account_count = diagnostics.selected_account_count,
+                stored_account_count = diagnostics.stored_account_count,
+                "provider refresh skipped because provider is already refreshing"
+            );
+        } else {
+            let skip_reason = diagnostics.not_ready_reason();
+            if skip_reason == "login_required" {
+                tracing::info!(
+                    provider = provider.label(),
+                    skip_reason,
+                    account_status = diagnostics.account_status,
+                    selected_account_count = diagnostics.selected_account_count,
+                    stored_account_count = diagnostics.stored_account_count,
+                    action_required_account_count = diagnostics.action_required_account_count,
+                    rate_limited_account_count = diagnostics.rate_limited_account_count,
+                    provider_error = diagnostics.provider_error.as_deref(),
+                    "provider refresh ignored because provider has no account"
+                );
+            } else {
+                tracing::info!(
+                    provider = provider.label(),
+                    skip_reason,
+                    account_status = diagnostics.account_status,
+                    selected_account_count = diagnostics.selected_account_count,
+                    stored_account_count = diagnostics.stored_account_count,
+                    action_required_account_count = diagnostics.action_required_account_count,
+                    rate_limited_account_count = diagnostics.rate_limited_account_count,
+                    provider_error = diagnostics.provider_error.as_deref(),
+                    "provider refresh skipped because selected account state is not ready"
+                );
+            }
+        }
         return Task::none();
     }
 
@@ -76,7 +257,7 @@ pub fn refresh_provider_task(
 
     for account in &previous_accounts {
         if account.auth_state == AuthState::ActionRequired {
-            tracing::info!(
+            tracing::debug!(
                 provider = provider.label(),
                 account_id = %account.account_id,
                 "skipping refresh for account requiring user action"
@@ -87,6 +268,24 @@ pub fn refresh_provider_task(
     let account_ids =
         account_ids_to_refresh(&config, provider, previous.as_ref(), &previous_accounts);
     if account_ids.is_empty() {
+        tracing::info!(
+            provider = provider.label(),
+            skip_reason = "no_refreshable_accounts",
+            selected_account_count = previous
+                .as_ref()
+                .map(|provider| provider.selected_account_ids.len())
+                .unwrap_or_default(),
+            stored_account_count = previous_accounts.len(),
+            action_required_account_count = previous_accounts
+                .iter()
+                .filter(|account| account.auth_state == AuthState::ActionRequired)
+                .count(),
+            rate_limited_account_count = previous_accounts
+                .iter()
+                .filter(|account| account.is_rate_limited())
+                .count(),
+            "provider refresh skipped because no accounts are refreshable"
+        );
         return Task::none();
     }
 
@@ -96,6 +295,7 @@ pub fn refresh_provider_task(
             let config = config.clone();
             let previous = previous.clone();
             let previous_accounts = previous_accounts.clone();
+            let process = process.clone();
             Task::perform(
                 async move {
                     runtime::refresh_account(
@@ -104,6 +304,7 @@ pub fn refresh_provider_task(
                         account_id,
                         previous,
                         previous_accounts,
+                        process,
                     )
                     .await
                 },
@@ -113,6 +314,15 @@ pub fn refresh_provider_task(
         .collect();
 
     Task::batch(tasks)
+}
+
+fn account_status_label(status: crate::model::AccountSelectionStatus) -> &'static str {
+    match status {
+        crate::model::AccountSelectionStatus::Ready => "ready",
+        crate::model::AccountSelectionStatus::LoginRequired => "login_required",
+        crate::model::AccountSelectionStatus::SelectionRequired => "selection_required",
+        crate::model::AccountSelectionStatus::Unavailable => "unavailable",
+    }
 }
 
 pub fn refresh_provider_account_statuses_task(
@@ -203,6 +413,12 @@ mod tests {
         path
     }
 
+    fn test_env_without_demo() -> test_support::TestEnv {
+        let mut env = test_support::test_env();
+        env.remove("YAPCAP_DEMO");
+        env
+    }
+
     fn stored_claude_account(
         storage: &ProviderAccountStorage,
         email: &str,
@@ -242,6 +458,7 @@ mod tests {
 
     #[test]
     fn refresh_tasks_mark_enabled_providers_refreshing() {
+        let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
         mark_all_ready(&mut state);
@@ -257,6 +474,7 @@ mod tests {
 
     #[test]
     fn refresh_tasks_skip_disabled_provider() {
+        let _env = test_env_without_demo();
         let config = Config {
             cursor_enabled: false,
             ..Config::default()
@@ -275,7 +493,70 @@ mod tests {
     }
 
     #[test]
+    fn automatic_refresh_tasks_refresh_missing_selected_account() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+
+        let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
+
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn automatic_refresh_tasks_skip_fresh_selected_account() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: Some(Utc::now()),
+            snapshot: None,
+            health: crate::model::ProviderHealth::Ok,
+            auth_state: AuthState::Ready,
+            error: None,
+            rate_limit_until: None,
+            consecutive_rate_limits: 0,
+        });
+
+        let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
+
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn automatic_refresh_tasks_refresh_stale_selected_account() {
+        let _env = test_env_without_demo();
+        let config = Config::default();
+        let mut state = AppState::empty();
+        mark_all_ready(&mut state);
+        state.upsert_account(crate::model::ProviderAccountRuntimeState {
+            provider: ProviderId::Codex,
+            account_id: "default".to_string(),
+            label: "Codex".to_string(),
+            source_label: None,
+            last_success_at: Some(Utc::now() - chrono::Duration::minutes(10)),
+            snapshot: None,
+            health: crate::model::ProviderHealth::Ok,
+            auth_state: AuthState::Ready,
+            error: None,
+            rate_limit_until: None,
+            consecutive_rate_limits: 0,
+        });
+
+        let _tasks = automatic_refresh_provider_tasks(&config, &mut state);
+
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
     fn refresh_tasks_skip_already_refreshing_provider() {
+        let _env = test_env_without_demo();
         let config = Config::default();
         let mut state = AppState::empty();
         mark_all_ready(&mut state);

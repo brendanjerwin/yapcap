@@ -4,7 +4,6 @@ mod account_selection;
 pub mod account_storage;
 mod app;
 mod auth;
-mod cache;
 mod config;
 mod currency_format;
 #[cfg(debug_assertions)]
@@ -15,7 +14,9 @@ mod i18n;
 mod logging;
 mod model;
 mod providers;
+mod refresh_owner;
 mod runtime;
+mod shared_state;
 #[cfg(test)]
 mod test_support;
 mod updates;
@@ -26,9 +27,9 @@ fn main() -> cosmic::iced::Result {
     i18n::init(&requested_languages);
 
     let default_level = if cfg!(debug_assertions) {
-        "debug"
+        "warn,yapcap=debug"
     } else {
-        "info"
+        "warn,yapcap=info"
     };
     let _log_guard = logging::init(default_level).ok();
 

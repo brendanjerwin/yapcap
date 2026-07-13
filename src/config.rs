@@ -8,13 +8,19 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+mod watch_update;
+
+pub const APP_ID: &str = "io.github.TopiCsarno.YapCap";
+
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 500]
+#[version = 502]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
     pub usage_amount_format: UsageAmountFormat,
     pub panel_icon_style: PanelIconStyle,
+    #[serde(default = "default_selected_provider")]
+    pub selected_provider: ProviderId,
     #[serde(default = "default_provider_visibility_mode")]
     pub provider_visibility_mode: ProviderVisibilityMode,
     pub codex_enabled: bool,
@@ -68,6 +74,7 @@ impl Default for Config {
             reset_time_format: ResetTimeFormat::Relative,
             usage_amount_format: UsageAmountFormat::Used,
             panel_icon_style: PanelIconStyle::LogoAndBars,
+            selected_provider: ProviderId::Codex,
             provider_visibility_mode: ProviderVisibilityMode::AutoInitPending,
             codex_enabled: true,
             claude_enabled: true,
@@ -95,6 +102,10 @@ impl Default for Config {
 
 fn default_provider_visibility_mode() -> ProviderVisibilityMode {
     ProviderVisibilityMode::UserManaged
+}
+
+fn default_selected_provider() -> ProviderId {
+    ProviderId::Codex
 }
 
 impl Config {
@@ -294,7 +305,7 @@ where
 
 pub struct AppPaths {
     pub cache_dir: PathBuf,
-    pub snapshot_file: PathBuf,
+    pub state_dir: PathBuf,
     pub codex_accounts_dir: PathBuf,
     pub claude_accounts_dir: PathBuf,
     pub cursor_accounts_dir: PathBuf,
@@ -423,8 +434,8 @@ pub fn paths() -> AppPaths {
     let minimax_accounts_dir = state_dir.join("minimax-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
-        snapshot_file: cache_dir.join("snapshots.json"),
         cache_dir,
+        state_dir,
         codex_accounts_dir,
         claude_accounts_dir,
         cursor_accounts_dir,
@@ -456,12 +467,13 @@ mod tests {
         assert_eq!(config.reset_time_format, ResetTimeFormat::Relative);
         assert_eq!(config.usage_amount_format, UsageAmountFormat::Used);
         assert_eq!(config.panel_icon_style, PanelIconStyle::LogoAndBars);
+        assert_eq!(config.selected_provider, ProviderId::Codex);
     }
 
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 500);
+        assert_eq!(Config::VERSION, 502);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());
@@ -515,6 +527,46 @@ mod tests {
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
         );
+    }
+
+    #[test]
+    fn missing_selected_provider_defaults_to_codex() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "refresh_interval_seconds": 60,
+                "reset_time_format": "relative",
+                "usage_amount_format": "used",
+                "panel_icon_style": "logo_and_bars",
+                "provider_visibility_mode": "user_managed",
+                "codex_enabled": true,
+                "claude_enabled": true,
+                "cursor_enabled": true,
+                "selected_codex_account_ids": [],
+                "codex_managed_accounts": [],
+                "selected_claude_account_ids": [],
+                "claude_managed_accounts": [],
+                "selected_cursor_account_ids": [],
+                "cursor_managed_accounts": [],
+                "log_level": "info"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.selected_provider, ProviderId::Codex);
+    }
+
+    #[test]
+    fn selected_provider_serializes_as_snake_case() {
+        let config = Config {
+            selected_provider: ProviderId::Claude,
+            ..Config::default()
+        };
+
+        let value = serde_json::to_value(&config).unwrap();
+        assert_eq!(value.get("selected_provider").unwrap(), "claude");
+
+        let parsed: Config = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.selected_provider, ProviderId::Claude);
     }
 
     #[test]

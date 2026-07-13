@@ -149,7 +149,7 @@ pub enum AccountSelectionStatus {
     Unavailable,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderRuntimeState {
     pub provider: ProviderId,
     pub enabled: bool,
@@ -235,7 +235,7 @@ impl ProviderRuntimeState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderAccountRuntimeState {
     pub provider: ProviderId,
     pub account_id: String,
@@ -310,7 +310,7 @@ impl ProviderAccountRuntimeState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppState {
     pub providers: Vec<ProviderRuntimeState>,
     #[serde(default)]
