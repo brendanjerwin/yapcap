@@ -18,7 +18,7 @@ read_when:
 | Target desktop | COSMIC |
 | Target language | Rust (edition 2024) |
 | Target runtime | libcosmic applet runtime |
-| Providers | Codex, Claude Code, Cursor, Gemini, Minimax, GitHub Copilot |
+| Providers | Codex, Claude Code, Cursor, Gemini, Minimax, GitHub Copilot, Antigravity |
 
 ## Document Map
 
@@ -26,7 +26,7 @@ read_when:
 | --- | --- |
 | 1. Product Definition | 1.1 Scope and Non-Goals<br>1.2 Supported Sources |
 | 2. Architecture | 2.1 System Context<br>2.2 Crate Layout<br>2.3 Runtime and Message Flow<br>2.4 Multi-Process Applet Model |
-| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Copilot<br>3.5 Gemini<br>3.6 Minimax |
+| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Copilot<br>3.5 Gemini<br>3.6 Minimax<br>3.7 Antigravity |
 | 4. Auth and Config | 4.1 OAuth Credential Files<br>4.2 Cursor Token Source<br>4.3 Configuration |
 | 5. Data Model | 5.1 UsageSnapshot<br>5.2 ProviderRuntimeState and Health<br>5.3 Stale/Fresh Rules |
 | 6. Persistence, Logging, Paths | |
@@ -39,7 +39,7 @@ read_when:
 
 ### 1.1 Scope and Non-Goals
 
-- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, Gemini, Minimax, and GitHub Copilot.
+- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, Gemini, Minimax, GitHub Copilot, and Antigravity.
 - Ships only on COSMIC. No GNOME, KDE, tray, or generic indicator paths exist.
 - Reads locally available credentials and caches. No user account, no cloud sync, no telemetry.
 - Out of scope: additional providers, historical charts, notifications, plugin architecture, doctor command, secret vault, alternative DEs.
@@ -945,6 +945,88 @@ Error classification (`MinimaxError`):
 - **Transient:** `RateLimited { retry_after_secs }`, network errors, timeouts.
 - **No usage data:** invalid or missing quota response preserves prior snapshot.
 
+### 3.7 Antigravity
+
+Antigravity is a second Google Code Assist provider modeled on Gemini (§3.5):
+YapCap runs its own Google OAuth login and stores its own tokens; it never
+reads Antigravity's keyring or talks to the local language server.
+
+Antigravity account model:
+
+- Each managed account is stored under
+  `<state-root>/yapcap/antigravity-accounts/<id>/` with `metadata.json`,
+  `tokens.json`, and optional `snapshot.json`.
+- Account identity is the normalized OAuth `id_token` email (trim + ASCII
+  lowercase) with duplicate-login dedupe.
+- Antigravity keeps its own token in the OS keyring, which YapCap does not read,
+  so `system_active_account_id` is always `None` — there is **no Active badge**
+  (like Copilot/Minimax).
+- Plan badge from `currentTier.id`: `free-tier` → Free, `standard-tier` /
+  `g1-pro-tier` → Pro, `g1-ultra-tier` → Ultra, anything else → Plan.
+
+Managed Antigravity add-account flow:
+
+- Settings exposes `Add account` under the Antigravity accounts card,
+  running the shared Google OAuth installed-app PKCE loopback flow (the Gemini
+  flow is the template) with Antigravity's own client pair and scopes.
+- Client id/secret default to the public pair embedded in the `agy` binary and
+  are overridable via `YAPCAP_ANTIGRAVITY_CLIENT_ID` /
+  `YAPCAP_ANTIGRAVITY_CLIENT_SECRET`. Scopes: `openid`, `email`, `profile`,
+  `cloud-platform`, and the Antigravity-specific `aicode` scope.
+- On callback: validate state, exchange the code, decode `id_token` for
+  email/sub, call `loadCodeAssist` (`ideType: ANTIGRAVITY`) for the tier id,
+  then commit to storage with normalized-email dedupe. Cancel/abort commits
+  nothing.
+- Re-auth reuses the flow with `login_hint=<email>` and rejects a mismatched
+  returned email; account rows show a re-auth icon on auth failure.
+
+API surface and host:
+
+- `POST <host>/v1internal:loadCodeAssist` and
+  `POST <host>/v1internal:retrieveUserQuotaSummary`, headers
+  `Authorization: Bearer`, `Content-Type: application/json`,
+  `User-Agent: antigravity`. `loadCodeAssist` metadata uses
+  `ideType: ANTIGRAVITY`; the quota call takes an empty body (no project id, no
+  cloud-resource-manager fallback).
+- Default host `cloudcode-pa.googleapis.com`, overridable via
+  `YAPCAP_ANTIGRAVITY_HOST`. **Host caveat:** the captured fixtures came from a
+  daily build on `daily-cloudcode-pa.googleapis.com`; the production host is not
+  yet live-verified (issue 001), so the default may need adjusting — env
+  override survives a change without a release.
+
+Usage fetch (per refresh cycle, same shape as Gemini):
+
+1. Preflight token refresh when within the refresh window; persist the rotated
+   access token and keep the stored refresh token (refresh responses return
+   none).
+2. `loadCodeAssist` → tier id. A 401 triggers one reactive refresh + one retry.
+3. `retrieveUserQuotaSummary` → groups, sharing the same single reactive-refresh
+   budget across the cycle.
+4. Normalize into four `UsageWindow`s: per group in server order, Weekly then
+   Five Hour. Per window: `group` = group `displayName`, `label` = bucket
+   `displayName`, `used_percent = (1 − remainingFraction) × 100` clamped,
+   `window_seconds` = 604 800 (weekly) / 18 000 (5h) / `None` for unknown,
+   `reset_at` from the RFC3339 `resetTime`. Empty `groups` → `NoUsageData`
+   preserving the prior snapshot. Snapshot headline index points at the first
+   5-hour window.
+5. Snapshot `source: "OAuth"`, identity email from stored metadata, plan badge
+   from the tier mapping; persist snapshot + updated metadata (last tier id).
+
+Display:
+
+- **Panel headline:** the two 5-hour bars (Gemini 5h + Claude/GPT 5h) — the
+  fast-moving ambient signal.
+- **Popup:** all four bars, grouped under the server's group `displayName`s
+  (Gemini Models / Claude and GPT models), Weekly then Five Hour within each.
+
+Error classification (`AntigravityError`), mirroring Gemini §3.5:
+
+- **Permanent / `requires_user_action`:** refresh HTTP 400/401/403,
+  `Unauthorized` after the reactive-refresh retry.
+- **Transient:** `RateLimited { retry_after_secs }` (429 with Retry-After),
+  5xx, network errors, timeouts.
+- **No usage data:** empty `groups` preserves the prior snapshot.
+
 ## 4. Auth and Config
 
 ### 4.1 OAuth Credential Files
@@ -972,9 +1054,15 @@ Copilot OAuth material lives only under YapCap-owned
 GitHub or Copilot CLI config for Copilot, and Copilot has no host-session
 Active badge.
 
-Codex, Claude, Gemini, and Copilot OAuth material used by normal refresh all
-lives under YapCap-owned account directories as `tokens.json`. Provider errors
-bubble up as `requires_user_action = true` when user login is needed.
+Antigravity OAuth material lives only under YapCap-owned
+`antigravity-accounts/<id>/tokens.json` (see §3.7). YapCap does not read
+Antigravity's keyring token or talk to its local language server, and
+Antigravity has no host-session Active badge.
+
+Codex, Claude, Gemini, Copilot, and Antigravity OAuth material used by normal
+refresh all lives under YapCap-owned account directories as `tokens.json`.
+Provider errors bubble up as `requires_user_action = true` when user login is
+needed.
 
 ### 4.2 Cursor Token Source
 
