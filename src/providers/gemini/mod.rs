@@ -3,7 +3,7 @@
 mod account;
 #[allow(dead_code)]
 pub mod buckets;
-mod code_assist;
+pub mod code_assist;
 mod host_session;
 pub mod id_token;
 mod login;
@@ -89,6 +89,7 @@ async fn fetch_at(
     let load = match code_assist::load_code_assist_typed(
         client,
         load_code_assist_endpoint,
+        code_assist::IDE_TYPE_UNSPECIFIED,
         &tokens.access_token,
     )
     .await
@@ -101,6 +102,7 @@ async fn fetch_at(
             code_assist::load_code_assist_typed(
                 client,
                 load_code_assist_endpoint,
+                code_assist::IDE_TYPE_UNSPECIFIED,
                 &tokens.access_token,
             )
             .await

@@ -58,21 +58,30 @@ pub fn parse_load_code_assist(raw: &str) -> Result<LoadCodeAssist, String> {
     })
 }
 
+pub const IDE_TYPE_UNSPECIFIED: &str = "IDE_UNSPECIFIED";
+
 pub async fn load_code_assist(
     client: &reqwest::Client,
     access_token: &str,
 ) -> Result<LoadCodeAssist, String> {
-    load_code_assist_at(client, LOAD_CODE_ASSIST_URL, access_token).await
+    load_code_assist_at(
+        client,
+        LOAD_CODE_ASSIST_URL,
+        IDE_TYPE_UNSPECIFIED,
+        access_token,
+    )
+    .await
 }
 
 pub async fn load_code_assist_at(
     client: &reqwest::Client,
     endpoint: &str,
+    ide_type: &str,
     access_token: &str,
 ) -> Result<LoadCodeAssist, String> {
     let body = json!({
         "metadata": {
-            "ideType": "IDE_UNSPECIFIED",
+            "ideType": ide_type,
             "platform": "PLATFORM_UNSPECIFIED",
             "pluginType": "GEMINI",
             "duetProject": "default",
@@ -104,11 +113,12 @@ pub async fn load_code_assist_at(
 pub async fn load_code_assist_typed(
     client: &reqwest::Client,
     endpoint: &str,
+    ide_type: &str,
     access_token: &str,
 ) -> Result<LoadCodeAssist, GeminiError> {
     let body = json!({
         "metadata": {
-            "ideType": "IDE_UNSPECIFIED",
+            "ideType": ide_type,
             "platform": "PLATFORM_UNSPECIFIED",
             "pluginType": "GEMINI",
             "duetProject": "default",
