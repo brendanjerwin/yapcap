@@ -66,11 +66,15 @@ suffix — the current name; earlier research said `retrieveUserQuota`). Headers
 `retrieveUserQuotaSummary` works with an **empty body** — the `project` field is
 optional (server resolves it from the token).
 
-> **Host caveat — [CONFIRMED]:** this daily build talks to
-> **`daily-cloudcode-pa.googleapis.com`**. Production/release Antigravity almost
-> certainly uses `cloudcode-pa.googleapis.com` (the gemini-cli host). The probe
-> takes `ANTIGRAVITY_CODE_ASSIST_HOST` to switch. Re-verify the release host and
-> that the quota shape matches before shipping.
+> **Host — [CONFIRMED, prod live-verified 2026-07-14]:** the production host is
+> **`cloudcode-pa.googleapis.com`** (the gemini-cli host). Verified by re-running
+> the probe against it with a live YapCap-minted token (issue 001): `loadCodeAssist`,
+> `fetchAvailableModels`, and `retrieveUserQuotaSummary` all return **200**, and the
+> quota JSON is structurally identical to the earlier daily-build capture
+> (`groups[] × buckets[] × {bucketId, displayName, remainingFraction, resetTime,
+> window, description}`). The daily build talked to `daily-cloudcode-pa.googleapis.com`;
+> the probe still takes `ANTIGRAVITY_CODE_ASSIST_HOST` to switch. `cloudcode-pa.googleapis.com`
+> is the shipped default; the committed fixtures remain valid (prod shape matches).
 
 **Quota shape — [CONFIRMED], supersedes §1/§4 Pro/Flash/Lite classification.**
 `retrieveUserQuotaSummary` returns server-defined **groups**, each with a

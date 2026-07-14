@@ -968,11 +968,17 @@ Managed Antigravity add-account flow:
 
 - Settings exposes `Add account` under the Antigravity accounts card,
   running the shared Google OAuth installed-app PKCE loopback flow (the Gemini
-  flow is the template) with Antigravity's own client pair and scopes.
+  flow is the template) with Antigravity's own client pair and scopes. The
+  redirect is an ephemeral-port loopback (`http://localhost:<port>/oauth/callback`,
+  OS-assigned); live-verified accepted by Google (issue 006, 2026-07-14), so no
+  fixed-port fallback is used.
 - Client id/secret default to the public pair embedded in the `agy` binary and
   are overridable via `YAPCAP_ANTIGRAVITY_CLIENT_ID` /
   `YAPCAP_ANTIGRAVITY_CLIENT_SECRET`. Scopes: `openid`, `email`, `profile`,
-  `cloud-platform`, and the Antigravity-specific `aicode` scope.
+  `cloud-platform`, and the Antigravity-specific `aicode` scope. Live-verified
+  sufficient for the quota endpoint (issue 006, 2026-07-14): a token minted with
+  exactly this set fetches quota successfully — no widening to the app's 7-scope
+  set is needed.
 - On callback: validate state, exchange the code, decode `id_token` for
   email/sub, call `loadCodeAssist` (`ideType: ANTIGRAVITY`) for the tier id,
   then commit to storage with normalized-email dedupe. Cancel/abort commits
@@ -989,10 +995,9 @@ API surface and host:
   `ideType: ANTIGRAVITY`; the quota call takes an empty body (no project id, no
   cloud-resource-manager fallback).
 - Default host `cloudcode-pa.googleapis.com`, overridable via
-  `YAPCAP_ANTIGRAVITY_HOST`. **Host caveat:** the captured fixtures came from a
-  daily build on `daily-cloudcode-pa.googleapis.com`; the production host is not
-  yet live-verified (issue 001), so the default may need adjusting — env
-  override survives a change without a release.
+  `YAPCAP_ANTIGRAVITY_HOST`. Live-verified (issue 001, 2026-07-14): all three
+  endpoints return 200 on the prod host and the quota shape matches the fixtures;
+  the env override remains as a safety valve.
 
 Usage fetch (per refresh cycle, same shape as Gemini):
 
