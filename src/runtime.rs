@@ -407,6 +407,24 @@ pub fn reconcile_provider(config: &Config, state: &mut AppState, provider: Provi
     }
 }
 
+pub(crate) fn mark_account_reauthenticated(
+    state: &mut AppState,
+    provider: ProviderId,
+    account_id: &str,
+) {
+    if let Some(account) = state
+        .provider_accounts
+        .iter_mut()
+        .find(|a| a.provider == provider && a.account_id == account_id)
+    {
+        account.health = ProviderHealth::Ok;
+        account.auth_state = AuthState::Ready;
+        account.error = None;
+        account.retry_after = None;
+        account.consecutive_failures = 0;
+    }
+}
+
 fn ensure_provider_states(state: &mut AppState) {
     for provider in ProviderId::ALL {
         if state.provider(provider).is_none() {
@@ -432,6 +450,38 @@ mod tests {
             extra_usage: None,
             identity: ProviderIdentity::default(),
         }
+    }
+
+    #[test]
+    fn mark_account_reauthenticated_clears_failure_state_so_refresh_can_run() {
+        let mut state = AppState::empty();
+        let mut account = ProviderAccountRuntimeState::empty(
+            ProviderId::Antigravity,
+            "antigravity-1",
+            "user@example.com",
+        );
+        account.snapshot = Some(snapshot());
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::ActionRequired;
+        account.error = Some("antigravity token refresh returned HTTP 400".to_string());
+        account.consecutive_failures = 2;
+        account.retry_after = Some(Utc::now() + chrono::Duration::seconds(600));
+        state.upsert_account(account);
+
+        mark_account_reauthenticated(&mut state, ProviderId::Antigravity, "antigravity-1");
+
+        let account = state
+            .provider_accounts
+            .iter()
+            .find(|a| a.account_id == "antigravity-1")
+            .unwrap();
+        assert_eq!(account.auth_state, AuthState::Ready);
+        assert_eq!(account.health, ProviderHealth::Ok);
+        assert!(account.error.is_none());
+        assert!(account.retry_after.is_none());
+        assert_eq!(account.consecutive_failures, 0);
+        assert!(!account.is_backing_off());
+        assert!(account.snapshot.is_some());
     }
 
     #[test]

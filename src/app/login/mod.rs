@@ -128,6 +128,7 @@ fn apply_login_success(
     );
     app.write_config(|new_config| apply(new_config));
     runtime::reconcile_provider(&app.config, &mut app.state, provider);
+    runtime::mark_account_reauthenticated(&mut app.state, provider, &account_id);
     app.sync_panel_suggested_bounds();
     app.request_provider_refresh(provider, RefreshRequestReason::AccountAction)
 }
