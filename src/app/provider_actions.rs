@@ -619,6 +619,9 @@ pub(super) fn popup_route_label(route: PopupRoute) -> &'static str {
         PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Gemini)) => "settings_gemini",
         PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Copilot)) => "settings_copilot",
         PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Minimax)) => "settings_minimax",
+        PopupRoute::Settings(SettingsRoute::Provider(ProviderId::Antigravity)) => {
+            "settings_antigravity"
+        }
     }
 }
 
@@ -654,4 +657,5 @@ fn managed_account_count(config: &Config) -> usize {
         + config.gemini_managed_accounts.len()
         + config.copilot_managed_accounts.len()
         + config.minimax_managed_accounts.len()
+        + config.antigravity_managed_accounts.len()
 }

@@ -32,6 +32,8 @@ impl Config {
             "cursor_enabled" => self.cursor_enabled = update.cursor_enabled,
             "gemini_enabled" => self.gemini_enabled = update.gemini_enabled,
             "copilot_enabled" => self.copilot_enabled = update.copilot_enabled,
+            "minimax_enabled" => self.minimax_enabled = update.minimax_enabled,
+            "antigravity_enabled" => self.antigravity_enabled = update.antigravity_enabled,
             "show_all_accounts" => self.show_all_accounts = update.show_all_accounts.clone(),
             "log_level" => self.log_level.clone_from(&update.log_level),
             _ => return false,
@@ -70,6 +72,19 @@ impl Config {
             }
             "copilot_managed_accounts" => {
                 self.copilot_managed_accounts = update.copilot_managed_accounts.clone();
+            }
+            "selected_minimax_account_ids" => {
+                self.selected_minimax_account_ids = update.selected_minimax_account_ids.clone();
+            }
+            "minimax_managed_accounts" => {
+                self.minimax_managed_accounts = update.minimax_managed_accounts.clone();
+            }
+            "selected_antigravity_account_ids" => {
+                self.selected_antigravity_account_ids =
+                    update.selected_antigravity_account_ids.clone();
+            }
+            "antigravity_managed_accounts" => {
+                self.antigravity_managed_accounts = update.antigravity_managed_accounts.clone();
             }
             _ => {}
         }

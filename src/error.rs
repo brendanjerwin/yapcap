@@ -52,6 +52,12 @@ impl From<MinimaxError> for AppError {
     }
 }
 
+impl From<AntigravityError> for AppError {
+    fn from(value: AntigravityError) -> Self {
+        Self::Provider(ProviderError::Antigravity(value))
+    }
+}
+
 impl AppError {
     #[must_use]
     pub fn user_message(&self) -> String {
@@ -93,6 +99,7 @@ impl AppError {
             Self::Provider(ProviderError::Gemini(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Copilot(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Minimax(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Antigravity(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
@@ -124,6 +131,8 @@ pub enum ProviderError {
     Copilot(#[from] CopilotError),
     #[error(transparent)]
     Minimax(#[from] MinimaxError),
+    #[error(transparent)]
+    Antigravity(#[from] AntigravityError),
 }
 
 impl ProviderError {
@@ -136,6 +145,7 @@ impl ProviderError {
             Self::Gemini(error) => error.is_network_unavailable(),
             Self::Copilot(error) => error.is_network_unavailable(),
             Self::Minimax(error) => error.is_network_unavailable(),
+            Self::Antigravity(error) => error.is_network_unavailable(),
         }
     }
 
@@ -148,6 +158,7 @@ impl ProviderError {
             Self::Gemini(error) => error.requires_user_action(),
             Self::Copilot(error) => error.requires_user_action(),
             Self::Minimax(error) => error.requires_user_action(),
+            Self::Antigravity(error) => error.requires_user_action(),
         }
     }
 
@@ -160,6 +171,7 @@ impl ProviderError {
             Self::Gemini(error) => error.is_transient(),
             Self::Copilot(error) => error.is_transient(),
             Self::Minimax(error) => error.is_transient(),
+            Self::Antigravity(error) => error.is_transient(),
         }
     }
 }
@@ -586,6 +598,81 @@ impl MinimaxError {
             Self::RateLimited { .. } => true,
             Self::UsageRequest(source) => request_could_not_reach_network(source),
             Self::UsageHttp { status } => *status >= 500,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum AntigravityError {
+    #[error("antigravity token refresh request failed")]
+    TokenRefreshRequest(#[source] reqwest::Error),
+    #[error("antigravity token refresh returned HTTP {status}")]
+    TokenRefreshHttp { status: u16 },
+    #[error("failed to decode antigravity token refresh response")]
+    TokenRefreshDecode(#[source] reqwest::Error),
+    #[error("failed to parse antigravity token refresh response: {0}")]
+    TokenRefreshParse(String),
+    #[error("Rate limited by Antigravity{} — will retry automatically",
+        .retry_after_secs.map_or(String::new(), |s| format!(" (retry in {})", format_retry_secs(s))))]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("Antigravity login required")]
+    Unauthorized,
+    #[error("antigravity code-assist request failed")]
+    LoadCodeAssistRequest(#[source] reqwest::Error),
+    #[error("antigravity loadCodeAssist returned HTTP {status}")]
+    LoadCodeAssistHttp { status: u16 },
+    #[error("failed to parse antigravity loadCodeAssist response: {0}")]
+    LoadCodeAssistParse(String),
+    #[error("antigravity retrieveUserQuotaSummary request failed")]
+    QuotaRequest(#[source] reqwest::Error),
+    #[error("antigravity retrieveUserQuotaSummary returned HTTP {status}")]
+    QuotaHttp { status: u16 },
+    #[error("failed to parse antigravity retrieveUserQuotaSummary response: {0}")]
+    QuotaParse(String),
+    #[error("Antigravity response had no usage windows")]
+    NoUsageData,
+    #[error("failed to read Antigravity account storage: {0}")]
+    AccountStorage(String),
+}
+
+impl AntigravityError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::TokenRefreshRequest(source)
+            | Self::LoadCodeAssistRequest(source)
+            | Self::QuotaRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        if let Self::TokenRefreshHttp { status } = self {
+            return (400..500).contains(status) && *status != 429;
+        }
+        matches!(self, Self::Unauthorized)
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::TokenRefreshRequest(source)
+            | Self::LoadCodeAssistRequest(source)
+            | Self::QuotaRequest(source) => request_could_not_reach_network(source),
+            Self::TokenRefreshHttp { status }
+            | Self::LoadCodeAssistHttp { status }
+            | Self::QuotaHttp { status } => *status == 429 || *status >= 500,
             _ => false,
         }
     }

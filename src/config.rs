@@ -13,7 +13,7 @@ mod watch_update;
 pub const APP_ID: &str = "io.github.TopiCsarno.YapCap";
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
-#[version = 502]
+#[version = 503]
 pub struct Config {
     pub refresh_interval_seconds: u64,
     pub reset_time_format: ResetTimeFormat,
@@ -32,6 +32,8 @@ pub struct Config {
     pub copilot_enabled: bool,
     #[serde(default = "default_minimax_enabled")]
     pub minimax_enabled: bool,
+    #[serde(default = "default_antigravity_enabled")]
+    pub antigravity_enabled: bool,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -52,6 +54,10 @@ pub struct Config {
     pub selected_minimax_account_ids: Vec<String>,
     #[serde(default)]
     pub minimax_managed_accounts: Vec<ManagedMinimaxAccountConfig>,
+    #[serde(default)]
+    pub selected_antigravity_account_ids: Vec<String>,
+    #[serde(default)]
+    pub antigravity_managed_accounts: Vec<ManagedAntigravityAccountConfig>,
     pub log_level: String,
 }
 
@@ -64,6 +70,10 @@ fn default_copilot_enabled() -> bool {
 }
 
 fn default_minimax_enabled() -> bool {
+    true
+}
+
+fn default_antigravity_enabled() -> bool {
     true
 }
 
@@ -82,6 +92,7 @@ impl Default for Config {
             gemini_enabled: true,
             copilot_enabled: true,
             minimax_enabled: true,
+            antigravity_enabled: true,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -95,6 +106,8 @@ impl Default for Config {
             copilot_managed_accounts: Vec::new(),
             selected_minimax_account_ids: Vec::new(),
             minimax_managed_accounts: Vec::new(),
+            selected_antigravity_account_ids: Vec::new(),
+            antigravity_managed_accounts: Vec::new(),
             log_level: "info".to_string(),
         }
     }
@@ -118,6 +131,7 @@ impl Config {
             ProviderId::Gemini => self.gemini_enabled,
             ProviderId::Copilot => self.copilot_enabled,
             ProviderId::Minimax => self.minimax_enabled,
+            ProviderId::Antigravity => self.antigravity_enabled,
         }
     }
 
@@ -130,6 +144,7 @@ impl Config {
             ProviderId::Gemini => &self.selected_gemini_account_ids,
             ProviderId::Copilot => &self.selected_copilot_account_ids,
             ProviderId::Minimax => &self.selected_minimax_account_ids,
+            ProviderId::Antigravity => &self.selected_antigravity_account_ids,
         }
     }
 
@@ -141,6 +156,7 @@ impl Config {
             ProviderId::Gemini => &mut self.selected_gemini_account_ids,
             ProviderId::Copilot => &mut self.selected_copilot_account_ids,
             ProviderId::Minimax => &mut self.selected_minimax_account_ids,
+            ProviderId::Antigravity => &mut self.selected_antigravity_account_ids,
         }
     }
 
@@ -165,6 +181,7 @@ impl Config {
             ProviderId::Gemini => &mut self.gemini_enabled,
             ProviderId::Copilot => &mut self.copilot_enabled,
             ProviderId::Minimax => &mut self.minimax_enabled,
+            ProviderId::Antigravity => &mut self.antigravity_enabled,
         };
         let changed = *target != enabled;
         *target = enabled;
@@ -250,6 +267,20 @@ pub struct ManagedGeminiAccountConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedAntigravityAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub account_root: PathBuf,
+    pub email: String,
+    pub sub: String,
+    #[serde(default)]
+    pub last_tier_id: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManagedCopilotAccountConfig {
     pub id: String,
     pub label: String,
@@ -312,6 +343,7 @@ pub struct AppPaths {
     pub gemini_accounts_dir: PathBuf,
     pub copilot_accounts_dir: PathBuf,
     pub minimax_accounts_dir: PathBuf,
+    pub antigravity_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
 }
 
@@ -421,6 +453,11 @@ pub fn managed_minimax_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn managed_antigravity_account_dir(account_id: &str) -> PathBuf {
+    paths().antigravity_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn paths() -> AppPaths {
     let cache_root = cache_root_dir();
     let state_root = state_parent_dir();
@@ -432,6 +469,7 @@ pub fn paths() -> AppPaths {
     let gemini_accounts_dir = state_dir.join("gemini-accounts");
     let copilot_accounts_dir = state_dir.join("copilot-accounts");
     let minimax_accounts_dir = state_dir.join("minimax-accounts");
+    let antigravity_accounts_dir = state_dir.join("antigravity-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
         cache_dir,
@@ -442,6 +480,7 @@ pub fn paths() -> AppPaths {
         gemini_accounts_dir,
         copilot_accounts_dir,
         minimax_accounts_dir,
+        antigravity_accounts_dir,
         log_dir,
     }
 }
@@ -459,6 +498,7 @@ mod tests {
         assert!(config.provider_enabled(ProviderId::Gemini));
         assert!(config.provider_enabled(ProviderId::Copilot));
         assert!(config.provider_enabled(ProviderId::Minimax));
+        assert!(config.provider_enabled(ProviderId::Antigravity));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::AutoInitPending
@@ -473,13 +513,14 @@ mod tests {
     #[test]
     fn config_schema_version_marks_fresh_patch_boundary() {
         let config = Config::default();
-        assert_eq!(Config::VERSION, 502);
+        assert_eq!(Config::VERSION, 503);
         assert!(config.codex_managed_accounts.is_empty());
         assert!(config.claude_managed_accounts.is_empty());
         assert!(config.cursor_managed_accounts.is_empty());
         assert!(config.gemini_managed_accounts.is_empty());
         assert!(config.copilot_managed_accounts.is_empty());
         assert!(config.minimax_managed_accounts.is_empty());
+        assert!(config.antigravity_managed_accounts.is_empty());
     }
 
     #[test]

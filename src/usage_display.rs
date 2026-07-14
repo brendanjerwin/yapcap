@@ -190,6 +190,7 @@ mod tests {
             reset_at,
             window_seconds: None,
             reset_description: None,
+            group: None,
         }
     }
 
@@ -204,6 +205,7 @@ mod tests {
             reset_at: Some(reset_at),
             window_seconds: Some(window_seconds),
             reset_description: None,
+            group: None,
         }
     }
 

@@ -34,6 +34,8 @@ pub struct ProviderAccountMetadata {
     pub gemini_last_tier_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gemini_last_cloudaicompanion_project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_last_tier_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -123,6 +125,7 @@ impl ProviderAccountStorage {
             updated_at: now,
             gemini_last_tier_id: None,
             gemini_last_cloudaicompanion_project: None,
+            antigravity_last_tier_id: None,
         };
 
         write_json(&account_dir.join(METADATA_FILE), &metadata)?;
@@ -252,6 +255,7 @@ impl ProviderAccountStorage {
             ProviderId::Gemini => "gemini",
             ProviderId::Copilot => "copilot",
             ProviderId::Minimax => "minimax",
+            ProviderId::Antigravity => "antigravity",
         };
         let millis = Utc::now().timestamp_millis();
         format!("{prefix}-{millis}-{}", std::process::id())

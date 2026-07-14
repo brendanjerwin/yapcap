@@ -62,6 +62,7 @@ pub(super) fn scoped_weekly_windows(
             reset_at,
             window_seconds: Some(SEVEN_DAY_SECONDS),
             reset_description: reset_at.map(|dt| dt.to_rfc3339()),
+            group: None,
         });
     }
     Ok(windows)

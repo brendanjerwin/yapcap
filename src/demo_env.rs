@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
-    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ManagedMinimaxAccountConfig,
-    ProviderVisibilityMode, paths,
+    Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
+    ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
+    ManagedMinimaxAccountConfig, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -26,6 +26,7 @@ const GEMINI_PRIMARY_ID: &str = "yapcap-demo:gemini-primary";
 const COPILOT_FREE_ID: &str = "yapcap-demo:copilot-casey-free";
 const COPILOT_PRO_ID: &str = "yapcap-demo:copilot-morgan-pro";
 const MINIMAX_PRIMARY_ID: &str = "yapcap-demo:minimax-primary";
+const ANTIGRAVITY_PRIMARY_ID: &str = "yapcap-demo:antigravity-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -55,6 +56,7 @@ pub fn apply_config(config: &mut Config) {
     config.gemini_enabled = true;
     config.copilot_enabled = true;
     config.minimax_enabled = true;
+    config.antigravity_enabled = true;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
@@ -62,6 +64,7 @@ pub fn apply_config(config: &mut Config) {
     config.gemini_managed_accounts = demo_gemini_accounts();
     config.copilot_managed_accounts = demo_copilot_accounts();
     config.minimax_managed_accounts = demo_minimax_accounts();
+    config.antigravity_managed_accounts = demo_antigravity_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
@@ -95,6 +98,10 @@ pub fn apply_config(config: &mut Config) {
         config.selected_minimax_account_ids = vec![MINIMAX_PRIMARY_ID.to_string()];
         config.set_provider_show_all(ProviderId::Minimax, false);
     }
+    if config.selected_antigravity_account_ids.is_empty() {
+        config.selected_antigravity_account_ids = vec![ANTIGRAVITY_PRIMARY_ID.to_string()];
+        config.set_provider_show_all(ProviderId::Antigravity, false);
+    }
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -110,6 +117,10 @@ pub fn strip_leaked_state(config: &mut Config) -> bool {
     changed |= retain_len_changed(&mut config.copilot_managed_accounts, |account| &account.id);
     changed |= strip_ids(&mut config.selected_minimax_account_ids);
     changed |= retain_len_changed(&mut config.minimax_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_antigravity_account_ids);
+    changed |= retain_len_changed(&mut config.antigravity_managed_accounts, |account| {
+        &account.id
+    });
     changed
 }
 
@@ -175,6 +186,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::Gemini => GEMINI_PRIMARY_ID,
         ProviderId::Copilot => return None,
         ProviderId::Minimax => return None,
+        ProviderId::Antigravity => return None,
     };
     Some(id.to_string())
 }
@@ -186,6 +198,7 @@ fn demo_source(provider: ProviderId) -> String {
         }
         ProviderId::Cursor => "Managed Account".to_string(),
         ProviderId::Minimax => "API Key".to_string(),
+        ProviderId::Antigravity => "OAuth".to_string(),
     }
 }
 
@@ -318,6 +331,18 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 snapshot: snapshot_minimax_primary(),
             },
         )],
+        ProviderId::Antigravity => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: ANTIGRAVITY_PRIMARY_ID,
+                label: "pro@example.com",
+                last_success_at: now - Duration::minutes(2),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_antigravity_primary(),
+            },
+        )],
     }
 }
 
@@ -363,6 +388,7 @@ fn codex_demo_windows(
             reset_at: Some(session_end),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
@@ -370,6 +396,7 @@ fn codex_demo_windows(
             reset_at: Some(weekly_end),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
     ]
 }
@@ -454,6 +481,7 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             reset_at: Some(s),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
@@ -461,6 +489,7 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Fable".to_string(),
@@ -468,6 +497,7 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -505,6 +535,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(s),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
@@ -512,6 +543,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Sonnet".to_string(),
@@ -519,6 +551,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Opus".to_string(),
@@ -526,6 +559,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Cowork".to_string(),
@@ -533,6 +567,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Fable".to_string(),
@@ -540,6 +575,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -569,6 +605,7 @@ fn snapshot_gemini_primary() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Flash".to_string(),
@@ -576,6 +613,7 @@ fn snapshot_gemini_primary() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Lite".to_string(),
@@ -583,6 +621,7 @@ fn snapshot_gemini_primary() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: None,
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -642,6 +681,7 @@ fn snapshot_copilot_free() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some(reset.to_rfc3339()),
+            group: None,
         },
         UsageWindow {
             label: "completions".to_string(),
@@ -649,6 +689,7 @@ fn snapshot_copilot_free() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some(reset.to_rfc3339()),
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -682,6 +723,7 @@ fn snapshot_copilot_pro() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some("+42 over plan".to_string()),
+            group: None,
         }],
         provider_cost: Some(ProviderCost {
             used: 28.0,
@@ -728,6 +770,7 @@ fn snapshot_minimax_primary() -> UsageSnapshot {
                 reset_at: None,
                 window_seconds: Some(5 * 3600),
                 reset_description: Some("Resets every 5 hours".to_string()),
+                group: None,
             },
             UsageWindow {
                 label: "MiniMax-M2 (Weekly): 3800/10000".to_string(),
@@ -735,6 +778,7 @@ fn snapshot_minimax_primary() -> UsageSnapshot {
                 reset_at: None,
                 window_seconds: Some(7 * 24 * 3600),
                 reset_description: Some("Resets weekly".to_string()),
+                group: None,
             },
         ],
         provider_cost: None,
@@ -868,6 +912,78 @@ fn demo_copilot_accounts() -> Vec<ManagedCopilotAccountConfig> {
     ]
 }
 
+fn demo_antigravity_accounts() -> Vec<ManagedAntigravityAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedAntigravityAccountConfig {
+        id: ANTIGRAVITY_PRIMARY_ID.to_string(),
+        label: "pro@example.com".to_string(),
+        account_root: demo_root().join("antigravity-primary"),
+        email: "pro@example.com".to_string(),
+        sub: "demo-antigravity-sub".to_string(),
+        last_tier_id: Some("g1-pro-tier".to_string()),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
+fn snapshot_antigravity_primary() -> UsageSnapshot {
+    let now = Utc::now();
+    let weekly = now + Duration::days(6);
+    let five_hour = now + Duration::hours(4);
+    let windows = vec![
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 12.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: Some("Gemini Models".to_string()),
+        },
+        UsageWindow {
+            label: "Five Hour Limit".to_string(),
+            used_percent: 44.0,
+            reset_at: Some(five_hour),
+            window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some("Gemini Models".to_string()),
+        },
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 3.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: Some("Claude and GPT models".to_string()),
+        },
+        UsageWindow {
+            label: "Five Hour Limit".to_string(),
+            used_percent: 0.0,
+            reset_at: Some(five_hour),
+            window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some("Claude and GPT models".to_string()),
+        },
+    ];
+    UsageSnapshot {
+        provider: ProviderId::Antigravity,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(1),
+        windows,
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("pro@example.com".to_string()),
+            account_id: None,
+            plan: Some(
+                crate::providers::antigravity::plan_label::plan_label("g1-pro-tier").to_string(),
+            ),
+            display_name: Some("Pro".to_string()),
+        },
+    }
+}
+
 fn demo_root() -> PathBuf {
     paths().cache_dir.join("demo")
 }
@@ -884,6 +1000,7 @@ fn window_cursor(
         reset_at: Some(reset_at),
         window_seconds: Some(window_seconds),
         reset_description: Some(reset_at.to_rfc3339()),
+        group: None,
     }
 }
 

@@ -365,5 +365,6 @@ fn normalize_window(
         reset_at: DateTime::from_timestamp(reset_at_epoch, 0),
         window_seconds,
         reset_description: None,
+        group: None,
     }
 }

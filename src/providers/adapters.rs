@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+mod antigravity_adapter;
 mod claude_adapter;
 mod codex_adapter;
 mod copilot_adapter;
@@ -23,6 +24,7 @@ pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
         ProviderId::Gemini => &GEMINI_ADAPTER,
         ProviderId::Copilot => &COPILOT_ADAPTER,
         ProviderId::Minimax => &MINIMAX_ADAPTER,
+        ProviderId::Antigravity => &ANTIGRAVITY_ADAPTER,
     }
 }
 
@@ -32,6 +34,8 @@ static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAda
 static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
 static COPILOT_ADAPTER: copilot_adapter::CopilotAdapter = copilot_adapter::CopilotAdapter;
 static MINIMAX_ADAPTER: minimax_adapter::MinimaxAdapter = minimax_adapter::MinimaxAdapter;
+static ANTIGRAVITY_ADAPTER: antigravity_adapter::AntigravityAdapter =
+    antigravity_adapter::AntigravityAdapter;
 
 pub(super) fn reconcile_provider_account_descriptors(
     provider: ProviderId,

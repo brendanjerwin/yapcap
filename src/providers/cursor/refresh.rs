@@ -243,6 +243,7 @@ fn window(
         reset_at: Some(reset_at),
         window_seconds: Some(window_seconds),
         reset_description: Some(reset_at.to_rfc3339()),
+        group: None,
     }
 }
 

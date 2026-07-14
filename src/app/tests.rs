@@ -726,6 +726,7 @@ fn selected_provider_all_percents_uses_first_panel_window() {
                 reset_at: None,
                 window_seconds: None,
                 reset_description: None,
+                group: None,
             },
             UsageWindow {
                 label: "Weekly".to_string(),
@@ -733,6 +734,7 @@ fn selected_provider_all_percents_uses_first_panel_window() {
                 reset_at: None,
                 window_seconds: None,
                 reset_description: None,
+                group: None,
             },
         ],
         provider_cost: None,
@@ -778,6 +780,7 @@ fn applet_bar_layout_preserves_single_bar_shape() {
             reset_at: None,
             window_seconds: None,
             reset_description: None,
+            group: None,
         }],
         provider_cost: None,
         extra_usage: None,
@@ -850,6 +853,7 @@ fn state_with_selected_account_percents(percents: &[f32]) -> AppState {
                 reset_at: None,
                 window_seconds: None,
                 reset_description: None,
+                group: None,
             }],
             provider_cost: None,
             extra_usage: None,
@@ -895,6 +899,8 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         copilot_login_handle: None,
         minimax_login: None,
         minimax_login_handle: None,
+        antigravity_login: None,
+        antigravity_login_handle: None,
     }
 }
 
@@ -1003,6 +1009,20 @@ fn minimax_account(id: &str) -> ManagedMinimaxAccountConfig {
         id: id.to_string(),
         label: id.to_string(),
         api_key_source: "env:MINIMAX_API_KEY".to_string(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_authenticated_at: None,
+    }
+}
+
+fn antigravity_account(id: &str) -> crate::config::ManagedAntigravityAccountConfig {
+    crate::config::ManagedAntigravityAccountConfig {
+        id: id.to_string(),
+        label: id.to_string(),
+        account_root: PathBuf::from("/tmp/yapcap/antigravity"),
+        email: format!("{id}@example.com"),
+        sub: id.to_string(),
+        last_tier_id: None,
         created_at: Utc::now(),
         updated_at: Utc::now(),
         last_authenticated_at: None,
@@ -1121,6 +1141,16 @@ fn delete_account_requests_refresh_for_all_providers() {
                 app.config.selected_minimax_account_ids = vec![keep_id.to_string()];
                 remove_account_id = "remove".to_string();
             }
+            ProviderId::Antigravity => {
+                app.config
+                    .antigravity_managed_accounts
+                    .push(antigravity_account(keep_id));
+                app.config
+                    .antigravity_managed_accounts
+                    .push(antigravity_account("remove"));
+                app.config.selected_antigravity_account_ids = vec![keep_id.to_string()];
+                remove_account_id = "remove".to_string();
+            }
         }
 
         let _task = app.delete_account(provider, &remove_account_id);
@@ -1191,6 +1221,7 @@ fn snapshot_with_windows(
                 reset_at: None,
                 window_seconds: None,
                 reset_description: None,
+                group: None,
             })
             .collect(),
         provider_cost: None,
@@ -1221,6 +1252,7 @@ fn snapshot_with_percents(provider: ProviderId, percents: &[f32]) -> UsageSnapsh
                 reset_at: None,
                 window_seconds: None,
                 reset_description: None,
+                group: None,
             })
             .collect(),
         provider_cost: None,

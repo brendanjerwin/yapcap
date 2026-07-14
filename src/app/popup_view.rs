@@ -20,6 +20,7 @@ use crate::fl;
 use crate::model::{
     AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState, UsageWindow,
 };
+use crate::providers::antigravity::{AntigravityLoginState, AntigravityLoginStatus};
 use crate::providers::claude::{ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{CodexLoginState, CodexLoginStatus};
 use crate::providers::copilot::{CopilotLoginState, CopilotLoginStatus};
@@ -50,6 +51,7 @@ const PROVIDER_SUMMARY_HEIGHT: f32 = 58.0;
 const PROVIDER_ACCOUNT_HEADER_HEIGHT: f32 = 96.0;
 const PROVIDER_SECTION_HEIGHT: f32 = 84.0;
 const PROVIDER_SECTION_WITH_ACTION_HEIGHT: f32 = 120.0;
+const PROVIDER_GROUP_HEADER_HEIGHT: f32 = 28.0;
 const SETTINGS_SECTION_HEIGHT: f32 = 104.0;
 const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
 const PROVIDER_TAB_ICON_SIZE: u16 = 16;
@@ -66,6 +68,7 @@ pub struct ProviderLoginStates<'a> {
     pub gemini: Option<&'a GeminiLoginState>,
     pub copilot: Option<&'a CopilotLoginState>,
     pub minimax: Option<&'a MinimaxLoginState>,
+    pub antigravity: Option<&'a AntigravityLoginState>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

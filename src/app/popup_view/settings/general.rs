@@ -151,6 +151,7 @@ fn reset_time_section(current_format: ResetTimeFormat) -> Element<'static, Messa
         reset_at: Some(now + chrono::Duration::hours(4)),
         window_seconds: None,
         reset_description: None,
+        group: None,
     };
 
     let buttons = options.iter().fold(

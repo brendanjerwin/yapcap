@@ -2,14 +2,15 @@ mod login_controls;
 mod rows;
 
 use self::login_controls::{
-    claude_login_controls, codex_login_controls, copilot_login_controls, cursor_scan_controls,
-    gemini_login_controls, minimax_login_controls,
+    antigravity_login_controls, claude_login_controls, codex_login_controls,
+    copilot_login_controls, cursor_scan_controls, gemini_login_controls, minimax_login_controls,
 };
 use self::rows::{account_selector_list, account_settings_row, show_all_accounts_row};
 use super::super::{
     AppState, Config, Element, Length, Message, ProviderId, ProviderLoginStates, fl,
     settings_block, settings_block_enabled, widget,
 };
+use crate::providers::antigravity::AntigravityLoginState;
 use crate::providers::claude::ClaudeLoginState;
 use crate::providers::codex::CodexLoginState;
 use crate::providers::copilot::CopilotLoginState;
@@ -41,6 +42,9 @@ pub(super) fn provider_settings_view<'a>(
         ProviderId::Gemini => gemini_accounts_section(state, config, logins.gemini, enabled),
         ProviderId::Copilot => copilot_accounts_section(state, config, logins.copilot, enabled),
         ProviderId::Minimax => minimax_accounts_section(state, config, logins.minimax, enabled),
+        ProviderId::Antigravity => {
+            antigravity_accounts_section(state, config, logins.antigravity, enabled)
+        }
     };
 
     Element::from(
@@ -234,6 +238,68 @@ fn gemini_accounts_section<'a>(
 
     settings_block_enabled(
         widget::text(fl!("gemini-accounts-title")).size(16).into(),
+        rows,
+        enabled,
+    )
+}
+
+fn antigravity_accounts_section<'a>(
+    state: &'a AppState,
+    config: &'a Config,
+    antigravity_login: Option<&'a AntigravityLoginState>,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let selected_ids: Vec<&str> = state
+        .provider(ProviderId::Antigravity)
+        .map(|provider| {
+            provider
+                .selected_account_ids
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let accounts = state.accounts_for(ProviderId::Antigravity);
+    let active_id = state
+        .provider(ProviderId::Antigravity)
+        .and_then(|provider| provider.system_active_account_id.as_deref());
+    let mut rows = cosmic::iced::widget::column![]
+        .spacing(8)
+        .width(Length::Fill);
+
+    if accounts.is_empty() {
+        rows = rows.push(widget::text(fl!("antigravity-accounts-empty")).size(13));
+    } else {
+        let mut account_rows = cosmic::iced::widget::column![]
+            .spacing(6)
+            .width(Length::Fill);
+        for account in &accounts {
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Antigravity,
+                account,
+                &selected_ids,
+                active_id,
+                config,
+                enabled,
+            ));
+        }
+        rows = rows.push(account_selector_list(account_rows));
+    }
+
+    if accounts.len() > 1 {
+        rows = rows.push(show_all_accounts_row(
+            ProviderId::Antigravity,
+            config.show_all_accounts(ProviderId::Antigravity),
+            enabled,
+        ));
+    }
+
+    rows = rows.push(antigravity_login_controls(antigravity_login, enabled));
+
+    settings_block_enabled(
+        widget::text(fl!("antigravity-accounts-title"))
+            .size(16)
+            .into(),
         rows,
         enabled,
     )

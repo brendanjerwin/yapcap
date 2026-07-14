@@ -1,7 +1,7 @@
 use super::super::super::{
-    Alignment, ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus,
-    CopilotLoginState, CopilotLoginStatus, CursorScanState, Element, GeminiLoginState,
-    GeminiLoginStatus, Length, Message, fl, row, widget,
+    Alignment, AntigravityLoginState, AntigravityLoginStatus, ClaudeLoginState, ClaudeLoginStatus,
+    CodexLoginState, CodexLoginStatus, CopilotLoginState, CopilotLoginStatus, CursorScanState,
+    Element, GeminiLoginState, GeminiLoginStatus, Length, Message, fl, row, widget,
 };
 use crate::app::login::{LoginFlow, MinimaxLoginFlow};
 use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
@@ -268,6 +268,64 @@ fn gemini_login_status(login: &GeminiLoginState) -> String {
             .error
             .clone()
             .unwrap_or_else(|| fl!("gemini-login-failed")),
+    }
+}
+
+pub(super) fn antigravity_login_controls(
+    login: Option<&AntigravityLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Antigravity)),
+            )
+            .into();
+    };
+
+    let mut content =
+        cosmic::iced::widget::column![widget::text(antigravity_login_status(login)).size(13)]
+            .spacing(10)
+            .width(Length::Fill);
+
+    if login.status == AntigravityLoginStatus::Running
+        && let Some(url) = &login.login_url
+    {
+        content = content.push(
+            widget::button::standard(fl!("open-browser"))
+                .on_press_maybe(enabled.then_some(Message::OpenUrl(url.clone()))),
+        );
+    }
+
+    if login.status == AntigravityLoginStatus::Running {
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Antigravity)),
+        ));
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Antigravity))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Antigravity))
+                ),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn antigravity_login_status(login: &AntigravityLoginState) -> String {
+    match login.status {
+        AntigravityLoginStatus::Running => fl!("antigravity-login-running"),
+        AntigravityLoginStatus::Succeeded => fl!("antigravity-login-succeeded"),
+        AntigravityLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("antigravity-login-failed")),
     }
 }
 

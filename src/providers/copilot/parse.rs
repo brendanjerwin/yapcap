@@ -159,6 +159,7 @@ fn quota_window(
             .overage_count
             .filter(|count| *count > 0)
             .map(overage_description),
+        group: None,
     }
 }
 

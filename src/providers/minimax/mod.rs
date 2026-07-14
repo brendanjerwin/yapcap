@@ -174,6 +174,7 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
                 reset_at: None,
                 window_seconds: Some(5 * 3600),
                 reset_description: Some("Resets every 5 hours".to_string()),
+                group: None,
             });
         }
 
@@ -198,6 +199,7 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
                 reset_at: None,
                 window_seconds: Some(7 * 24 * 3600),
                 reset_description: Some("Resets weekly".to_string()),
+                group: None,
             });
         }
     }

@@ -2,12 +2,13 @@ mod flows;
 mod legacy;
 
 pub(crate) use flows::{
-    ClaudeLoginFlow, CodexLoginFlow, CopilotLoginFlow, GeminiLoginFlow, MinimaxLoginFlow,
+    AntigravityLoginFlow, ClaudeLoginFlow, CodexLoginFlow, CopilotLoginFlow, GeminiLoginFlow,
+    MinimaxLoginFlow,
 };
 
 use super::{
-    AppModel, ClaudeLoginEvent, CodexLoginEvent, Config, CopilotLoginEvent, GeminiLoginEvent,
-    Handle, Message, MinimaxLoginEvent, ProviderId, Task, runtime,
+    AntigravityLoginEvent, AppModel, ClaudeLoginEvent, CodexLoginEvent, Config, CopilotLoginEvent,
+    GeminiLoginEvent, Handle, Message, MinimaxLoginEvent, ProviderId, Task, runtime,
 };
 use crate::shared_state::RefreshRequestReason;
 
@@ -208,6 +209,7 @@ pub(crate) enum LoginEventKind {
     Gemini(GeminiLoginEvent),
     Copilot(CopilotLoginEvent),
     Minimax(MinimaxLoginEvent),
+    Antigravity(AntigravityLoginEvent),
 }
 
 #[cfg(test)]

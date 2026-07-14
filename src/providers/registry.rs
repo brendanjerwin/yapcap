@@ -6,7 +6,7 @@ use crate::providers::adapters::adapter;
 use crate::providers::interface::{
     ProviderAccountDescriptor, ProviderAccountHandle, ProviderCapabilities,
 };
-use crate::providers::{claude, codex, copilot, cursor, gemini, minimax};
+use crate::providers::{antigravity, claude, codex, copilot, cursor, gemini, minimax};
 
 #[cfg(test)]
 mod tests;
@@ -22,12 +22,14 @@ pub fn startup_sync(config: &mut Config) -> bool {
     let gemini_changed = gemini::sync_managed_accounts(config);
     let copilot_changed = copilot::sync_managed_accounts(config);
     let minimax_changed = minimax::sync_managed_accounts(config);
+    let antigravity_changed = antigravity::sync_managed_accounts(config);
     codex_changed
         | cursor_changed
         | claude_changed
         | gemini_changed
         | copilot_changed
         | minimax_changed
+        | antigravity_changed
 }
 
 pub fn initialize_provider_visibility(config: &mut Config, providers: &[ProviderId]) -> bool {
@@ -94,6 +96,7 @@ pub async fn fetch_handle(
         ProviderAccountHandle::Gemini(_) => ProviderId::Gemini,
         ProviderAccountHandle::Copilot(_) => ProviderId::Copilot,
         ProviderAccountHandle::Minimax(_) => ProviderId::Minimax,
+        ProviderAccountHandle::Antigravity(_) => ProviderId::Antigravity,
     };
     adapter(provider).fetch_account(handle, client).await
 }

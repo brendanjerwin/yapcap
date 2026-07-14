@@ -105,6 +105,7 @@ impl FamilyUsageWindow {
             reset_at: self.reset_at,
             window_seconds: self.reset_at.map(|_| GEMINI_WINDOW_SECONDS),
             reset_description: None,
+            group: None,
         }
     }
 }

@@ -1,8 +1,9 @@
 use super::{
-    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_SECTION_HEIGHT,
-    PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT, PopupRoute, SettingsRoute,
-    account_label_text, apply_alpha, badge_destructive, badge_neutral, badge_success,
-    badge_warning, badge_with_tooltip, card, info_block, plan_badge, provider_summary,
+    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_GROUP_HEADER_HEIGHT,
+    PROVIDER_SECTION_HEIGHT, PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT,
+    PopupRoute, SettingsRoute, account_label_text, apply_alpha, badge_destructive, badge_neutral,
+    badge_success, badge_warning, badge_with_tooltip, card, info_block, plan_badge,
+    provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
 use crate::currency_format;
@@ -105,7 +106,14 @@ fn account_column_body_items<'a>(
         if account.is_some_and(|account| account.health == ProviderHealth::Error) {
             items.extend(provider_status_info(provider, state, account));
         }
+        let mut previous_group: Option<&str> = None;
         for window in &snapshot.windows {
+            if let Some(group) = window.group.as_deref()
+                && previous_group != Some(group)
+            {
+                items.push(group_header(group));
+            }
+            previous_group = window.group.as_deref();
             items.push(usage_section(
                 window,
                 window_display_label(snapshot.provider, &window.label),
@@ -338,6 +346,13 @@ fn provider_body_height_for_account(
         let window_count = f32::from(u16::try_from(snapshot.windows.len()).unwrap_or(u16::MAX));
         height += window_count * PROVIDER_SECTION_HEIGHT;
         cards += snapshot.windows.len();
+
+        let group_headers = group_header_count(&snapshot.windows);
+        if group_headers > 0 {
+            height += f32::from(u16::try_from(group_headers).unwrap_or(u16::MAX))
+                * (PROVIDER_GROUP_HEADER_HEIGHT + PROVIDER_CARD_SPACING);
+            cards += group_headers;
+        }
         match snapshot.provider {
             ProviderId::Claude => {
                 if snapshot.extra_usage.is_some() || snapshot.provider_cost.as_ref().is_some() {
@@ -398,6 +413,27 @@ fn usage_section(
     )
 }
 
+fn group_header_count(windows: &[UsageWindow]) -> usize {
+    let mut count = 0;
+    let mut previous: Option<&str> = None;
+    for window in windows {
+        if let Some(group) = window.group.as_deref()
+            && previous != Some(group)
+        {
+            count += 1;
+        }
+        previous = window.group.as_deref();
+    }
+    count
+}
+
+fn group_header(group: &str) -> Element<'static, Message> {
+    container(widget::text(group.to_string()).size(15))
+        .width(Length::Fill)
+        .padding([4, 4])
+        .into()
+}
+
 fn window_display_label(provider: ProviderId, label: &str) -> String {
     if provider == ProviderId::Copilot {
         match label {
@@ -456,6 +492,7 @@ fn extra_usage_cost_bar(
         reset_at: None,
         window_seconds: None,
         reset_description: None,
+        group: None,
     };
     let (cost_line, cost_tip) = currency_format::format_provider_cost(cost);
     usage_block(
@@ -726,6 +763,45 @@ fn format_updated_label(last_success_at: chrono::DateTime<chrono::Utc>) -> Strin
 mod tests {
     use super::*;
     use crate::model::{AccountSelectionStatus, AuthState, ProviderHealth};
+
+    fn grouped_window(group: &str) -> UsageWindow {
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 10.0,
+            reset_at: None,
+            window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some(group.to_string()),
+        }
+    }
+
+    fn ungrouped_window() -> UsageWindow {
+        UsageWindow {
+            label: "Session".to_string(),
+            used_percent: 10.0,
+            reset_at: None,
+            window_seconds: None,
+            reset_description: None,
+            group: None,
+        }
+    }
+
+    #[test]
+    fn group_header_count_counts_only_group_boundaries() {
+        let windows = vec![
+            grouped_window("Gemini Models"),
+            grouped_window("Gemini Models"),
+            grouped_window("Claude and GPT models"),
+            grouped_window("Claude and GPT models"),
+        ];
+        assert_eq!(group_header_count(&windows), 2);
+    }
+
+    #[test]
+    fn group_header_count_is_zero_for_ungrouped_providers() {
+        let windows = vec![ungrouped_window(), ungrouped_window()];
+        assert_eq!(group_header_count(&windows), 0);
+    }
 
     #[test]
     fn action_required_account_reports_reauth_message() {
