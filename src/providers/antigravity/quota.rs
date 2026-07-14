@@ -1,0 +1,185 @@
+// SPDX-License-Identifier: MPL-2.0
+
+use crate::error::AntigravityError;
+use crate::model::UsageWindow;
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
+use serde_json::json;
+
+pub const WEEKLY_WINDOW_SECONDS: i64 = 7 * 24 * 3600;
+pub const FIVE_HOUR_WINDOW_SECONDS: i64 = 5 * 3600;
+
+#[derive(Debug, Deserialize)]
+pub struct QuotaSummaryResponse {
+    #[serde(default)]
+    pub groups: Vec<RawGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RawGroup {
+    #[serde(default, rename = "displayName")]
+    pub display_name: String,
+    #[serde(default)]
+    pub buckets: Vec<RawBucket>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RawBucket {
+    #[serde(default, rename = "displayName")]
+    pub display_name: String,
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default, rename = "remainingFraction")]
+    pub remaining_fraction: f64,
+    #[serde(default, rename = "resetTime")]
+    pub reset_time: Option<DateTime<Utc>>,
+}
+
+fn window_rank(window: Option<&str>) -> u8 {
+    match window {
+        Some("weekly") => 0,
+        Some("5h") => 1,
+        _ => 2,
+    }
+}
+
+fn window_seconds(window: Option<&str>) -> Option<i64> {
+    match window {
+        Some("weekly") => Some(WEEKLY_WINDOW_SECONDS),
+        Some("5h") => Some(FIVE_HOUR_WINDOW_SECONDS),
+        _ => None,
+    }
+}
+
+#[must_use]
+pub fn normalize_quota_summary(response: &QuotaSummaryResponse) -> Vec<UsageWindow> {
+    let mut windows = Vec::new();
+    for group in &response.groups {
+        let mut buckets: Vec<&RawBucket> = group.buckets.iter().collect();
+        buckets.sort_by_key(|bucket| window_rank(bucket.window.as_deref()));
+        for bucket in buckets {
+            let used_percent = ((1.0 - bucket.remaining_fraction) * 100.0).clamp(0.0, 100.0) as f32;
+            windows.push(UsageWindow {
+                label: bucket.display_name.clone(),
+                used_percent,
+                reset_at: bucket.reset_time,
+                window_seconds: window_seconds(bucket.window.as_deref()),
+                reset_description: None,
+                group: Some(group.display_name.clone()),
+            });
+        }
+    }
+    windows
+}
+
+pub async fn retrieve_user_quota_summary_typed(
+    client: &reqwest::Client,
+    endpoint: &str,
+    access_token: &str,
+) -> Result<QuotaSummaryResponse, AntigravityError> {
+    let response = client
+        .post(endpoint)
+        .bearer_auth(access_token)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json")
+        .header("User-Agent", "antigravity")
+        .json(&json!({}))
+        .send()
+        .await
+        .map_err(AntigravityError::QuotaRequest)?;
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(AntigravityError::Unauthorized);
+    }
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        let retry_after_secs = response
+            .headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        return Err(AntigravityError::RateLimited { retry_after_secs });
+    }
+    if !status.is_success() {
+        return Err(AntigravityError::QuotaHttp {
+            status: status.as_u16(),
+        });
+    }
+    let body = response
+        .text()
+        .await
+        .map_err(|error| AntigravityError::QuotaParse(error.to_string()))?;
+    parse_quota_summary(&body)
+}
+
+pub fn parse_quota_summary(raw: &str) -> Result<QuotaSummaryResponse, AntigravityError> {
+    serde_json::from_str(raw).map_err(|error| AntigravityError::QuotaParse(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load_fixture() -> QuotaSummaryResponse {
+        let raw = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fixtures/antigravity/retrieve_user_quota_response.json"
+        ))
+        .expect("fixture exists");
+        let outer: serde_json::Value = serde_json::from_str(&raw).expect("valid json");
+        serde_json::from_value(outer["body_json"].clone()).expect("body_json parses")
+    }
+
+    #[test]
+    fn normalizes_fixture_into_four_grouped_windows() {
+        let response = load_fixture();
+        let windows = normalize_quota_summary(&response);
+        assert_eq!(windows.len(), 4);
+
+        assert_eq!(windows[0].group.as_deref(), Some("Gemini Models"));
+        assert_eq!(windows[0].label, "Weekly Limit");
+        assert_eq!(windows[0].window_seconds, Some(WEEKLY_WINDOW_SECONDS));
+        assert!((windows[0].used_percent - (100.0 - 99.77627)).abs() < 0.01);
+        assert!(windows[0].reset_at.is_some());
+
+        assert_eq!(windows[1].group.as_deref(), Some("Gemini Models"));
+        assert_eq!(windows[1].label, "Five Hour Limit");
+        assert_eq!(windows[1].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
+
+        assert_eq!(windows[2].group.as_deref(), Some("Claude and GPT models"));
+        assert_eq!(windows[2].label, "Weekly Limit");
+        assert!((windows[2].used_percent - 0.0).abs() < 0.01);
+
+        assert_eq!(windows[3].group.as_deref(), Some("Claude and GPT models"));
+        assert_eq!(windows[3].label, "Five Hour Limit");
+        assert_eq!(windows[3].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
+    }
+
+    #[test]
+    fn weekly_ordered_before_five_hour_regardless_of_input_order() {
+        let raw = r#"{"groups":[{"displayName":"G","buckets":[
+            {"displayName":"Five Hour Limit","window":"5h","remainingFraction":0.5,"resetTime":"2026-07-14T15:00:00Z"},
+            {"displayName":"Weekly Limit","window":"weekly","remainingFraction":0.9,"resetTime":"2026-07-21T15:00:00Z"}
+        ]}]}"#;
+        let response = parse_quota_summary(raw).unwrap();
+        let windows = normalize_quota_summary(&response);
+        assert_eq!(windows[0].label, "Weekly Limit");
+        assert_eq!(windows[1].label, "Five Hour Limit");
+    }
+
+    #[test]
+    fn unknown_window_leaves_window_seconds_none() {
+        let raw = r#"{"groups":[{"displayName":"G","buckets":[
+            {"displayName":"Odd","window":"monthly","remainingFraction":0.5}
+        ]}]}"#;
+        let response = parse_quota_summary(raw).unwrap();
+        let windows = normalize_quota_summary(&response);
+        assert_eq!(windows[0].window_seconds, None);
+        assert_eq!(windows[0].reset_at, None);
+    }
+
+    #[test]
+    fn empty_groups_yield_no_windows() {
+        let response = parse_quota_summary(r#"{"groups":[]}"#).unwrap();
+        assert!(normalize_quota_summary(&response).is_empty());
+    }
+}
