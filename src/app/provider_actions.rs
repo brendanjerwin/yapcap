@@ -150,6 +150,16 @@ impl AppModel {
 
     fn measured_popup_size_for_route(&self, route: &PopupRoute) -> Option<Size> {
         match route {
+            PopupRoute::ProviderDetail if popup_view::popup_empty_state_active(&self.state) => self
+                .popup_body_measurements
+                .empty_state_height()
+                .map(|height| {
+                    popup_view::popup_session_size_with_body_height(
+                        &self.state,
+                        self.selected_provider,
+                        height,
+                    )
+                }),
             PopupRoute::ProviderDetail => self
                 .popup_body_measurements
                 .provider_height(&self.state)

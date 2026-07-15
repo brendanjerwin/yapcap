@@ -1,0 +1,33 @@
+# Ralph Progress
+
+Feature: provider-discovery
+Started: 2026-07-15T14:53:37+02:00
+
+
+## 2026-07-15T15:05:00+02:00 - 007-detection-module.md
+
+- Implemented: src/detection.rs — pure path-existence detection module encoding the PRD marker table (Gemini = settings.json file only, kind-checked dir/file markers), with detect(home) -> DetectionSnapshot and a nothing-detected Default. Declared dark in main.rs via #[cfg_attr(not(test), allow(dead_code))].
+- Files changed: src/detection.rs (new), src/main.rs (mod declaration), issues/provider-discovery/issues/007-detection-module.md (status done + note)
+- Checks run: cargo fmt, cargo test (501 passed), just check (clippy -D warnings, clean)
+- Learnings: &[dir("...")] match arms of const-fn-built arrays hit E0515 (no static promotion); explicit per-provider `const` arrays fix it. Repo precedent for dark modules is cfg_attr(not(test), allow(dead_code)) as in providers/copilot/storage.rs.
+
+## 2026-07-15T18:40:00+02:00 - 008-detection-at-startup.md
+
+- Implemented: detection::startup_snapshot(Option<PathBuf>) with default fallback when home is unresolvable; AppModel::init computes and stores a dark `detection` field (demo mode uses new demo_env::detection_snapshot(), default nothing detected) and logs detected_providers once via tracing::info!. Removed the now-stale dead_code cfg_attr on `mod detection`.
+- Files changed: src/detection.rs, src/demo_env.rs, src/app/mod.rs, src/app/tests.rs, src/app/login/login_flow_tests/support.rs, src/main.rs, issues/provider-discovery/issues/008-detection-at-startup.md
+- Checks run: cargo fmt, cargo test (506 passed), just check (clippy -D warnings, clean)
+- Learnings: Previous attempt died on a session limit after writing red tests; resumed from that diff. AppModel is constructed in two test supports (app/tests.rs test_app and app/login/login_flow_tests/support.rs) — new fields must be added to both. Dark AppModel fields follow the cfg_attr(not(test), allow(dead_code)) precedent with a test reading the field.
+
+## 2026-07-15T19:02:00+02:00 - 009-panel-app-icon-fallback.md
+
+- Implemented: Panel app-icon fallback — when no enabled provider has any account, the applet renders the plain YapCap icon alone, overriding panel_icon_style. New in src/app/applet.rs: panel_fallback_active (keyed on provider_accounts + provider.enabled), applet_fallback_indicator (provider_assets::app_icon_handle → resources/icon.svg), applet_fallback_button_size (icon square + paddings, shared applet_paddings helper), panel_button_size (dispatches fallback vs normal sizing). Wired into AppModel::init suggested bounds, view(), sync_panel_suggested_bounds, and applet_settings (config-based approximation: no enabled provider with selected account ids). applet_button now takes an explicit (width, height) instead of recomputing.
+- Files changed: src/app/applet.rs, src/app/provider_assets.rs, src/app/mod.rs, src/app/provider_actions.rs, src/app/tests.rs, docs/spec.md, issues/provider-discovery/issues/009-panel-app-icon-fallback.md
+- Checks run: cargo fmt, cargo test (511 passed), just check (clippy -D warnings, clean)
+- Learnings: The issue's status was already "started" but the worktree was clean and no prior attempt log existed, so this was a fresh start. Applet sizing has three call sites that must agree (applet_settings pre-state, init, sync_panel_suggested_bounds); routing them through one panel_button_size helper keeps fallback and normal sizing consistent. applet_settings runs before runtime state loads, so the fallback condition there can only approximate via config selected_account_ids.
+
+## 2026-07-15T19:21:02+02:00 - 010-popup-empty-state.md
+
+- Implemented: Centered provider/app-logo empty-state hero with updated copy and suggested Settings navigation; hidden Refresh now and provider navigation when no provider tabs are enabled; measured and resized the popup for the hero through the existing measurement path.
+- Files changed: src/app/popup_view.rs, src/app/popup_view/detail.rs, src/app/mod.rs, src/app/provider_actions.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/provider-discovery/issues/010-popup-empty-state.md, issues/provider-discovery/progress.txt
+- Checks run: cargo fmt, cargo test (512 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
+- Learnings: The measured body needs its own target and cached height because the provider-height aggregation intentionally has no value with zero enabled providers.

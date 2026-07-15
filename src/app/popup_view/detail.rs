@@ -1,9 +1,10 @@
+use super::super::provider_assets::app_icon_handle;
 use super::{
     Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_GROUP_HEADER_HEIGHT,
     PROVIDER_SECTION_HEIGHT, PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT,
     PopupRoute, SettingsRoute, account_label_text, apply_alpha, badge_destructive, badge_neutral,
     badge_success, badge_warning, badge_with_tooltip, card, info_block, plan_badge,
-    provider_summary,
+    provider_icon_handle, provider_icon_variant, provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
 use crate::currency_format;
@@ -25,7 +26,7 @@ pub(super) fn selected_provider_view<'a>(
     config: &'a Config,
 ) -> Element<'a, Message> {
     let Some(provider) = provider else {
-        return no_providers_view();
+        return empty_state_view();
     };
     let accounts = state.display_selected_accounts(provider.provider);
     let summary = provider_summary(provider);
@@ -226,18 +227,41 @@ fn account_column_view<'a>(
         .into()
 }
 
-fn no_providers_view<'a>() -> Element<'a, Message> {
-    card(
-        column![
-            widget::text(fl!("no-providers")).size(16),
-            widget::text(fl!("no-providers-detail")).size(13),
-            widget::button::standard(fl!("no-providers-open-settings")).on_press(
-                Message::NavigateTo(PopupRoute::Settings(SettingsRoute::General))
-            ),
-        ]
-        .spacing(10)
-        .width(Length::Fill),
-    )
+pub(super) fn empty_state_view<'a>() -> Element<'a, Message> {
+    let logos = row![
+        widget::icon::icon(provider_icon_handle(
+            ProviderId::Claude,
+            provider_icon_variant()
+        ))
+        .size(22),
+        widget::icon::icon(app_icon_handle()).size(48),
+        widget::icon::icon(provider_icon_handle(
+            ProviderId::Gemini,
+            provider_icon_variant()
+        ))
+        .size(22),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+    let content = column![
+        logos,
+        widget::text(fl!("no-providers")).size(22),
+        widget::text(fl!("no-providers-detail")).size(13),
+        widget::button::suggested(fl!("no-providers-open-settings")).on_press(Message::NavigateTo(
+            PopupRoute::Settings(SettingsRoute::General)
+        )),
+    ]
+    .spacing(12)
+    .align_x(Alignment::Center)
+    .width(Length::Fill);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding(24)
+        .into()
 }
 
 fn provider_status_info(

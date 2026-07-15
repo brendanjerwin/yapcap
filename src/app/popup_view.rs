@@ -10,7 +10,9 @@ use self::badges::{
     badge_neutral_soft, badge_success, badge_success_soft, badge_warning, badge_warning_soft,
     badge_with_tooltip, plan_badge,
 };
-use self::detail::{active_snapshot, provider_body_height_multi, selected_provider_view};
+use self::detail::{
+    active_snapshot, empty_state_view, provider_body_height_multi, selected_provider_view,
+};
 use self::measure::Measure;
 use self::settings::{general_settings_view, provider_settings_view, settings_body_height};
 use super::provider_assets::{provider_icon_handle, provider_icon_variant};
@@ -41,6 +43,7 @@ const POPUP_WIDTH: f32 = POPUP_COLUMN_WIDTH;
 const POPUP_MAX_HEIGHT: f32 = 1080.0;
 const POPUP_PADDING: f32 = 32.0;
 const POPUP_CHROME_SPACING: f32 = 42.0;
+const POPUP_EMPTY_CHROME_SPACING: f32 = 28.0;
 const POPUP_HEADER_HEIGHT: f32 = 36.0;
 const POPUP_TAB_HEIGHT: f32 = 68.0;
 const PROVIDER_TABS_PER_ROW: usize = 4;
@@ -48,6 +51,7 @@ const PROVIDER_TAB_ROW_SPACING: f32 = 8.0;
 const POPUP_FOOTER_HEIGHT: f32 = 28.0;
 const POPUP_BODY_PANEL_PADDING: f32 = 24.0;
 const POPUP_BODY_BOTTOM_SLACK: f32 = 8.0;
+const EMPTY_STATE_BODY_HEIGHT: f32 = 194.0;
 const PROVIDER_CARD_SPACING: f32 = 8.0;
 const PROVIDER_SUMMARY_HEIGHT: f32 = 58.0;
 const PROVIDER_ACCOUNT_HEADER_HEIGHT: f32 = 96.0;
@@ -76,6 +80,7 @@ pub struct ProviderLoginStates<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PopupBodyMeasureTarget {
     Provider(ProviderId),
+    EmptyState,
     Settings(SettingsRoute),
 }
 
@@ -88,17 +93,27 @@ pub fn popup_content<'a>(
     update_status: &'a UpdateStatus,
 ) -> Element<'a, Message> {
     let selected = selected_state(state, selected_provider);
+    let empty_state = popup_empty_state_active(state);
 
-    let header = popup_header(route);
+    let header = popup_header(route, empty_state);
 
-    let nav_row: Element<'_, Message> = match route {
-        PopupRoute::ProviderDetail => provider_tab_rows(state, selected_provider),
+    let nav_row: Option<Element<'_, Message>> = match route {
+        PopupRoute::ProviderDetail if empty_state => None,
+        PopupRoute::ProviderDetail => Some(provider_tab_rows(state, selected_provider)),
         PopupRoute::Settings(settings_route) => {
-            settings_category_row(settings_route, update_status)
+            Some(settings_category_row(settings_route, update_status))
         }
     };
 
-    let body = popup_body_view(state, config, logins, selected, route, update_status);
+    let body = popup_body_view(
+        state,
+        config,
+        logins,
+        selected,
+        route,
+        update_status,
+        empty_state,
+    );
 
     let footer_action: Element<'_, Message> = match route {
         PopupRoute::ProviderDetail => settings_footer_action(update_status),
@@ -121,16 +136,17 @@ pub fn popup_content<'a>(
 
     let body_stack = popup_body_stack(state, config, logins, update_status, body_panel);
 
-    let content = column![
-        narrow_chrome(header),
-        narrow_chrome(nav_row),
-        body_stack,
-        narrow_chrome(footer),
-    ]
-    .spacing(14)
-    .padding(16)
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let mut content = column![narrow_chrome(header)];
+    if let Some(nav_row) = nav_row {
+        content = content.push(narrow_chrome(nav_row));
+    }
+    let content = content
+        .push(body_stack)
+        .push(narrow_chrome(footer))
+        .spacing(14)
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     Element::from(content)
 }
@@ -142,8 +158,10 @@ fn popup_body_view<'a>(
     selected: Option<&'a ProviderRuntimeState>,
     route: &'a PopupRoute,
     update_status: &'a UpdateStatus,
+    empty_state: bool,
 ) -> Element<'a, Message> {
     match route {
+        PopupRoute::ProviderDetail if empty_state => empty_state_view(),
         PopupRoute::ProviderDetail => selected_provider_view(selected, state, config),
         PopupRoute::Settings(SettingsRoute::General) => {
             general_settings_view(config, update_status)
@@ -165,6 +183,12 @@ fn popup_body_stack<'a>(
         .push(body_panel)
         .width(Length::Fill)
         .height(Length::Fill);
+
+    if popup_empty_state_active(state) {
+        stack = stack.push(Measure::new(empty_state_view(), POPUP_WIDTH, |size| {
+            Message::PopupBodyMeasured(PopupBodyMeasureTarget::EmptyState, size)
+        }));
+    }
 
     for provider in state.providers.iter().filter(|provider| provider.enabled) {
         let provider_id = provider.provider;
@@ -205,6 +229,9 @@ pub fn popup_max_width(state: &AppState) -> f32 {
 }
 
 pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Size {
+    if popup_empty_state_active(state) {
+        return popup_empty_state_size(EMPTY_STATE_BODY_HEIGHT);
+    }
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
     let provider_height = state
@@ -224,6 +251,9 @@ pub fn popup_session_size_with_body_height(
     selected_provider: ProviderId,
     body_height: f32,
 ) -> Size {
+    if popup_empty_state_active(state) {
+        return popup_empty_state_size(body_height);
+    }
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
     Size::new(
@@ -258,6 +288,21 @@ fn popup_total_height(nav_height: f32, body_height: f32) -> f32 {
     height.clamp(1.0, POPUP_MAX_HEIGHT)
 }
 
+fn popup_empty_state_size(body_height: f32) -> Size {
+    let height = POPUP_PADDING
+        + POPUP_EMPTY_CHROME_SPACING
+        + POPUP_HEADER_HEIGHT
+        + POPUP_FOOTER_HEIGHT
+        + POPUP_BODY_PANEL_PADDING
+        + POPUP_BODY_BOTTOM_SLACK
+        + body_height;
+    Size::new(POPUP_WIDTH, height.clamp(1.0, POPUP_MAX_HEIGHT))
+}
+
+pub(super) fn popup_empty_state_active(state: &AppState) -> bool {
+    state.providers.iter().all(|provider| !provider.enabled)
+}
+
 fn selected_account_count(state: &AppState, provider: ProviderId) -> f32 {
     let n = state.display_selected_account_count(provider);
     f32::from(u8::try_from(n).unwrap_or(u8::MAX))
@@ -274,7 +319,7 @@ fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     Element::from(container(content).width(Length::Fill).padding(12))
 }
 
-fn popup_header(route: &PopupRoute) -> Element<'static, Message> {
+fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Message> {
     let mut header = row![
         widget::text(fl!("app-title")).size(22),
         cosmic::iced::widget::Space::new().width(Length::Fill),
@@ -282,7 +327,7 @@ fn popup_header(route: &PopupRoute) -> Element<'static, Message> {
     .align_y(Alignment::Center)
     .spacing(12);
 
-    if matches!(route, PopupRoute::ProviderDetail) {
+    if matches!(route, PopupRoute::ProviderDetail) && !empty_state {
         header =
             header.push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
     }
@@ -760,4 +805,27 @@ fn tab_percents(state: &AppState, provider: &ProviderRuntimeState) -> Vec<f32> {
                 .map_or(0.0, |w| usage_display::displayed_percent(w, now))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_state_is_active_without_enabled_provider_tabs() {
+        let mut state = AppState::empty();
+        for provider in ProviderId::ALL {
+            state.provider_mut(provider).unwrap().enabled = false;
+        }
+
+        assert!(popup_empty_state_active(&state));
+        assert_eq!(
+            popup_session_size(&state, ProviderId::Codex).width,
+            POPUP_WIDTH
+        );
+
+        state.provider_mut(ProviderId::Codex).unwrap().enabled = true;
+
+        assert!(!popup_empty_state_active(&state));
+    }
 }

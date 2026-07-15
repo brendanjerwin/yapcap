@@ -203,6 +203,7 @@ pub(super) struct PopupBodyMeasurements {
     copilot: Option<f32>,
     minimax: Option<f32>,
     antigravity: Option<f32>,
+    empty_state: Option<f32>,
     general_settings: Option<f32>,
     codex_settings: Option<f32>,
     claude_settings: Option<f32>,
@@ -278,6 +279,10 @@ impl PopupBodyMeasurements {
             })
             .try_fold(0.0_f32, |height, next| next.map(|next| height.max(next)))?;
         any_enabled.then_some(height)
+    }
+
+    fn empty_state_height(&self) -> Option<f32> {
+        self.empty_state
     }
 }
 
@@ -865,6 +870,11 @@ impl AppModel {
             PopupBodyMeasureTarget::Provider(provider) => {
                 let previous = self.popup_body_measurements.provider(provider);
                 self.popup_body_measurements.set_provider(provider, height);
+                previous
+            }
+            PopupBodyMeasureTarget::EmptyState => {
+                let previous = self.popup_body_measurements.empty_state;
+                self.popup_body_measurements.empty_state = Some(height);
                 previous
             }
             PopupBodyMeasureTarget::Settings(route) => {

@@ -128,8 +128,8 @@ update-open-release = Open release page
 update-check-again = Check again
 
 ## Provider detail view
-no-providers = No providers available
-no-providers-detail = Open Settings, enable a provider, and add an account to get started.
+no-providers = No providers set up yet
+no-providers-detail = Open Settings to connect a provider and start tracking usage.
 no-providers-open-settings = Open Settings
 open-provider-settings = Open { $provider } settings
 account-label = Account
