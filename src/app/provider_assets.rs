@@ -41,11 +41,8 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::Minimax, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/minimax-reversed.svg")
         }
-        (ProviderId::Antigravity, ProviderIconVariant::Default) => {
-            include_bytes!("../../resources/providers/antigravity.svg")
-        }
-        (ProviderId::Antigravity, ProviderIconVariant::Reversed) => {
-            include_bytes!("../../resources/providers/antigravity-reversed.svg")
+        (ProviderId::Antigravity, _) => {
+            include_bytes!("../../resources/providers/antigravity-color.svg")
         }
     };
 
