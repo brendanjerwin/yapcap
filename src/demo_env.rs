@@ -45,6 +45,10 @@ pub fn is_active() -> bool {
     std::env::var(DEMO_ENV).is_ok() && env_truthy()
 }
 
+pub fn detection_snapshot() -> crate::detection::DetectionSnapshot {
+    crate::detection::DetectionSnapshot::default()
+}
+
 pub fn apply_config(config: &mut Config) {
     if !is_active() {
         return;
@@ -1022,6 +1026,14 @@ mod tests {
         ] {
             assert!(!snapshot.windows.is_empty());
             assert!(snapshot.identity.email.is_some());
+        }
+    }
+
+    #[test]
+    fn demo_detection_snapshot_detects_nothing() {
+        let snapshot = detection_snapshot();
+        for provider in ProviderId::ALL {
+            assert!(!snapshot.detected(provider));
         }
     }
 

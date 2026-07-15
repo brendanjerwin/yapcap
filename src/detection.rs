@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::ProviderId;
 
@@ -69,6 +69,14 @@ impl DetectionSnapshot {
     pub fn detected(&self, provider: ProviderId) -> bool {
         self.detected[provider_index(provider)]
     }
+
+    #[must_use]
+    pub fn detected_providers(&self) -> Vec<ProviderId> {
+        ProviderId::ALL
+            .into_iter()
+            .filter(|provider| self.detected(*provider))
+            .collect()
+    }
 }
 
 fn provider_index(provider: ProviderId) -> usize {
@@ -87,6 +95,11 @@ pub fn detect(home: &Path) -> DetectionSnapshot {
             .any(|marker| marker.exists_in(home));
     }
     snapshot
+}
+
+#[must_use]
+pub fn startup_snapshot(home: Option<PathBuf>) -> DetectionSnapshot {
+    home.map_or_else(DetectionSnapshot::default, |home| detect(&home))
 }
 
 #[cfg(test)]
@@ -117,6 +130,32 @@ mod tests {
                 "unexpected detection state for {provider:?}"
             );
         }
+    }
+
+    #[test]
+    fn startup_snapshot_without_home_detects_nothing() {
+        let snapshot = startup_snapshot(None);
+        assert_eq!(snapshot, DetectionSnapshot::default());
+    }
+
+    #[test]
+    fn startup_snapshot_with_home_runs_detection() {
+        let home = home();
+        mkdir(home.path(), ".codex");
+        let snapshot = startup_snapshot(Some(home.path().to_path_buf()));
+        assert_only_detected(&snapshot, ProviderId::Codex);
+    }
+
+    #[test]
+    fn detected_providers_lists_only_detected() {
+        let home = home();
+        mkdir(home.path(), ".codex");
+        touch(home.path(), ".gemini/settings.json");
+        let snapshot = detect(home.path());
+        assert_eq!(
+            snapshot.detected_providers(),
+            vec![ProviderId::Codex, ProviderId::Gemini]
+        );
     }
 
     #[test]

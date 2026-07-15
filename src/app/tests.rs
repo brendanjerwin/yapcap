@@ -908,6 +908,7 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         popup: None,
         config: Config::default(),
         state: AppState::empty(),
+        detection: crate::detection::DetectionSnapshot::default(),
         selected_provider: ProviderId::Codex,
         popup_route: PopupRoute::ProviderDetail,
         update_status: UpdateStatus::Unchecked,
@@ -937,6 +938,14 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         minimax_login_handle: None,
         antigravity_login: None,
         antigravity_login_handle: None,
+    }
+}
+
+#[test]
+fn test_app_starts_with_nothing_detected() {
+    let app = test_app(None);
+    for provider in ProviderId::ALL {
+        assert!(!app.detection.detected(provider));
     }
 }
 

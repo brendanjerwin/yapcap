@@ -9,7 +9,6 @@ mod currency_format;
 #[cfg(debug_assertions)]
 mod debug_env;
 mod demo_env;
-#[cfg_attr(not(test), allow(dead_code))]
 mod detection;
 mod error;
 mod i18n;

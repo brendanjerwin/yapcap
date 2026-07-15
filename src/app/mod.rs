@@ -91,6 +91,8 @@ pub struct AppModel {
     popup: Option<Id>,
     config: Config,
     state: AppState,
+    #[cfg_attr(not(test), allow(dead_code))]
+    detection: crate::detection::DetectionSnapshot,
     selected_provider: ProviderId,
     popup_route: PopupRoute,
     update_status: UpdateStatus,
@@ -331,6 +333,15 @@ impl cosmic::Application for AppModel {
         #[cfg(debug_assertions)]
         crate::debug_env::apply(&mut state);
         demo_env::apply(&initial_config, &mut state);
+        let detection = if demo_env::is_active() {
+            demo_env::detection_snapshot()
+        } else {
+            crate::detection::startup_snapshot(crate::config::host_user_home_dir())
+        };
+        tracing::info!(
+            detected_providers = ?detection.detected_providers(),
+            "startup provider detection"
+        );
         let selected_provider = select_provider(initial_config.selected_provider, &state);
         let n_accounts_init = state.display_selected_account_count(selected_provider);
         let (applet_width, applet_height) =
@@ -341,6 +352,7 @@ impl cosmic::Application for AppModel {
             popup: None,
             config,
             state,
+            detection,
             selected_provider,
             popup_route: PopupRoute::ProviderDetail,
             update_status: UpdateStatus::Unchecked,

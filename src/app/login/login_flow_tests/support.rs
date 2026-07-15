@@ -15,6 +15,7 @@ pub(super) fn test_app() -> AppModel {
         popup: None,
         config: Config::default(),
         state: crate::model::AppState::empty(),
+        detection: crate::detection::DetectionSnapshot::default(),
         selected_provider: ProviderId::Codex,
         popup_route: crate::app::PopupRoute::ProviderDetail,
         update_status: crate::updates::UpdateStatus::Unchecked,
