@@ -173,6 +173,10 @@ sequenceDiagram
   use `Auto`, while the one-shot legacy migration preserves prior boolean
   settings as explicit enablement. The settings toggle writes only explicit
   `Enabled` or `Disabled` values.
+- Provider detection runs at startup and re-runs after debounced host-auth
+  watcher events for its marker paths. A changed detection snapshot reconciles
+  effective enablement without polling; stored accounts still keep a provider
+  enabled when its marker disappears.
 - `Message::Tick` polls automatic-refresh eligibility every 10 seconds. Provider
   data remains eligible only after `refresh_interval_seconds` has elapsed since
   its last successful refresh, so a due refresh can begin up to 10 seconds after

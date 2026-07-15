@@ -58,3 +58,10 @@ Started: 2026-07-15T14:53:37+02:00
 - Files changed: src/app/popup_view.rs, src/app/popup_view/detail.rs, src/app/popup_view/settings.rs, src/app/popup_view/settings/accounts.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/provider-discovery/issues/014-settings-detected-hint.md, issues/provider-discovery/progress.txt
 - Checks run: cargo fmt, cargo test (520 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
 - Learnings: Rendering the settings navigation and settings body from one predicate prevents the tab dot and caption from drifting when account state changes.
+
+## 2026-07-15T19:49:40+02:00 - 015-live-redetection.md
+
+- Implemented: Extended the debounced host watcher for all provider marker paths, including `~/.config` and existing `~/.gemini`; host changes now refresh the detection snapshot and reconcile resolved provider state.
+- Files changed: src/app/host_auth_watch.rs, src/app/provider_actions.rs, docs/spec.md, issues/provider-discovery/issues/015-live-redetection.md, issues/provider-discovery/progress.txt
+- Checks run: cargo fmt, cargo test host_auth_watch, cargo check, cargo test (523 passed), just check (clippy -D warnings, clean), git diff --check
+- Learnings: Gemini needs both the direct auth-file watch and its directory watch when present, otherwise `settings.json` changes can be missed.

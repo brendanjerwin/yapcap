@@ -493,26 +493,20 @@ impl AppModel {
             owner_status = self.owner_status(),
             "host CLI auth change detected"
         );
+        let detection = crate::detection::startup_snapshot(crate::config::host_user_home_dir());
+        let detection_changed = detection != self.detection;
+        if detection_changed {
+            tracing::info!(
+                process_id = %self.process_info.id,
+                detected_providers = ?detection.detected_providers(),
+                "provider detection changed"
+            );
+            self.detection = detection;
+        }
+
         let previous_state = self.state.clone();
-        runtime::reconcile_provider(
-            &self.config,
-            &self.detection,
-            &mut self.state,
-            ProviderId::Codex,
-        );
-        runtime::reconcile_provider(
-            &self.config,
-            &self.detection,
-            &mut self.state,
-            ProviderId::Claude,
-        );
-        runtime::reconcile_provider(
-            &self.config,
-            &self.detection,
-            &mut self.state,
-            ProviderId::Gemini,
-        );
-        if self.state == previous_state {
+        runtime::reconcile_state(&self.config, &self.detection, &mut self.state);
+        if !detection_changed && self.state == previous_state {
             tracing::info!(
                 process_id = %self.process_info.id,
                 owner_status = self.owner_status(),
@@ -520,6 +514,7 @@ impl AppModel {
             );
             return;
         }
+        self.selected_provider = select_provider(self.config.selected_provider, &self.state);
         tracing::info!(
             process_id = %self.process_info.id,
             owner_status = self.owner_status(),
