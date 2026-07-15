@@ -667,6 +667,37 @@ fn popup_provider_tabs_share_tallest_provider_height() {
 }
 
 #[test]
+fn popup_grows_taller_when_provider_tabs_wrap_to_second_row() {
+    let mut state = state_with_provider_window_counts(&[(ProviderId::Codex, 1, false)]);
+    for provider in ProviderId::ALL {
+        state.provider_mut(provider).unwrap().enabled = false;
+    }
+    for provider in [
+        ProviderId::Codex,
+        ProviderId::Claude,
+        ProviderId::Cursor,
+        ProviderId::Gemini,
+    ] {
+        state.provider_mut(provider).unwrap().enabled = true;
+    }
+
+    let four_enabled = popup_session_size(&state, ProviderId::Codex);
+
+    state.provider_mut(ProviderId::Minimax).unwrap().enabled = true;
+    let five_enabled = popup_session_size(&state, ProviderId::Codex);
+
+    assert!(five_enabled.height > four_enabled.height);
+
+    for provider in [ProviderId::Claude, ProviderId::Cursor, ProviderId::Gemini] {
+        state.provider_mut(provider).unwrap().enabled = false;
+    }
+    state.provider_mut(ProviderId::Minimax).unwrap().enabled = false;
+    let one_enabled = popup_session_size(&state, ProviderId::Codex);
+
+    assert_eq!(one_enabled.height, four_enabled.height);
+}
+
+#[test]
 fn popup_provider_height_is_independent_from_settings_height() {
     let mut state = state_with_provider_window_counts(&[
         (ProviderId::Codex, 1, false),

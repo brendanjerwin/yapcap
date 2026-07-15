@@ -1468,8 +1468,8 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
 
 - Header: "YapCap" + "Refresh now" button.
 - Navigation row:
-  - provider detail: one tab per enabled provider with its icon and headline percent;
-  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and Minimax, using a theme-symbolic gear icon for General and provider icons for provider settings.
+  - provider detail: one tab per enabled provider with its icon and headline percent. Tabs wrap into additional rows after four per row; partial rows keep four equal-width slots so every tab has the same width, and the popup grows taller by one tab-row height per extra row;
+  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and Minimax, using a theme-symbolic gear icon for General and provider icons for provider settings. These tabs wrap the same way, with General occupying the first slot of the first row.
 - Providers render in a single fixed order (`ProviderId::ALL`) everywhere they are listed: Codex, Claude, Cursor, Gemini, Antigravity, Copilot, Minimax.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.

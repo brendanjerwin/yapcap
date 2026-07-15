@@ -43,6 +43,8 @@ const POPUP_PADDING: f32 = 32.0;
 const POPUP_CHROME_SPACING: f32 = 42.0;
 const POPUP_HEADER_HEIGHT: f32 = 36.0;
 const POPUP_TAB_HEIGHT: f32 = 68.0;
+const PROVIDER_TABS_PER_ROW: usize = 4;
+const PROVIDER_TAB_ROW_SPACING: f32 = 8.0;
 const POPUP_FOOTER_HEIGHT: f32 = 28.0;
 const POPUP_BODY_PANEL_PADDING: f32 = 24.0;
 const POPUP_BODY_BOTTOM_SLACK: f32 = 8.0;
@@ -90,24 +92,9 @@ pub fn popup_content<'a>(
     let header = popup_header(route);
 
     let nav_row: Element<'_, Message> = match route {
-        PopupRoute::ProviderDetail => state
-            .providers
-            .iter()
-            .filter(|provider| provider.enabled)
-            .fold(row![].spacing(8), |row, provider| {
-                row.push(provider_tab(
-                    state,
-                    provider,
-                    provider.provider == selected_provider,
-                ))
-            })
-            .into(),
+        PopupRoute::ProviderDetail => provider_tab_rows(state, selected_provider),
         PopupRoute::Settings(settings_route) => {
-            container(settings_category_row(settings_route, update_status))
-                .height(Length::Fixed(POPUP_TAB_HEIGHT))
-                .align_y(Alignment::Center)
-                .width(Length::Fill)
-                .into()
+            settings_category_row(settings_route, update_status)
         }
     };
 
@@ -226,16 +213,10 @@ pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Si
         .filter(|provider| provider.enabled)
         .map(|provider| provider_body_height_multi(state, Some(provider)))
         .fold(PROVIDER_SUMMARY_HEIGHT, f32::max);
-    let height = POPUP_PADDING
-        + POPUP_CHROME_SPACING
-        + POPUP_HEADER_HEIGHT
-        + POPUP_TAB_HEIGHT
-        + POPUP_FOOTER_HEIGHT
-        + POPUP_BODY_PANEL_PADDING
-        + POPUP_BODY_BOTTOM_SLACK
-        + provider_height;
-
-    Size::new(width, height.clamp(1.0, POPUP_MAX_HEIGHT))
+    Size::new(
+        width,
+        popup_total_height(provider_nav_height(state), provider_height),
+    )
 }
 
 pub fn popup_session_size_with_body_height(
@@ -245,30 +226,31 @@ pub fn popup_session_size_with_body_height(
 ) -> Size {
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
-    Size::new(width, popup_total_height(body_height))
+    Size::new(
+        width,
+        popup_total_height(provider_nav_height(state), body_height),
+    )
 }
 
 pub fn popup_settings_size(state: &AppState) -> Size {
-    let height = POPUP_PADDING
-        + POPUP_CHROME_SPACING
-        + POPUP_HEADER_HEIGHT
-        + POPUP_TAB_HEIGHT
-        + POPUP_FOOTER_HEIGHT
-        + POPUP_BODY_PANEL_PADDING
-        + POPUP_BODY_BOTTOM_SLACK
-        + settings_body_height(state);
-    Size::new(POPUP_WIDTH, height.clamp(1.0, POPUP_MAX_HEIGHT))
+    Size::new(
+        POPUP_WIDTH,
+        popup_total_height(settings_nav_height(), settings_body_height(state)),
+    )
 }
 
 pub fn popup_settings_size_with_body_height(body_height: f32) -> Size {
-    Size::new(POPUP_WIDTH, popup_total_height(body_height))
+    Size::new(
+        POPUP_WIDTH,
+        popup_total_height(settings_nav_height(), body_height),
+    )
 }
 
-fn popup_total_height(body_height: f32) -> f32 {
+fn popup_total_height(nav_height: f32, body_height: f32) -> f32 {
     let height = POPUP_PADDING
         + POPUP_CHROME_SPACING
         + POPUP_HEADER_HEIGHT
-        + POPUP_TAB_HEIGHT
+        + nav_height
         + POPUP_FOOTER_HEIGHT
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
@@ -366,29 +348,25 @@ fn settings_category_row(
     route: &SettingsRoute,
     update_status: &UpdateStatus,
 ) -> Element<'static, Message> {
-    let row = row![settings_category_tab(
+    let mut tabs = vec![settings_category_tab(
         fl!("settings-general-title"),
         settings_category_icon(&SettingsRoute::General),
         matches!(route, SettingsRoute::General),
         SettingsRoute::General,
         update_available(update_status),
-    )]
-    .spacing(8)
-    .width(Length::Fill);
-    let providers = ProviderId::ALL;
-    providers
-        .into_iter()
-        .fold(row, |row, provider| {
-            let target_route = SettingsRoute::Provider(provider);
-            row.push(settings_category_tab(
-                provider.label().to_string(),
-                settings_category_icon(&target_route),
-                matches!(route, SettingsRoute::Provider(id) if *id == provider),
-                target_route,
-                false,
-            ))
-        })
-        .into()
+    )];
+    for provider in ProviderId::ALL {
+        let target_route = SettingsRoute::Provider(provider);
+        tabs.push(settings_category_tab(
+            provider.label().to_string(),
+            settings_category_icon(&target_route),
+            matches!(route, SettingsRoute::Provider(id) if *id == provider),
+            target_route,
+            false,
+        ));
+    }
+
+    wrap_tab_rows(tabs)
 }
 
 fn settings_category_tab(
@@ -564,6 +542,55 @@ impl ButtonInteraction {
             pressed: true,
         }
     }
+}
+
+fn provider_tab_rows(state: &AppState, selected_provider: ProviderId) -> Element<'static, Message> {
+    let tabs = state
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled)
+        .map(|provider| provider_tab(state, provider, provider.provider == selected_provider))
+        .collect();
+
+    wrap_tab_rows(tabs)
+}
+
+fn wrap_tab_rows(tabs: Vec<Element<'static, Message>>) -> Element<'static, Message> {
+    let mut rows = column![].spacing(PROVIDER_TAB_ROW_SPACING);
+    let mut tabs = tabs.into_iter().peekable();
+    while tabs.peek().is_some() {
+        let mut tab_row = row![].spacing(8);
+        for _ in 0..PROVIDER_TABS_PER_ROW {
+            tab_row = match tabs.next() {
+                Some(tab) => tab_row.push(tab),
+                None => {
+                    tab_row.push(cosmic::iced::widget::Space::new().width(Length::FillPortion(1)))
+                }
+            };
+        }
+        rows = rows.push(tab_row);
+    }
+    rows.into()
+}
+
+fn nav_rows_height(tab_count: usize) -> f32 {
+    let rows = tab_count.div_ceil(PROVIDER_TABS_PER_ROW).max(1);
+    let rows = f32::from(u8::try_from(rows).unwrap_or(u8::MAX));
+    rows * POPUP_TAB_HEIGHT + (rows - 1.0) * PROVIDER_TAB_ROW_SPACING
+}
+
+fn provider_nav_height(state: &AppState) -> f32 {
+    nav_rows_height(
+        state
+            .providers
+            .iter()
+            .filter(|provider| provider.enabled)
+            .count(),
+    )
+}
+
+fn settings_nav_height() -> f32 {
+    nav_rows_height(ProviderId::ALL.len() + 1)
 }
 
 fn provider_tab(
