@@ -1,8 +1,8 @@
 use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
     PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, SettingsRoute, Size, Task,
-    UpdateStatus, UsageAmountFormat, app_popup, applet_button_size, demo_env, destroy_popup,
-    format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple, popup_view,
+    UpdateStatus, UsageAmountFormat, app_popup, demo_env, destroy_popup, format_retry_delay,
+    panel_button_size, popup_size_limits_with_max_width, popup_size_tuple, popup_view,
     refresh_provider_account_statuses_task, registry, resize_popup, runtime, select_provider,
     update_retry_delay, update_retry_task,
 };
@@ -168,10 +168,12 @@ impl AppModel {
     }
 
     pub(super) fn sync_panel_suggested_bounds(&mut self) {
-        let n_accounts = self
-            .state
-            .display_selected_account_count(self.selected_provider);
-        let (w, h) = applet_button_size(&self.core, self.config.panel_icon_style, n_accounts);
+        let (w, h) = panel_button_size(
+            &self.core,
+            &self.state,
+            self.config.panel_icon_style,
+            self.selected_provider,
+        );
         self.core.applet.suggested_bounds = Some(Size::new(w, h));
     }
 

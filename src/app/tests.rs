@@ -1,7 +1,7 @@
 use super::applet::{
     AppletBarLayout, applet_bar_layout, applet_bar_width, applet_button_size,
-    applet_percent_cell_alignment, applet_percent_cell_width, applet_percent_text, select_provider,
-    selected_provider_all_bar_layouts,
+    applet_fallback_button_size, applet_percent_cell_alignment, applet_percent_cell_width,
+    applet_percent_text, panel_fallback_active, select_provider, selected_provider_all_bar_layouts,
 };
 use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size, popup_settings_size};
 use super::refresh::should_refresh_account_statuses;
@@ -628,6 +628,72 @@ fn applet_button_size_percent_styles_ignore_current_percent_digits() {
         applet_button_size(&core, PanelIconStyle::LogoAndPercent, short_n),
         applet_button_size(&core, PanelIconStyle::LogoAndPercent, wide_n)
     );
+}
+
+#[test]
+fn panel_fallback_is_active_when_no_provider_has_accounts() {
+    let state = AppState::empty();
+
+    assert!(panel_fallback_active(&state));
+}
+
+#[test]
+fn panel_fallback_clears_when_an_enabled_provider_has_an_account() {
+    let mut state = AppState::empty();
+    state.upsert_account(ProviderAccountRuntimeState::empty(
+        ProviderId::Codex,
+        "codex-1",
+        "Codex",
+    ));
+
+    assert!(!panel_fallback_active(&state));
+}
+
+#[test]
+fn panel_fallback_stays_active_when_only_disabled_providers_have_accounts() {
+    let mut state = AppState::empty();
+    state.upsert_provider(ProviderRuntimeState::disabled(ProviderId::Codex));
+    state.upsert_account(ProviderAccountRuntimeState::empty(
+        ProviderId::Codex,
+        "codex-1",
+        "Codex",
+    ));
+
+    assert!(panel_fallback_active(&state));
+}
+
+#[test]
+fn panel_fallback_stays_active_when_all_providers_are_disabled() {
+    let mut state = AppState::empty();
+    for provider in &mut state.providers {
+        provider.enabled = false;
+    }
+
+    assert!(panel_fallback_active(&state));
+}
+
+#[test]
+fn applet_fallback_button_size_is_icon_only() {
+    let core = cosmic::Core::default();
+    let (suggested_w, suggested_h) = core.applet.suggested_size(false);
+    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
+    let (horizontal_padding, vertical_padding) = if core.applet.is_horizontal() {
+        (major_padding, minor_padding)
+    } else {
+        (minor_padding, major_padding)
+    };
+    let icon_px = suggested_w.min(suggested_h);
+
+    let (width, height) = applet_fallback_button_size(&core);
+
+    assert_eq!(
+        width,
+        f32::from(icon_px) + f32::from(2 * horizontal_padding)
+    );
+    assert_eq!(height, f32::from(suggested_h + 2 * vertical_padding));
+    let (bars_width, bars_height) = applet_button_size(&core, PanelIconStyle::LogoAndBars, 1);
+    assert!(width < bars_width);
+    assert_eq!(height, bars_height);
 }
 
 #[test]

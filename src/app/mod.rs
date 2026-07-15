@@ -16,7 +16,10 @@ mod tests;
 mod window;
 
 pub(crate) use self::applet::applet_settings;
-use self::applet::{applet_button, applet_button_size, applet_indicator, select_provider};
+use self::applet::{
+    applet_button, applet_fallback_indicator, applet_indicator, panel_button_size,
+    panel_fallback_active, select_provider,
+};
 use self::popup_view::{PopupBodyMeasureTarget, ProviderLoginStates};
 use self::provider_assets::{provider_icon_handle, provider_icon_variant};
 use self::refresh::{
@@ -343,9 +346,12 @@ impl cosmic::Application for AppModel {
             "startup provider detection"
         );
         let selected_provider = select_provider(initial_config.selected_provider, &state);
-        let n_accounts_init = state.display_selected_account_count(selected_provider);
-        let (applet_width, applet_height) =
-            applet_button_size(&core, initial_config.panel_icon_style, n_accounts_init);
+        let (applet_width, applet_height) = panel_button_size(
+            &core,
+            &state,
+            initial_config.panel_icon_style,
+            selected_provider,
+        );
         core.applet.suggested_bounds = Some(Size::new(applet_width, applet_height));
         let mut app = AppModel {
             core,
@@ -424,25 +430,30 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let n_accounts = self
-            .state
-            .display_selected_account_count(self.selected_provider);
-        let indicator = applet_indicator(
+        let indicator = if panel_fallback_active(&self.state) {
+            applet_fallback_indicator(&self.core)
+        } else {
+            let n_accounts = self
+                .state
+                .display_selected_account_count(self.selected_provider);
+            applet_indicator(
+                &self.state,
+                self.selected_provider,
+                self.config.panel_icon_style,
+                self.config.usage_amount_format,
+                &self.core,
+                n_accounts,
+            )
+        };
+        let size = panel_button_size(
+            &self.core,
             &self.state,
+            self.config.panel_icon_style,
             self.selected_provider,
-            self.config.panel_icon_style,
-            self.config.usage_amount_format,
-            &self.core,
-            n_accounts,
         );
-        let button: Element<'_, Message> = applet_button(
-            &self.core,
-            self.config.panel_icon_style,
-            n_accounts,
-            indicator,
-        )
-        .on_press(Message::TogglePopup)
-        .into();
+        let button: Element<'_, Message> = applet_button(&self.core, size, indicator)
+            .on_press(Message::TogglePopup)
+            .into();
 
         match self.launch_mode {
             LaunchMode::Panel => self.core.applet.autosize_window(button).into(),

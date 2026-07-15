@@ -1,3 +1,4 @@
+use super::provider_assets::app_icon_handle;
 use super::{
     APPLET_ACCOUNT_GAP, APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER, APPLET_ICON_GAP,
     APPLET_PERCENT_ACCOUNT_GAP, APPLET_PERCENT_CELL_HORIZONTAL_PAD, APPLET_PERCENT_GLYPH_WIDTH,
@@ -54,18 +55,25 @@ pub(crate) fn applet_settings() -> cosmic::app::Settings {
         Ok(cfg) | Err((_, cfg)) => cfg,
     })
     .unwrap_or_default();
-    let n_accounts = ProviderId::ALL
+    let no_enabled_provider_has_selected_accounts = ProviderId::ALL
         .iter()
-        .filter(|&&p| config.provider_enabled(p))
-        .map(|&p| {
-            config
-                .selected_account_ids(p)
-                .len()
-                .clamp(1, MAX_MULTI_ACCOUNT_SELECTION)
-        })
-        .max()
-        .unwrap_or(1);
-    let (width, height) = applet_button_size(&preview_core, config.panel_icon_style, n_accounts);
+        .all(|&p| !config.provider_enabled(p) || config.selected_account_ids(p).is_empty());
+    let (width, height) = if no_enabled_provider_has_selected_accounts {
+        applet_fallback_button_size(&preview_core)
+    } else {
+        let n_accounts = ProviderId::ALL
+            .iter()
+            .filter(|&&p| config.provider_enabled(p))
+            .map(|&p| {
+                config
+                    .selected_account_ids(p)
+                    .len()
+                    .clamp(1, MAX_MULTI_ACCOUNT_SELECTION)
+            })
+            .max()
+            .unwrap_or(1);
+        applet_button_size(&preview_core, config.panel_icon_style, n_accounts)
+    };
 
     cosmic::app::Settings::default()
         .size(Size::new(width, height))
@@ -147,19 +155,58 @@ pub(super) fn provider_logo<'a>(
         .into()
 }
 
+pub(super) fn panel_fallback_active(state: &AppState) -> bool {
+    !state.provider_accounts.iter().any(|account| {
+        state
+            .provider(account.provider)
+            .is_some_and(|provider| provider.enabled)
+    })
+}
+
+pub(super) fn applet_fallback_indicator<'a>(core: &cosmic::Core) -> Element<'a, Message> {
+    let icon_px = applet_fallback_icon_px(core);
+    let icon_size = f32::from(icon_px);
+    widget::icon::icon(app_icon_handle())
+        .size(icon_px)
+        .width(Length::Fixed(icon_size))
+        .height(Length::Fixed(icon_size))
+        .into()
+}
+
+pub(super) fn applet_fallback_button_size(core: &cosmic::Core) -> (f32, f32) {
+    let (_, suggested_h) = core.applet.suggested_size(false);
+    let (horizontal_padding, vertical_padding) = applet_paddings(core);
+    let width = f32::from(applet_fallback_icon_px(core)) + f32::from(2 * horizontal_padding);
+    let height = f32::from(suggested_h + 2 * vertical_padding);
+
+    (width, height)
+}
+
+fn applet_fallback_icon_px(core: &cosmic::Core) -> u16 {
+    let (suggested_w, suggested_h) = core.applet.suggested_size(false);
+    suggested_w.min(suggested_h)
+}
+
+pub(super) fn panel_button_size(
+    core: &cosmic::Core,
+    state: &AppState,
+    style: PanelIconStyle,
+    selected_provider: ProviderId,
+) -> (f32, f32) {
+    if panel_fallback_active(state) {
+        applet_fallback_button_size(core)
+    } else {
+        let n_accounts = state.display_selected_account_count(selected_provider);
+        applet_button_size(core, style, n_accounts)
+    }
+}
+
 pub(super) fn applet_button<'a>(
     core: &cosmic::Core,
-    style: PanelIconStyle,
-    n_accounts: usize,
+    (width, height): (f32, f32),
     content: impl Into<Element<'a, Message>>,
 ) -> widget::Button<'a, Message> {
-    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
-    let horizontal_padding = if core.applet.is_horizontal() {
-        major_padding
-    } else {
-        minor_padding
-    };
-    let (width, height) = applet_button_size(core, style, n_accounts);
+    let (horizontal_padding, _) = applet_paddings(core);
 
     widget::button::custom(
         widget::layer_container(content)
@@ -178,12 +225,7 @@ pub(super) fn applet_button_size(
     n_accounts: usize,
 ) -> (f32, f32) {
     let (suggested_w, suggested_h) = core.applet.suggested_size(false);
-    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
-    let (horizontal_padding, vertical_padding) = if core.applet.is_horizontal() {
-        (major_padding, minor_padding)
-    } else {
-        (minor_padding, major_padding)
-    };
+    let (horizontal_padding, vertical_padding) = applet_paddings(core);
     let compact_px = suggested_w.min(suggested_h);
     let logo_width = f32::from(compact_px.saturating_sub(8).max(11));
     let bar_width = applet_bar_width(suggested_w, suggested_h);
@@ -201,6 +243,15 @@ pub(super) fn applet_button_size(
     let height = f32::from(suggested_h + 2 * vertical_padding);
 
     (width, height)
+}
+
+fn applet_paddings(core: &cosmic::Core) -> (u16, u16) {
+    let (major_padding, minor_padding) = core.applet.suggested_padding(false);
+    if core.applet.is_horizontal() {
+        (major_padding, minor_padding)
+    } else {
+        (minor_padding, major_padding)
+    }
 }
 
 fn percent_columns_content_width(n_accounts: usize) -> f32 {
