@@ -1399,7 +1399,9 @@ notifications have not arrived yet. Shared runtime and control watcher updates
 are handled only when their `app_state` and `requests` payload keys arrive;
 metadata-only notifications do not replay an incomplete document.
 
-Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. The default release filter is `warn,yapcap=info`, which keeps YapCap diagnostics and dependency warnings/errors while suppressing routine dependency `info` output. File logs are plain text without ANSI terminal styling. No credentials, bearer tokens, or cookie values are logged.
+Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. The default release filter is `warn,cosmic::theme=off,yapcap=info`, which keeps YapCap diagnostics and dependency warnings/errors while suppressing routine dependency `info` output. File logs are plain text without ANSI terminal styling. No credentials, bearer tokens, or cookie values are logged.
+
+The `cosmic::theme=off` directive suppresses libcosmic's `error loading system dark theme` / `error loading system light theme` events. These fire when the installed COSMIC desktop writes a theme config that predates a key the pinned libcosmic expects (for example a missing `list_button`). libcosmic substitutes its default for the missing key and the applet renders correctly, so the events are noise that YapCap cannot act on. The target logs nothing else. Setting `RUST_LOG` overrides the whole default filter, so `RUST_LOG=debug` restores these events.
 
 Support logs are an INFO-level audit trail for reconstructing what happened from
 a user-provided log file. A clean `YapCap started` line is the first routine
