@@ -167,6 +167,7 @@ fn owner_ignores_duplicate_request_for_refreshing_provider() {
 
 #[test]
 fn owner_consumes_request_for_not_ready_provider() {
+    let _env = crate::test_support::test_env();
     let owner = refresh_owner("owner-not-ready-request");
     let mut app = test_app(Some(owner));
 
@@ -382,6 +383,7 @@ fn quit_requests_runtime_exit() {
 
 #[test]
 fn selecting_stale_enabled_provider_writes_provider_selected_request() {
+    let _env = crate::test_support::test_env();
     let mut app = test_app(None);
     ready_selected_provider(&mut app.state, ProviderId::Claude);
     selected_account_without_usage(&mut app.state, ProviderId::Claude);
@@ -430,6 +432,7 @@ fn selecting_provider_preserves_local_popup_state() {
 
 #[test]
 fn non_owner_account_selection_requests_owner_refresh_without_running_it() {
+    let _env = crate::test_support::test_env();
     let mut app = test_app(None);
     app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
     runtime_reconcile_provider(&app.config, &mut app.state, ProviderId::Copilot);
@@ -480,6 +483,7 @@ fn owner_account_selection_runs_requested_refresh() {
 
 #[test]
 fn non_owner_provider_disable_reconciles_locally_without_publishing_runtime() {
+    let _env = crate::test_support::test_env();
     let mut app = test_app(None);
     app.config.copilot_managed_accounts = vec![copilot_account("copilot-1", "octocat")];
     app.config.selected_copilot_account_ids = vec!["copilot-1".to_string()];

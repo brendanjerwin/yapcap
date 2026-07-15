@@ -347,6 +347,31 @@ pub struct AppPaths {
     pub log_dir: PathBuf,
 }
 
+#[cfg(not(test))]
+pub fn cosmic_config_context(
+    app_id: &str,
+    version: u64,
+) -> Result<cosmic_config::Config, cosmic_config::Error> {
+    cosmic_config::Config::new(app_id, version)
+}
+
+#[cfg(test)]
+pub fn cosmic_config_context(
+    app_id: &str,
+    version: u64,
+) -> Result<cosmic_config::Config, cosmic_config::Error> {
+    cosmic_config::Config::with_custom_path(app_id, version, test_config_root())
+}
+
+#[cfg(test)]
+fn test_config_root() -> PathBuf {
+    thread_local! {
+        static ROOT: tempfile::TempDir =
+            tempfile::tempdir().expect("create per-test cosmic config root");
+    }
+    ROOT.with(|root| root.path().to_path_buf())
+}
+
 fn flatpak_var_app_subdir(segments: &[&str]) -> Option<PathBuf> {
     let app_id = std::env::var_os("FLATPAK_ID")?;
     let mut path = host_user_home_dir()?;

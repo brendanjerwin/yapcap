@@ -140,7 +140,7 @@ impl SharedControlState {
 
 #[must_use]
 pub fn load_runtime(app_id: &str) -> Option<SharedRuntimeState> {
-    let ctx = match cosmic_config::Config::new(app_id, SharedRuntimeState::VERSION) {
+    let ctx = match crate::config::cosmic_config_context(app_id, SharedRuntimeState::VERSION) {
         Ok(ctx) => ctx,
         Err(error) => {
             tracing::warn!(
@@ -166,7 +166,7 @@ pub fn load_runtime(app_id: &str) -> Option<SharedRuntimeState> {
 
 #[must_use]
 pub fn load_control(app_id: &str) -> SharedControlState {
-    let ctx = match cosmic_config::Config::new(app_id, SharedControlState::VERSION) {
+    let ctx = match crate::config::cosmic_config_context(app_id, SharedControlState::VERSION) {
         Ok(ctx) => ctx,
         Err(error) => {
             tracing::warn!(
@@ -196,7 +196,7 @@ pub fn save_runtime_as(
     reason: &'static str,
     writer: Option<SharedStateWriter<'_>>,
 ) -> Result<(), cosmic_config::Error> {
-    let ctx = cosmic_config::Config::new(app_id, SharedRuntimeState::VERSION)?;
+    let ctx = crate::config::cosmic_config_context(app_id, SharedRuntimeState::VERSION)?;
     let generation = SharedRuntimeState::get_entry(&ctx)
         .ok()
         .map_or(1, |shared| shared.generation.saturating_add(1));
@@ -256,7 +256,7 @@ pub fn refreshing_provider_labels(state: &AppState) -> String {
 }
 
 pub fn save_control(app_id: &str, state: &SharedControlState) -> Result<(), cosmic_config::Error> {
-    let ctx = cosmic_config::Config::new(app_id, SharedControlState::VERSION)?;
+    let ctx = crate::config::cosmic_config_context(app_id, SharedControlState::VERSION)?;
     state.write_entry(&ctx)?;
     Ok(())
 }

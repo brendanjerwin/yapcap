@@ -2,8 +2,8 @@ use super::{
     APPLET_ACCOUNT_GAP, APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER, APPLET_ICON_GAP,
     APPLET_PERCENT_ACCOUNT_GAP, APPLET_PERCENT_CELL_HORIZONTAL_PAD, APPLET_PERCENT_GLYPH_WIDTH,
     Alignment, AppModel, AppState, Config, CosmicButton, CosmicConfigEntry, Element, Length,
-    Limits, Message, PanelIconStyle, ProviderId, Size, UsageAmountFormat, cosmic_config,
-    progress_bar, provider_icon_handle, provider_icon_variant, row, usage_display, widget,
+    Limits, Message, PanelIconStyle, ProviderId, Size, UsageAmountFormat, progress_bar,
+    provider_icon_handle, provider_icon_variant, row, usage_display, widget,
 };
 use crate::account_selection::MAX_MULTI_ACCOUNT_SELECTION;
 use crate::model::AppletWindows;
@@ -45,13 +45,15 @@ impl AppletBarLayout {
 
 pub(crate) fn applet_settings() -> cosmic::app::Settings {
     let preview_core = cosmic::Core::default();
-    let config =
-        cosmic_config::Config::new(<AppModel as cosmic::Application>::APP_ID, Config::VERSION)
-            .ok()
-            .map(|ctx| match Config::get_entry(&ctx) {
-                Ok(cfg) | Err((_, cfg)) => cfg,
-            })
-            .unwrap_or_default();
+    let config = crate::config::cosmic_config_context(
+        <AppModel as cosmic::Application>::APP_ID,
+        Config::VERSION,
+    )
+    .ok()
+    .map(|ctx| match Config::get_entry(&ctx) {
+        Ok(cfg) | Err((_, cfg)) => cfg,
+    })
+    .unwrap_or_default();
     let n_accounts = ProviderId::ALL
         .iter()
         .filter(|&&p| config.provider_enabled(p))

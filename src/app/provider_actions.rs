@@ -1,10 +1,10 @@
 use super::{
     AccountSelectionStatus, AppModel, Config, CosmicConfigEntry, Id, Message, PanelIconStyle,
     PopupRoute, ProviderId, ProviderRefreshResult, ResetTimeFormat, SettingsRoute, Size, Task,
-    UpdateStatus, UsageAmountFormat, app_popup, applet_button_size, cosmic_config, demo_env,
-    destroy_popup, format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple,
-    popup_view, refresh_provider_account_statuses_task, registry, resize_popup, runtime,
-    select_provider, update_retry_delay, update_retry_task,
+    UpdateStatus, UsageAmountFormat, app_popup, applet_button_size, demo_env, destroy_popup,
+    format_retry_delay, popup_size_limits_with_max_width, popup_size_tuple, popup_view,
+    refresh_provider_account_statuses_task, registry, resize_popup, runtime, select_provider,
+    update_retry_delay, update_retry_task,
 };
 use crate::account_selection::provider_show_all_account_selection;
 use crate::config::APP_ID;
@@ -313,7 +313,7 @@ impl AppModel {
             self.config = new_config;
             return;
         }
-        let ctx = match cosmic_config::Config::new(
+        let ctx = match crate::config::cosmic_config_context(
             <Self as cosmic::Application>::APP_ID,
             Config::VERSION,
         ) {

@@ -59,7 +59,7 @@ use crate::updates::UpdateStatus;
 use crate::usage_display;
 use chrono::Utc;
 use cosmic::app::Task;
-use cosmic::cosmic_config::{self, CosmicConfigEntry};
+use cosmic::cosmic_config::CosmicConfigEntry;
 use cosmic::iced::task::Handle;
 use cosmic::iced::time;
 use cosmic::iced::widget::{progress_bar, row};
@@ -298,7 +298,7 @@ impl cosmic::Application for AppModel {
         core.window.show_minimize = false;
         core.window.use_template = false;
 
-        let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
+        let config = crate::config::cosmic_config_context(Self::APP_ID, Config::VERSION)
             .map(|ctx| {
                 let mut config = match Config::get_entry(&ctx) {
                     Ok(cfg) => cfg,
