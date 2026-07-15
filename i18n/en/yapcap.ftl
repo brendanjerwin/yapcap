@@ -134,6 +134,7 @@ no-providers-open-settings = Open Settings
 provider-detected-chip = Detected
 provider-detected-cta = { $provider } was detected on this machine, but YapCap has no account for it yet.
 provider-detected-add-account = Add account in Settings
+provider-detected-caption = Detected on this machine
 open-provider-settings = Open { $provider } settings
 account-label = Account
 status-label = Status

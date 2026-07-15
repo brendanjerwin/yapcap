@@ -3,8 +3,8 @@ use super::{
     Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_GROUP_HEADER_HEIGHT,
     PROVIDER_SECTION_HEIGHT, PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT,
     PopupRoute, SettingsRoute, account_label_text, apply_alpha, badge_destructive, badge_neutral,
-    badge_success, badge_warning, badge_with_tooltip, card, info_block, plan_badge,
-    provider_icon_handle, provider_icon_variant, provider_summary,
+    badge_success, badge_warning, badge_with_tooltip, card, detected_without_accounts, info_block,
+    plan_badge, provider_icon_handle, provider_icon_variant, provider_summary,
 };
 use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
 use crate::currency_format;
@@ -30,8 +30,7 @@ pub(super) fn selected_provider_view<'a>(
         return empty_state_view();
     };
     let accounts = state.display_selected_accounts(provider.provider);
-    let detected_without_accounts =
-        is_detected_without_accounts(state, detection, provider.provider);
+    let detected_without_accounts = detected_without_accounts(state, detection, provider.provider);
     let summary = provider_summary(provider, detected_without_accounts);
 
     if accounts.len() <= 1 {
@@ -280,7 +279,7 @@ fn provider_status_info(
     active_account: Option<&ProviderAccountRuntimeState>,
     detection: &crate::detection::DetectionSnapshot,
 ) -> Option<Element<'static, Message>> {
-    if is_detected_without_accounts(state, detection, provider.provider) {
+    if detected_without_accounts(state, detection, provider.provider) {
         return Some(detected_provider_cta(provider.provider));
     }
     let message = provider_status_message(provider, state, active_account);
@@ -308,14 +307,6 @@ fn detected_provider_cta(provider: ProviderId) -> Element<'static, Message> {
                 .into(),
         ),
     )
-}
-
-fn is_detected_without_accounts(
-    state: &AppState,
-    detection: &crate::detection::DetectionSnapshot,
-    provider: ProviderId,
-) -> bool {
-    detection.detected(provider) && state.accounts_for(provider).is_empty()
 }
 
 fn login_required_settings_action(
@@ -1017,12 +1008,12 @@ mod tests {
         let detection = crate::detection::detect(home.path());
         let state = AppState::empty();
 
-        assert!(is_detected_without_accounts(
+        assert!(detected_without_accounts(
             &state,
             &detection,
             ProviderId::Codex
         ));
-        assert!(!is_detected_without_accounts(
+        assert!(!detected_without_accounts(
             &state,
             &detection,
             ProviderId::Claude
@@ -1036,7 +1027,7 @@ mod tests {
                 "codex-test",
                 "test@example.com",
             ));
-        assert!(!is_detected_without_accounts(
+        assert!(!detected_without_accounts(
             &with_account,
             &detection,
             ProviderId::Codex

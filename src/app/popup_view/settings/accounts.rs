@@ -7,8 +7,8 @@ use self::login_controls::{
 };
 use self::rows::{account_selector_list, account_settings_row, show_all_accounts_row};
 use super::super::{
-    AppState, Config, Element, Length, Message, ProviderId, ProviderLoginStates, fl,
-    settings_block, settings_block_enabled, widget,
+    AppState, Config, DetectionSnapshot, Element, Length, Message, ProviderId, ProviderLoginStates,
+    detected_without_accounts, fl, settings_block, settings_block_enabled, widget,
 };
 use crate::providers::antigravity::AntigravityLoginState;
 use crate::providers::claude::ClaudeLoginState;
@@ -21,6 +21,7 @@ use crate::providers::minimax::MinimaxLoginState;
 pub(super) fn provider_settings_view<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     provider_id: ProviderId,
 ) -> Element<'a, Message> {
@@ -47,11 +48,11 @@ pub(super) fn provider_settings_view<'a>(
         }
     };
 
-    Element::from(
-        cosmic::iced::widget::column![enable_section, accounts_section]
-            .spacing(14)
-            .width(Length::Fill),
-    )
+    let mut sections = cosmic::iced::widget::column![enable_section].spacing(14);
+    if detected_without_accounts(state, detection, provider_id) {
+        sections = sections.push(widget::text(fl!("provider-detected-caption")).size(13));
+    }
+    Element::from(sections.push(accounts_section).width(Length::Fill))
 }
 
 fn codex_accounts_section<'a>(

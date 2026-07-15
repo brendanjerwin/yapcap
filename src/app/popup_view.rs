@@ -102,9 +102,12 @@ pub fn popup_content<'a>(
     let nav_row: Option<Element<'_, Message>> = match route {
         PopupRoute::ProviderDetail if empty_state => None,
         PopupRoute::ProviderDetail => Some(provider_tab_rows(state, selected_provider)),
-        PopupRoute::Settings(settings_route) => {
-            Some(settings_category_row(settings_route, update_status))
-        }
+        PopupRoute::Settings(settings_route) => Some(settings_category_row(
+            state,
+            detection,
+            settings_route,
+            update_status,
+        )),
     };
 
     let body = popup_body_view(
@@ -169,7 +172,7 @@ fn popup_body_view<'a>(
             general_settings_view(config, update_status)
         }
         PopupRoute::Settings(SettingsRoute::Provider(id)) => {
-            provider_settings_view(state, config, logins, *id)
+            provider_settings_view(state, config, detection, logins, *id)
         }
     }
 }
@@ -211,7 +214,7 @@ fn popup_body_stack<'a>(
     }));
 
     for provider in ProviderId::ALL {
-        let body = provider_settings_view(state, config, logins, provider);
+        let body = provider_settings_view(state, config, detection, logins, provider);
         stack = stack.push(Measure::new(body, POPUP_WIDTH, move |size| {
             Message::PopupBodyMeasured(
                 PopupBodyMeasureTarget::Settings(SettingsRoute::Provider(provider)),
@@ -306,6 +309,14 @@ pub(super) fn popup_empty_state_active(state: &AppState) -> bool {
     state.providers.iter().all(|provider| !provider.enabled)
 }
 
+pub(super) fn detected_without_accounts(
+    state: &AppState,
+    detection: &DetectionSnapshot,
+    provider: ProviderId,
+) -> bool {
+    detection.detected(provider) && state.accounts_for(provider).is_empty()
+}
+
 fn selected_account_count(state: &AppState, provider: ProviderId) -> f32 {
     let n = state.display_selected_account_count(provider);
     f32::from(u8::try_from(n).unwrap_or(u8::MAX))
@@ -393,6 +404,8 @@ fn settings_block_enabled<'a>(
 }
 
 fn settings_category_row(
+    state: &AppState,
+    detection: &DetectionSnapshot,
     route: &SettingsRoute,
     update_status: &UpdateStatus,
 ) -> Element<'static, Message> {
@@ -410,7 +423,7 @@ fn settings_category_row(
             settings_category_icon(&target_route),
             matches!(route, SettingsRoute::Provider(id) if *id == provider),
             target_route,
-            false,
+            detected_without_accounts(state, detection, provider),
         ));
     }
 
@@ -422,20 +435,20 @@ fn settings_category_tab(
     icon: widget::icon::Handle,
     selected: bool,
     route: SettingsRoute,
-    notify: bool,
+    detected: bool,
 ) -> Element<'static, Message> {
     let icon = widget::icon::icon(icon)
         .size(PROVIDER_TAB_ICON_SIZE)
         .width(Length::Fixed(PROVIDER_TAB_ICON_LENGTH))
         .height(Length::Fixed(PROVIDER_TAB_ICON_LENGTH));
-    let label: Element<'static, Message> = if notify {
+    let label: Element<'static, Message> = if detected {
         container(
             row![
                 widget::text(label)
                     .size(PROVIDER_TAB_LABEL_SIZE)
                     .width(Length::Shrink)
                     .align_x(Alignment::Center),
-                update_notification_dot(6.0)
+                accent_notification_dot(6.0)
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -512,6 +525,28 @@ fn notification_dot(size: f32) -> Element<'static, Message> {
         .style(move |_theme: &cosmic::Theme| widget::container::Style {
             text_color: None,
             background: Some(Background::Color(UPDATE_NOTIFICATION_DOT_COLOR)),
+            border: cosmic::iced::Border {
+                radius: (size / 2.0).into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            },
+            shadow: cosmic::iced::Shadow::default(),
+            icon_color: None,
+            snap: true,
+        }),
+    )
+}
+
+fn accent_notification_dot(size: f32) -> Element<'static, Message> {
+    Element::from(
+        container(
+            cosmic::iced::widget::Space::new()
+                .width(Length::Fixed(size))
+                .height(Length::Fixed(size)),
+        )
+        .style(move |theme: &cosmic::Theme| widget::container::Style {
+            text_color: None,
+            background: Some(Background::Color(theme.cosmic().accent.base.into())),
             border: cosmic::iced::Border {
                 radius: (size / 2.0).into(),
                 width: 0.0,
@@ -837,5 +872,33 @@ mod tests {
         state.provider_mut(ProviderId::Codex).unwrap().enabled = true;
 
         assert!(!popup_empty_state_active(&state));
+    }
+
+    #[test]
+    fn detected_settings_hint_ignores_explicit_disablement_but_hides_after_account_added() {
+        let home = tempfile::tempdir().expect("create temporary home");
+        std::fs::create_dir(home.path().join(".codex")).expect("create Codex marker");
+        let detection = crate::detection::detect(home.path());
+        let mut state = AppState::empty();
+        state.provider_mut(ProviderId::Codex).unwrap().enabled = false;
+
+        assert!(detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Codex
+        ));
+
+        state
+            .provider_accounts
+            .push(ProviderAccountRuntimeState::empty(
+                ProviderId::Codex,
+                "codex-test",
+                "test@example.com",
+            ));
+        assert!(!detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Codex
+        ));
     }
 }
