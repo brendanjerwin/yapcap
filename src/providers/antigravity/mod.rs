@@ -7,7 +7,7 @@ pub mod quota;
 
 use crate::account_storage::{ProviderAccountStorage, ProviderAccountTokens};
 use crate::error::{AntigravityError, GeminiError, Result};
-use crate::model::{ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot};
+use crate::model::{ProviderId, ProviderIdentity, UsageHeadline, UsageSnapshot, UsageWindow};
 use crate::providers::gemini::code_assist;
 use crate::providers::google_oauth::{self, GoogleOAuthConfig, GoogleRefreshError};
 use chrono::Utc;
@@ -124,11 +124,13 @@ async fn fetch_at(
             Err(other) => return Err(other),
         };
     let tier_id = load.tier_id.clone().unwrap_or_default();
+    let project = load.cloudaicompanion_project.clone();
 
     let summary = match quota::retrieve_user_quota_summary_typed(
         client,
         &endpoints.retrieve_user_quota,
         &tokens.access_token,
+        project.as_deref(),
     )
     .await
     {
@@ -140,6 +142,7 @@ async fn fetch_at(
                 client,
                 &endpoints.retrieve_user_quota,
                 &tokens.access_token,
+                project.as_deref(),
             )
             .await?
         }
@@ -150,10 +153,7 @@ async fn fetch_at(
     if windows.is_empty() {
         return Err(AntigravityError::NoUsageData);
     }
-    let headline = windows
-        .iter()
-        .position(|window| window.window_seconds == Some(quota::FIVE_HOUR_WINDOW_SECONDS))
-        .unwrap_or(0);
+    let headline = headline_index(&windows);
 
     let now = Utc::now();
     let metadata = storage
@@ -185,6 +185,17 @@ async fn fetch_at(
     };
     let _ = storage.save_snapshot(account_id, &snapshot);
     Ok(snapshot)
+}
+
+fn headline_index(windows: &[UsageWindow]) -> usize {
+    let position = |seconds: i64| {
+        windows
+            .iter()
+            .position(|window| window.window_seconds == Some(seconds))
+    };
+    position(quota::FIVE_HOUR_WINDOW_SECONDS)
+        .or_else(|| position(quota::WEEKLY_WINDOW_SECONDS))
+        .unwrap_or(0)
 }
 
 async fn load_code_assist(
@@ -310,6 +321,20 @@ mod tests {
         }
     }
 
+    fn free_quota_body() -> String {
+        let weekly = (Utc::now() + Duration::days(6)).to_rfc3339();
+        format!(
+            r#"{{"groups":[
+                {{"displayName":"Gemini Models","buckets":[
+                    {{"displayName":"Weekly Limit","window":"weekly","remainingFraction":0.947,"resetTime":"{weekly}"}}
+                ]}},
+                {{"displayName":"Claude and GPT models","buckets":[
+                    {{"displayName":"Weekly Limit","window":"weekly","remainingFraction":0.938,"resetTime":"{weekly}"}}
+                ]}}
+            ]}}"#
+        )
+    }
+
     fn quota_body() -> String {
         let weekly = (Utc::now() + Duration::days(6)).to_rfc3339();
         let five = (Utc::now() + Duration::hours(4)).to_rfc3339();
@@ -391,6 +416,124 @@ mod tests {
         assert!(requests[0].contains("\"ideType\":\"ANTIGRAVITY\""));
         let meta = storage.load_metadata(&account_id).unwrap();
         assert_eq!(meta.antigravity_last_tier_id.as_deref(), Some("free-tier"));
+    }
+
+    #[tokio::test]
+    async fn fetch_sends_discovered_project_id_to_quota_endpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base, handle) = server(vec![
+            MockResponse {
+                method: "POST",
+                path: "/load",
+                status: 200,
+                body:
+                    r#"{"currentTier":{"id":"free-tier"},"cloudaicompanionProject":"daring-goods"}"#
+                        .to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/quota",
+                status: 200,
+                body: free_quota_body(),
+            },
+        ])
+        .await;
+
+        fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            endpoints(&base),
+        )
+        .await
+        .unwrap();
+
+        let requests = handle.await.unwrap();
+        assert!(requests[1].contains(r#"{"project":"daring-goods"}"#));
+    }
+
+    #[tokio::test]
+    async fn fetch_omits_project_when_load_code_assist_returns_none() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base, handle) = server(vec![
+            MockResponse {
+                method: "POST",
+                path: "/load",
+                status: 200,
+                body: r#"{"currentTier":{"id":"free-tier"}}"#.to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/quota",
+                status: 200,
+                body: free_quota_body(),
+            },
+        ])
+        .await;
+
+        fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            endpoints(&base),
+        )
+        .await
+        .unwrap();
+
+        let requests = handle.await.unwrap();
+        assert!(requests[1].ends_with("{}"));
+    }
+
+    #[tokio::test]
+    async fn fetch_free_tier_builds_two_weekly_windows_with_weekly_headline() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage = ProviderAccountStorage::new(temp.path());
+        let (account_id, account_dir) = create_account(&storage, Utc::now() + Duration::hours(1));
+        let (base, handle) = server(vec![
+            MockResponse {
+                method: "POST",
+                path: "/load",
+                status: 200,
+                body:
+                    r#"{"currentTier":{"id":"free-tier"},"cloudaicompanionProject":"daring-goods"}"#
+                        .to_string(),
+            },
+            MockResponse {
+                method: "POST",
+                path: "/quota",
+                status: 200,
+                body: free_quota_body(),
+            },
+        ])
+        .await;
+
+        let snapshot = fetch_at(
+            &reqwest::Client::new(),
+            &account_id,
+            account_dir,
+            endpoints(&base),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows[0].group.as_deref(), Some("Gemini Models"));
+        assert_eq!(
+            snapshot.windows[1].group.as_deref(),
+            Some("Claude and GPT models")
+        );
+        assert!(
+            snapshot
+                .windows
+                .iter()
+                .all(|window| window.window_seconds == Some(quota::WEEKLY_WINDOW_SECONDS))
+        );
+        assert_eq!(snapshot.headline, UsageHeadline(0));
+        handle.await.unwrap();
     }
 
     #[tokio::test]

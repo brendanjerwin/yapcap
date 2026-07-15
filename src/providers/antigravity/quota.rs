@@ -76,14 +76,19 @@ pub async fn retrieve_user_quota_summary_typed(
     client: &reqwest::Client,
     endpoint: &str,
     access_token: &str,
+    project: Option<&str>,
 ) -> Result<QuotaSummaryResponse, AntigravityError> {
+    let body = match project {
+        Some(project) => json!({ "project": project }),
+        None => json!({}),
+    };
     let response = client
         .post(endpoint)
         .bearer_auth(access_token)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .header("User-Agent", "antigravity")
-        .json(&json!({}))
+        .json(&body)
         .send()
         .await
         .map_err(AntigravityError::QuotaRequest)?;
@@ -119,14 +124,17 @@ pub fn parse_quota_summary(raw: &str) -> Result<QuotaSummaryResponse, Antigravit
 mod tests {
     use super::*;
 
-    fn load_fixture() -> QuotaSummaryResponse {
-        let raw = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/fixtures/antigravity/retrieve_user_quota_response.json"
-        ))
-        .expect("fixture exists");
+    fn load_fixture_named(name: &str) -> QuotaSummaryResponse {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/antigravity")
+            .join(name);
+        let raw = std::fs::read_to_string(path).expect("fixture exists");
         let outer: serde_json::Value = serde_json::from_str(&raw).expect("valid json");
         serde_json::from_value(outer["body_json"].clone()).expect("body_json parses")
+    }
+
+    fn load_fixture() -> QuotaSummaryResponse {
+        load_fixture_named("retrieve_user_quota_response.json")
     }
 
     #[test]
@@ -152,6 +160,30 @@ mod tests {
         assert_eq!(windows[3].group.as_deref(), Some("Claude and GPT models"));
         assert_eq!(windows[3].label, "Five Hour Limit");
         assert_eq!(windows[3].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
+    }
+
+    #[test]
+    fn normalizes_free_tier_fixture_into_two_weekly_windows() {
+        let response = load_fixture_named("retrieve_user_quota_free_response.json");
+        let windows = normalize_quota_summary(&response);
+        assert_eq!(windows.len(), 2);
+
+        assert_eq!(windows[0].group.as_deref(), Some("Gemini Models"));
+        assert_eq!(windows[0].label, "Weekly Limit");
+        assert_eq!(windows[0].window_seconds, Some(WEEKLY_WINDOW_SECONDS));
+        assert!((windows[0].used_percent - (100.0 - 94.70576)).abs() < 0.01);
+        assert!(windows[0].reset_at.is_some());
+
+        assert_eq!(windows[1].group.as_deref(), Some("Claude and GPT models"));
+        assert_eq!(windows[1].label, "Weekly Limit");
+        assert_eq!(windows[1].window_seconds, Some(WEEKLY_WINDOW_SECONDS));
+        assert!((windows[1].used_percent - (100.0 - 93.8137)).abs() < 0.01);
+
+        assert!(
+            windows
+                .iter()
+                .all(|window| window.window_seconds != Some(FIVE_HOUR_WINDOW_SECONDS))
+        );
     }
 
     #[test]

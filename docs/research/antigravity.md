@@ -63,8 +63,28 @@ suffix — the current name; earlier research said `retrieveUserQuota`). Headers
 `Authorization: Bearer <access_token>`, `Content-Type: application/json`,
 `User-Agent: antigravity`. `loadCodeAssist` body uses metadata
 `{"ideType":"ANTIGRAVITY","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}`.
-`retrieveUserQuotaSummary` works with an **empty body** — the `project` field is
-optional (server resolves it from the token).
+`retrieveUserQuotaSummary` takes `{"project": "<cloudaicompanionProject>"}`.
+
+> **The `project` field is NOT safely optional — [CONFIRMED, live-verified 2026-07-15].**
+> Earlier research claimed an empty body works because the server resolves the
+> project from the token. That is true *only for paid accounts*. On a **free**
+> account an empty body silently returns a **degraded, wrong** response: a single
+> `All Models` group of eight per-model buckets (`gemini-3.5-flash-low`,
+> `claude-opus-4-6-thinking`, …), each with **no `window` field** and a flat
+> `remainingFraction: 1` — i.e. it reports zero usage on an account that has
+> really consumed ~5%. Same token, same host, same headers, `{"project": …}`:
+> the normal grouped shape with real numbers (`gemini-weekly` 0.9471,
+> `3p-weekly` 0.9381). Paid accounts return byte-identical responses either way,
+> which is why the empty body survived the original live QA (issue 007) — it was
+> only ever exercised against a Google-AI-Pro account. Matrix:
+>
+> | account | `{}` | `{"project": …}` |
+> |---|---|---|
+> | free | 1 group `All Models`, 8 per-model buckets, no `window`, all `1.0` | 2 groups × weekly, real usage |
+> | paid | 2 groups × {weekly, 5h} | identical |
+>
+> `User-Agent: antigravity` is **required** on the quota call regardless of body —
+> without it (or with `gemini-cli`) the endpoint returns 403 `PERMISSION_DENIED`.
 
 > **Host — [CONFIRMED, prod live-verified 2026-07-14]:** the production host is
 > **`cloudcode-pa.googleapis.com`** (the gemini-cli host). Verified by re-running
@@ -77,9 +97,13 @@ optional (server resolves it from the token).
 > is the shipped default; the committed fixtures remain valid (prod shape matches).
 
 **Quota shape — [CONFIRMED], supersedes §1/§4 Pro/Flash/Lite classification.**
-`retrieveUserQuotaSummary` returns server-defined **groups**, each with a
-**weekly** and a **5-hour** bucket. It does *not* return per-model buckets for the
-usage summary, and there is no "lite" family. Captured shape:
+`retrieveUserQuotaSummary` returns server-defined **groups**. It does *not* return
+per-model buckets for the usage summary (given a `project` — see above), and there
+is no "lite" family. **Bucket count is tier-dependent — [CONFIRMED, live-verified
+2026-07-15]:** paid accounts get a **weekly** *and* a **5-hour** bucket per group
+(4 bars); free accounts get **weekly only** (2 bars), consistent with free tier
+having no 5-hour cap. Group `displayName`s and bucket labels are identical across
+tiers, so no tier-specific client rendering is needed. Captured paid shape:
 
 ```
 groups: [
@@ -110,13 +134,33 @@ groups: [
 `g1-pro-tier` (name "Google AI Pro"). `cloudaicompanionProject` present
 (e.g. `mimetic-team-7tjsh`). Same tier fields the Gemini provider already reads.
 
-**Proposed YapCap model (locked in):**
+> **`currentTier.id` is the wrong plan signal — [CONFIRMED, live-verified 2026-07-15].**
+> Two findings, both unhandled today (tracked separately; the quota fix does not
+> depend on them):
+>
+> 1. **`paidTier` is the real entitlement.** A Google-AI-Pro account and a genuinely
+>    free account *both* report `currentTier.id: free-tier`. They differ only in
+>    `paidTier`: `g1-pro-tier` ("Google AI Pro") vs `free-tier` ("Antigravity
+>    Starter Quota"). The free account's bucket layout matches its `paidTier`,
+>    not its `currentTier`.
+> 2. **`currentTier.id` is User-Agent dependent.** Same token, same body, prod
+>    host: with `User-Agent: antigravity` the Pro account reports
+>    `currentTier.id: free-tier`; **without** the header it reports
+>    `standard-tier`. YapCap omits the header on `loadCodeAssist` but sends it on
+>    the quota call, so the current "Pro" plan badge is correct only by accident
+>    and would flip to "Free" if the headers were made consistent. The quota
+>    endpoint 403s without the header, so it cannot simply be dropped everywhere.
 
-- **Four `UsageWindow`s**, grouped: Gemini Weekly, Gemini 5h, Claude+GPT Weekly,
-  Claude+GPT 5h. Section titles from `groups[].displayName`; per-bar labels from
+**YapCap model (implemented):**
+
+- **One `UsageWindow` per bucket**, grouped — paid: Gemini Weekly, Gemini 5h,
+  Claude+GPT Weekly, Claude+GPT 5h; free: Gemini Weekly, Claude+GPT Weekly.
+  Section titles from `groups[].displayName`; per-bar labels from
   `buckets[].displayName`.
 - **Panel headline (2 thin bars):** the two **5-hour** windows (Gemini 5h +
-  Claude/GPT 5h) — the fast-moving ambient signal. Popup shows all four.
+  Claude/GPT 5h) — the fast-moving ambient signal. Free tier has no 5-hour
+  windows, so the applet falls back to the first two windows: the two weekly
+  bars. Popup shows all bars.
 - Group labels come from the server, so — unlike the Gemini provider — YapCap does
   **not** need to hard-code a model→family classifier for the usage summary.
 
@@ -528,11 +572,14 @@ Aggregate per family by **min `remainingFraction`** and **earliest `resetTime`**
 - **[UNKNOWN]** Whether the current IDE ships the same public client id above or a
   rotated one — verify by grepping the installed Linux bundle for
   `apps.googleusercontent.com` / `GOCSPX-` (CodexBar's extraction approach).
-- **[INFERRED]** Whether prod `cloudcode-pa.googleapis.com` returns full quota for a
-  free-tier account or requires the daily-sandbox host — capture both. opencode
-  prefers daily-sandbox for generateContent but prod for `loadCodeAssist`/quota.
-- Real tier-id strings in `loadCodeAssist` (`standard-tier`/`free-tier`/… are
-  CodexBar's assumptions).
+- **[RESOLVED 2026-07-15]** Prod `cloudcode-pa.googleapis.com` returns full quota
+  for a free-tier account — no daily-sandbox host needed — **provided the
+  `project` field is sent**. See the `project` box in §2; free tier returns two
+  weekly buckets, no 5h.
+- **[RESOLVED 2026-07-15]** Real tier-id strings live-verified against two
+  accounts: `currentTier.id` ∈ {`free-tier`, `standard-tier`} (User-Agent
+  dependent — see the tier box), `paidTier.id` ∈ {`free-tier` ("Antigravity
+  Starter Quota"), `g1-pro-tier` ("Google AI Pro")}.
 - Confirm `gpt-oss-120b-medium` handling and the exact July-2026 Gemini model ids
   (`gemini-3-pro-high/low` vs a `gemini-3.1-pro` rename).
 

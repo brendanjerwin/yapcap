@@ -992,8 +992,16 @@ API surface and host:
   `POST <host>/v1internal:retrieveUserQuotaSummary`, headers
   `Authorization: Bearer`, `Content-Type: application/json`,
   `User-Agent: antigravity`. `loadCodeAssist` metadata uses
-  `ideType: ANTIGRAVITY`; the quota call takes an empty body (no project id, no
-  cloud-resource-manager fallback).
+  `ideType: ANTIGRAVITY`. The quota call sends `{"project": <id>}` using the
+  `cloudaicompanionProject` discovered by `loadCodeAssist`, falling back to an
+  empty body when the field is absent (no cloud-resource-manager fallback).
+  **The project id is load-bearing for free accounts** (live-verified
+  2026-07-15): with an empty body a free account's quota response degrades to a
+  single `All Models` group of per-model buckets carrying no `window` field and a
+  flat `remainingFraction: 1`, i.e. wrong values. Passing the project id returns
+  the normal grouped shape with real usage. Paid accounts return the same
+  response either way. `User-Agent: antigravity` is required — the quota endpoint
+  answers 403 `PERMISSION_DENIED` without it.
 - Default host `cloudcode-pa.googleapis.com`, overridable via
   `YAPCAP_ANTIGRAVITY_HOST`. Live-verified (issue 001, 2026-07-14): all three
   endpoints return 200 on the prod host and the quota shape matches the fixtures;
@@ -1004,24 +1012,37 @@ Usage fetch (per refresh cycle, same shape as Gemini):
 1. Preflight token refresh when within the refresh window; persist the rotated
    access token and keep the stored refresh token (refresh responses return
    none).
-2. `loadCodeAssist` → tier id. A 401 triggers one reactive refresh + one retry.
-3. `retrieveUserQuotaSummary` → groups, sharing the same single reactive-refresh
-   budget across the cycle.
-4. Normalize into four `UsageWindow`s: per group in server order, Weekly then
-   Five Hour. Per window: `group` = group `displayName`, `label` = bucket
+2. `loadCodeAssist` → tier id + `cloudaicompanionProject`. A 401 triggers one
+   reactive refresh + one retry.
+3. `retrieveUserQuotaSummary` (project id from step 2) → groups, sharing the same
+   single reactive-refresh budget across the cycle.
+4. Normalize into one `UsageWindow` per bucket: per group in server order, Weekly
+   then Five Hour. Per window: `group` = group `displayName`, `label` = bucket
    `displayName`, `used_percent = (1 − remainingFraction) × 100` clamped,
    `window_seconds` = 604 800 (weekly) / 18 000 (5h) / `None` for unknown,
    `reset_at` from the RFC3339 `resetTime`. Empty `groups` → `NoUsageData`
    preserving the prior snapshot. Snapshot headline index points at the first
-   5-hour window.
+   5-hour window, falling back to the first weekly window (free accounts have no
+   5-hour bucket), then to index 0.
 5. Snapshot `source: "OAuth"`, identity email from stored metadata, plan badge
    from the tier mapping; persist snapshot + updated metadata (last tier id).
+
+Bucket count is tier-dependent; the layout is not. Both tiers return the same two
+groups with the same labels, so no tier-specific rendering exists:
+
+- **Paid (`paidTier.id` = `g1-pro-tier`/`g1-ultra-tier`): four bars** — Gemini
+  Models {Weekly, Five Hour}, Claude and GPT models {Weekly, Five Hour}.
+- **Free (`paidTier.id` = `free-tier`, "Antigravity Starter Quota"): two bars** —
+  Gemini Models {Weekly}, Claude and GPT models {Weekly}. Free tier has no
+  5-hour cap, so the server sends no 5h bucket.
 
 Display:
 
 - **Panel headline:** the two 5-hour bars (Gemini 5h + Claude/GPT 5h) — the
-  fast-moving ambient signal.
-- **Popup:** all four bars, grouped under the server's group `displayName`s
+  fast-moving ambient signal. When fewer than two 5-hour windows exist (free
+  tier), the applet falls back to the first two windows, which are the two weekly
+  bars.
+- **Popup:** all bars, grouped under the server's group `displayName`s
   (Gemini Models / Claude and GPT models), Weekly then Five Hour within each.
 
 Error classification (`AntigravityError`), mirroring Gemini §3.5:
