@@ -227,7 +227,14 @@ fn copilot_user_code_row<'a>(code: &'a str, copied: bool, enabled: bool) -> Elem
     let copy_icon = widget::Svg::new(copy_icon_handle)
         .symbolic(true)
         .class(cosmic::theme::Svg::custom(|theme| widget::svg::Style {
-            color: Some(theme.cosmic().background.component.on.into()),
+            color: Some(
+                theme
+                    .cosmic()
+                    .background(theme.transparent)
+                    .component
+                    .on
+                    .into(),
+            ),
         }))
         .width(Length::Fixed(16.0))
         .height(Length::Fixed(16.0));

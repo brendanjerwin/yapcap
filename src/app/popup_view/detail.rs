@@ -210,7 +210,9 @@ fn account_column_view<'a>(
             let cosmic = theme.cosmic();
             widget::container::Style {
                 text_color: None,
-                background: Some(Background::Color(cosmic.background.component.base.into())),
+                background: Some(Background::Color(
+                    cosmic.background(theme.transparent).component.base.into(),
+                )),
                 border: cosmic::iced::Border {
                     radius: cosmic.corner_radii.radius_m.into(),
                     width: 0.0,

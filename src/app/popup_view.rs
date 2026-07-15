@@ -339,18 +339,24 @@ fn settings_block_enabled<'a>(
     Element::from(outer.style(|theme| {
         let cosmic = theme.cosmic();
         widget::container::Style {
-            text_color: Some(apply_alpha(cosmic.background.on.into(), 0.45)),
+            text_color: Some(apply_alpha(
+                cosmic.background(theme.transparent).on.into(),
+                0.45,
+            )),
             background: Some(Background::Color(apply_alpha(
-                cosmic.background.component.base.into(),
+                cosmic.background(theme.transparent).component.base.into(),
                 0.45,
             ))),
             border: cosmic::iced::Border {
                 radius: cosmic.corner_radii.radius_s.into(),
                 width: 1.0,
-                color: apply_alpha(cosmic.background.divider.into(), 0.45),
+                color: apply_alpha(cosmic.background(theme.transparent).divider.into(), 0.45),
             },
             shadow: cosmic::iced::Shadow::default(),
-            icon_color: Some(apply_alpha(cosmic.background.on.into(), 0.45)),
+            icon_color: Some(apply_alpha(
+                cosmic.background(theme.transparent).on.into(),
+                0.45,
+            )),
             snap: true,
         }
     }))
@@ -625,7 +631,7 @@ fn tab_button_style(
 ) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    let surface = &cosmic.background.component;
+    let surface = &cosmic.background(theme.transparent).component;
 
     let background = if selected {
         if interaction.pressed {
@@ -636,7 +642,7 @@ fn tab_button_style(
     } else if interaction.pressed {
         surface.divider.into()
     } else if interaction.hovered {
-        cosmic.background.component.hover.into()
+        cosmic.background(theme.transparent).component.hover.into()
     } else {
         surface.base.into()
     };

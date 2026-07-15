@@ -1457,6 +1457,7 @@ Dated YapCap log files are pruned on startup. The app keeps the current day plus
 - Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Codex and Cursor use themed monochrome pairs; Claude and Gemini use a single brand-colored SVG (`claude-color.svg`, `gemini-color.svg`) for both variants.
 - YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running. Native and Flatpak builds both rely on the COSMIC settings daemon config watcher for those live updates.
+- The COSMIC theme config is versioned (`~/.config/cosmic/com.system76.CosmicTheme.<Mode>/v<N>/`), and the version YAPCAP reads is whatever the pinned `libcosmic` declares on `Theme`. COSMIC keeps older version directories on disk without updating them, so a `libcosmic` pin older than the desktop's theme version silently reads a stale accent instead of failing. `cosmic-config` falls back to `version - 1` when a version directory is missing, so a newer pin still themes correctly on older COSMIC installs; a stale pin is the only broken direction. Bump `libcosmic` when COSMIC bumps its theme config version.
 
 ### 7.2 Popup
 

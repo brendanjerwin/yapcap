@@ -87,7 +87,7 @@ pub(super) fn badge_neutral(label: impl Into<String>) -> Element<'static, Messag
     let label = label.into();
     badge_container(label, move |theme| {
         let cosmic = theme.cosmic();
-        let surface = &cosmic.background.component;
+        let surface = &cosmic.background(theme.transparent).component;
         badge_style(
             apply_alpha(surface.base.into(), 0.42),
             surface.on.into(),
@@ -101,7 +101,7 @@ pub(super) fn badge_neutral_soft(label: impl Into<String>) -> Element<'static, M
     let label = label.into();
     badge_container(label, move |theme| {
         let cosmic = theme.cosmic();
-        let surface = &cosmic.background.component;
+        let surface = &cosmic.background(theme.transparent).component;
         badge_style(
             apply_alpha(surface.base.into(), 0.24),
             apply_alpha(surface.on.into(), 0.52),

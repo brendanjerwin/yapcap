@@ -465,15 +465,17 @@ impl cosmic::Application for AppModel {
                 let cosmic = theme.cosmic();
                 let corners = cosmic.corner_radii;
                 widget::container::Style {
-                    text_color: Some(cosmic.background.on.into()),
-                    background: Some(Background::Color(cosmic.background.base.into())),
+                    text_color: Some(cosmic.background(theme.transparent).on.into()),
+                    background: Some(Background::Color(
+                        cosmic.background(theme.transparent).base.into(),
+                    )),
                     border: cosmic::iced::Border {
                         radius: corners.radius_m.into(),
                         width: 1.0,
-                        color: cosmic.background.divider.into(),
+                        color: cosmic.background(theme.transparent).divider.into(),
                     },
                     shadow: Shadow::default(),
-                    icon_color: Some(cosmic.background.on.into()),
+                    icon_color: Some(cosmic.background(theme.transparent).on.into()),
                     snap: true,
                 }
             })

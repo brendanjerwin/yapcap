@@ -285,6 +285,7 @@ impl AppModel {
         );
         cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(
             app_popup::<Self>(
+                |_| Default::default(),
                 move |state| {
                     let new_id = Id::unique();
                     state.popup.replace(new_id);

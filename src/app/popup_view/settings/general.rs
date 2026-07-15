@@ -265,7 +265,7 @@ fn refresh_option_interaction_style(
 ) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    let surface = &cosmic.background.component;
+    let surface = &cosmic.background(theme.transparent).component;
 
     let (background, foreground, border_color) = if selected {
         (
@@ -281,7 +281,7 @@ fn refresh_option_interaction_style(
         )
     } else if interaction.hovered {
         (
-            cosmic.background.component.hover.into(),
+            cosmic.background(theme.transparent).component.hover.into(),
             surface.on.into(),
             surface.divider.into(),
         )

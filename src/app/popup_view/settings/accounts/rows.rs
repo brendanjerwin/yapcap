@@ -217,7 +217,15 @@ pub(super) fn show_all_accounts_row(
     let label = widget::tooltip::tooltip(
         container(widget::text(fl!("show-all-accounts-label")).size(13)).style(
             move |theme: &cosmic::Theme| {
-                let color = apply_alpha(theme.cosmic().background.component.on.into(), opacity);
+                let color = apply_alpha(
+                    theme
+                        .cosmic()
+                        .background(theme.transparent)
+                        .component
+                        .on
+                        .into(),
+                    opacity,
+                );
                 widget::container::Style {
                     text_color: Some(color),
                     background: None,
@@ -260,7 +268,15 @@ fn disabled_show_all_accounts_toggle(show_all: bool) -> Element<'static, Message
     .width(Length::Fixed(20.0))
     .height(Length::Fixed(20.0))
     .style(|theme: &cosmic::Theme| {
-        let color = apply_alpha(theme.cosmic().background.component.on.into(), 0.45);
+        let color = apply_alpha(
+            theme
+                .cosmic()
+                .background(theme.transparent)
+                .component
+                .on
+                .into(),
+            0.45,
+        );
         widget::container::Style {
             text_color: None,
             background: Some(Background::Color(color)),
@@ -392,7 +408,10 @@ fn account_selected_marker(selected: bool, enabled: bool) -> Element<'static, Me
         let color = if enabled {
             cosmic.accent.base.into()
         } else {
-            apply_alpha(cosmic.background.component.on.into(), 0.45)
+            apply_alpha(
+                cosmic.background(theme.transparent).component.on.into(),
+                0.45,
+            )
         };
         widget::container::Style {
             text_color: Some(color),
@@ -433,7 +452,7 @@ fn account_row_container<'a>(
     .width(Length::Fill)
     .style(move |theme: &cosmic::Theme| {
         let cosmic = theme.cosmic();
-        let surface = &cosmic.background.component;
+        let surface = &cosmic.background(theme.transparent).component;
         let warning = cosmic.warning.base;
         widget::container::Style {
             text_color: Some(surface.on.into()),
@@ -497,7 +516,7 @@ fn account_row_button_style(
 ) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    let foreground = cosmic.background.component.on.into();
+    let foreground = cosmic.background(theme.transparent).component.on.into();
 
     style.icon_color = Some(apply_alpha(foreground, opacity));
     style.text_color = Some(apply_alpha(foreground, opacity));
@@ -536,7 +555,14 @@ fn account_action_icon_button(
     let icon = widget::Svg::new(handle)
         .symbolic(true)
         .class(cosmic::theme::Svg::custom(|theme| widget::svg::Style {
-            color: Some(theme.cosmic().background.component.on.into()),
+            color: Some(
+                theme
+                    .cosmic()
+                    .background(theme.transparent)
+                    .component
+                    .on
+                    .into(),
+            ),
         }))
         .opacity(if available { 1.0_f32 } else { 0.45_f32 })
         .width(Length::Fixed(16.0))
@@ -556,7 +582,7 @@ fn account_action_icon_button(
 fn account_row_icon_button_style(theme: &cosmic::Theme, opacity: f32) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    let foreground = cosmic.background.component.on.into();
+    let foreground = cosmic.background(theme.transparent).component.on.into();
 
     style.icon_color = Some(apply_alpha(foreground, opacity));
     style.text_color = Some(apply_alpha(foreground, opacity));
