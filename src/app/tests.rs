@@ -4,6 +4,7 @@ use super::applet::{
     selected_provider_all_bar_layouts,
 };
 use super::popup_view::{POPUP_COLUMN_WIDTH, popup_session_size, popup_settings_size};
+use super::refresh::should_refresh_account_statuses;
 use super::{
     APPLET_ACCOUNT_GAP, APPLET_ICON_GAP, APPLET_PERCENT_ACCOUNT_GAP, AppModel, AppState, Config,
     LaunchMode, Message, PanelIconStyle, PopupBodyMeasurements, PopupRoute, ProviderId, Size,
@@ -1031,6 +1032,35 @@ fn antigravity_account(id: &str) -> crate::config::ManagedAntigravityAccountConf
         updated_at: Utc::now(),
         last_authenticated_at: None,
     }
+}
+
+#[test]
+fn cursor_status_refresh_skipped_without_accounts() {
+    let _env = crate::test_support::test_env();
+    let config = Config::default();
+
+    assert!(config.cursor_enabled);
+    assert!(!should_refresh_account_statuses(
+        &config,
+        ProviderId::Cursor
+    ));
+}
+
+#[test]
+fn cursor_status_refresh_runs_with_accounts() {
+    let _env = crate::test_support::test_env();
+    seed_account_storage(
+        crate::config::paths().cursor_accounts_dir,
+        ProviderId::Cursor,
+        "one",
+        "one@example.com",
+    );
+    let mut config = Config::default();
+    config
+        .cursor_managed_accounts
+        .push(cursor_account("one", "one@example.com"));
+
+    assert!(should_refresh_account_statuses(&config, ProviderId::Cursor));
 }
 
 fn seed_account_storage(dir: PathBuf, provider: ProviderId, id: &str, email: &str) {

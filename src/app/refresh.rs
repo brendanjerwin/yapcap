@@ -341,13 +341,19 @@ fn account_status_label(status: crate::model::AccountSelectionStatus) -> &'stati
     }
 }
 
+#[must_use]
+pub fn should_refresh_account_statuses(config: &Config, provider: ProviderId) -> bool {
+    config.provider_enabled(provider)
+        && registry::supports_background_status_refresh(provider)
+        && !registry::discover_accounts(provider, config).is_empty()
+}
+
 pub fn refresh_provider_account_statuses_task(
     config: &Config,
     state: &AppState,
     provider: ProviderId,
 ) -> Task<Message> {
-    if !config.provider_enabled(provider) || !registry::supports_background_status_refresh(provider)
-    {
+    if !should_refresh_account_statuses(config, provider) {
         return Task::none();
     }
 
