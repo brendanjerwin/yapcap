@@ -13,9 +13,9 @@ pub enum ProviderId {
     Claude,
     Cursor,
     Gemini,
+    Antigravity,
     Copilot,
     Minimax,
-    Antigravity,
 }
 
 impl ProviderId {
@@ -24,9 +24,9 @@ impl ProviderId {
         Self::Claude,
         Self::Cursor,
         Self::Gemini,
+        Self::Antigravity,
         Self::Copilot,
         Self::Minimax,
-        Self::Antigravity,
     ];
 
     #[must_use]
@@ -36,9 +36,9 @@ impl ProviderId {
             Self::Claude => "Claude",
             Self::Cursor => "Cursor",
             Self::Gemini => "Gemini",
+            Self::Antigravity => "Antigravity",
             Self::Copilot => "Copilot",
             Self::Minimax => "Minimax",
-            Self::Antigravity => "Antigravity",
         }
     }
 }

@@ -426,11 +426,16 @@ pub(crate) fn mark_account_reauthenticated(
 }
 
 fn ensure_provider_states(state: &mut AppState) {
+    let mut ordered = Vec::with_capacity(ProviderId::ALL.len());
     for provider in ProviderId::ALL {
-        if state.provider(provider).is_none() {
-            state.providers.push(ProviderRuntimeState::empty(provider));
-        }
+        let existing = state
+            .providers
+            .iter()
+            .position(|entry| entry.provider == provider)
+            .map(|index| state.providers.swap_remove(index));
+        ordered.push(existing.unwrap_or_else(|| ProviderRuntimeState::empty(provider)));
     }
+    state.providers = ordered;
 }
 
 #[cfg(test)]
@@ -527,6 +532,23 @@ mod tests {
         for provider in &state.providers {
             assert!(!provider.is_refreshing);
         }
+    }
+
+    #[test]
+    fn load_initial_state_reorders_stale_shared_runtime_into_canonical_order() {
+        let config = Config::default();
+        let mut shared_state = AppState::empty();
+        shared_state.providers.rotate_left(1);
+        shared_state
+            .provider_mut(ProviderId::Antigravity)
+            .unwrap()
+            .is_refreshing = true;
+
+        let state = load_initial_state(&config, Some(SharedRuntimeState::new(shared_state, 1)));
+
+        let order: Vec<ProviderId> = state.providers.iter().map(|entry| entry.provider).collect();
+        assert_eq!(order, ProviderId::ALL.to_vec());
+        assert!(state.provider(ProviderId::Antigravity).is_some());
     }
 
     #[test]

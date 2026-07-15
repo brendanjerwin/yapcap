@@ -1469,7 +1469,8 @@ owns provider detail cards and `app::popup_view::settings::*` owns the settings 
 - Header: "YapCap" + "Refresh now" button.
 - Navigation row:
   - provider detail: one tab per enabled provider with its icon and headline percent;
-  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Minimax, and Copilot, using a theme-symbolic gear icon for General and provider icons for provider settings.
+  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and Minimax, using a theme-symbolic gear icon for General and provider icons for provider settings.
+- Providers render in a single fixed order (`ProviderId::ALL`) everywhere they are listed: Codex, Claude, Cursor, Gemini, Antigravity, Copilot, Minimax.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
 - Body panel (scrollable): shows either the selected provider details or the selected settings category.
 - Provider view always starts with a provider title card (icon + name). Below it, each displayed selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one displayed selected account the column fills the full popup width. When a provider has two or more displayed selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to four columns and up to the widest provider across all tabs.
