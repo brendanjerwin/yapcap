@@ -18,6 +18,7 @@ pub(super) fn test_app() -> AppModel {
         detection: crate::detection::DetectionSnapshot::default(),
         selected_provider: ProviderId::Codex,
         popup_route: crate::app::PopupRoute::ProviderDetail,
+        provider_picker_open: false,
         update_status: crate::updates::UpdateStatus::Unchecked,
         launch_mode: crate::app::LaunchMode::Standalone,
         popup_size: None,

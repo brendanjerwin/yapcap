@@ -69,6 +69,7 @@ const ACCENT_SOFT_FILL_ALPHA: f32 = 0.14;
 
 #[derive(Clone, Copy)]
 pub struct ProviderLoginStates<'a> {
+    pub provider_picker_open: bool,
     pub codex: Option<&'a CodexLoginState>,
     pub claude: Option<&'a ClaudeLoginState>,
     pub cursor_scan: &'a CursorScanState,
@@ -98,6 +99,10 @@ pub fn popup_content<'a>(
     let empty_state = popup_empty_state_active(state);
 
     let header = popup_header(route, empty_state);
+    let picker = (logins.provider_picker_open
+        && matches!(route, PopupRoute::ProviderDetail)
+        && !empty_state)
+        .then(|| provider_picker_view(state, detection));
 
     let nav_row: Option<Element<'_, Message>> = match route {
         PopupRoute::ProviderDetail if empty_state => None,
@@ -142,6 +147,9 @@ pub fn popup_content<'a>(
     let body_stack = popup_body_stack(state, config, detection, logins, update_status, body_panel);
 
     let mut content = column![narrow_chrome(header)];
+    if let Some(picker) = picker {
+        content = content.push(narrow_chrome(picker));
+    }
     if let Some(nav_row) = nav_row {
         content = content.push(narrow_chrome(nav_row));
     }
@@ -342,11 +350,71 @@ fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Messa
     .spacing(12);
 
     if matches!(route, PopupRoute::ProviderDetail) && !empty_state {
-        header =
-            header.push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
+        let add_provider = widget::tooltip::tooltip(
+            widget::button::standard("+").on_press(Message::ToggleProviderPicker),
+            widget::text(fl!("add-provider")).size(12),
+            widget::tooltip::Position::Top,
+        );
+        header = header
+            .push(add_provider)
+            .push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
     }
 
     header.into()
+}
+
+fn provider_picker_providers(state: &AppState, detection: &DetectionSnapshot) -> Vec<ProviderId> {
+    let mut providers = ProviderId::ALL.to_vec();
+    providers.sort_by_key(|provider| !detected_without_accounts(state, detection, *provider));
+    providers
+}
+
+fn provider_picker_view(
+    state: &AppState,
+    detection: &DetectionSnapshot,
+) -> Element<'static, Message> {
+    let providers = provider_picker_providers(state, detection);
+    let detected_count = providers
+        .iter()
+        .take_while(|provider| detected_without_accounts(state, detection, **provider))
+        .count();
+    let (detected, remaining) = providers.split_at(detected_count);
+    let mut content = column!().spacing(4).width(Length::Fill);
+
+    if !detected.is_empty() {
+        content = content.push(widget::text(fl!("provider-picker-detected-section")).size(12));
+        for provider in detected {
+            content = content.push(provider_picker_item(*provider, true));
+        }
+    }
+
+    content = content.push(widget::text(fl!("provider-picker-all-section")).size(12));
+    for provider in remaining {
+        content = content.push(provider_picker_item(*provider, false));
+    }
+
+    row![
+        cosmic::iced::widget::Space::new().width(Length::Fill),
+        container(content.padding(8)).width(Length::Fixed(240.0)),
+    ]
+    .into()
+}
+
+fn provider_picker_item(provider: ProviderId, detected: bool) -> Element<'static, Message> {
+    let mut content = row![
+        widget::icon::icon(provider_icon_handle(provider, provider_icon_variant())).size(16),
+        widget::text(provider.label()),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    if detected {
+        content = content.push(cosmic::iced::widget::Space::new().width(Length::Fill));
+        content = content.push(badge_accent(fl!("provider-detected-add-account")));
+    }
+    widget::button::custom(content)
+        .width(Length::Fill)
+        .on_press(Message::OpenProviderPickerProvider(provider))
+        .into()
 }
 
 fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -900,5 +968,26 @@ mod tests {
             &detection,
             ProviderId::Codex
         ));
+    }
+
+    #[test]
+    fn provider_picker_lists_detected_unconfigured_providers_first() {
+        let home = tempfile::tempdir().expect("create temporary home");
+        std::fs::create_dir(home.path().join(".codex")).expect("create Codex marker");
+        let detection = crate::detection::detect(home.path());
+        let state = AppState::empty();
+
+        assert_eq!(
+            provider_picker_providers(&state, &detection),
+            vec![
+                ProviderId::Codex,
+                ProviderId::Claude,
+                ProviderId::Cursor,
+                ProviderId::Gemini,
+                ProviderId::Antigravity,
+                ProviderId::Copilot,
+                ProviderId::Minimax,
+            ]
+        );
     }
 }

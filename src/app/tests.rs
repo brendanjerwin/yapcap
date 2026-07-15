@@ -119,6 +119,22 @@ fn non_owner_refresh_now_writes_shared_control_requests_without_refreshing() {
 }
 
 #[test]
+fn provider_picker_selection_opens_settings_and_closes_picker() {
+    let mut app = test_app(None);
+
+    let _ = app.handle_message(Message::ToggleProviderPicker);
+    assert!(app.provider_picker_open);
+
+    let _ = app.handle_message(Message::OpenProviderPickerProvider(ProviderId::Gemini));
+
+    assert_eq!(
+        app.popup_route,
+        PopupRoute::Settings(super::SettingsRoute::Provider(ProviderId::Gemini))
+    );
+    assert!(!app.provider_picker_open);
+}
+
+#[test]
 fn refresh_now_excludes_disabled_providers_from_requests() {
     let mut app = test_app(None);
     app.config.claude_enablement = crate::config::ProviderEnablement::Disabled;
@@ -984,6 +1000,7 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         detection: crate::detection::DetectionSnapshot::default(),
         selected_provider: ProviderId::Codex,
         popup_route: PopupRoute::ProviderDetail,
+        provider_picker_open: false,
         update_status: UpdateStatus::Unchecked,
         launch_mode: LaunchMode::Standalone,
         popup_size: None,

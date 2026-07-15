@@ -65,3 +65,10 @@ Started: 2026-07-15T14:53:37+02:00
 - Files changed: src/app/host_auth_watch.rs, src/app/provider_actions.rs, docs/spec.md, issues/provider-discovery/issues/015-live-redetection.md, issues/provider-discovery/progress.txt
 - Checks run: cargo fmt, cargo test host_auth_watch, cargo check, cargo test (523 passed), just check (clippy -D warnings, clean), git diff --check
 - Learnings: Gemini needs both the direct auth-file watch and its directory watch when present, otherwise `settings.json` changes can be missed.
+
+## 2026-07-15T19:54:52+02:00 - 016-provider-picker-button.md
+
+- Implemented: Added a permanent, accessible header `+` button that toggles a picker of all providers. Detected providers without accounts appear first with accent add-account emphasis; selecting any provider opens its Settings category and closes the picker.
+- Files changed: src/app/mod.rs, src/app/popup_view.rs, src/app/tests.rs, src/app/login/login_flow_tests/support.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/provider-discovery/issues/016-provider-picker-button.md, issues/provider-discovery/progress.txt
+- Checks run: cargo fmt, cargo test (525 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
+- Learnings: Folding short-lived picker state into the popup render inputs avoids expanding the render function beyond the repository's strict clippy argument limit.

@@ -1471,7 +1471,7 @@ Dated YapCap log files are pruned on startup. The app keeps the current day plus
 `app::popup_view::popup_content` composes the popup shell, while `app::popup_view::detail`
 owns provider detail cards and `app::popup_view::settings::*` owns the settings routes:
 
-- Header: "YapCap" + "Refresh now" button. When no provider tabs are available, the Refresh now button is hidden.
+- Header: "YapCap", an `Add provider` (`+`) button, and a `Refresh now` button. The Add provider button opens a picker that lists all providers, placing detected providers with no YapCap account first and emphasizing their add-account journey; every entry opens that provider's Settings category. When no provider tabs are available, both header actions are hidden.
 - Navigation row:
   - provider detail: one tab per enabled provider with its icon and headline percent. Tabs wrap into additional rows after four per row; partial rows keep four equal-width slots so every tab has the same width, and the popup grows taller by one tab-row height per extra row;
   - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and Minimax, using a theme-symbolic gear icon for General and provider icons for provider settings. These tabs wrap the same way, with General occupying the first slot of the first row.

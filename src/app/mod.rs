@@ -98,6 +98,7 @@ pub struct AppModel {
     detection: crate::detection::DetectionSnapshot,
     selected_provider: ProviderId,
     popup_route: PopupRoute,
+    provider_picker_open: bool,
     update_status: UpdateStatus,
     launch_mode: LaunchMode,
     popup_size: Option<Size>,
@@ -161,6 +162,8 @@ pub enum Message {
     RefreshOwnershipAcquired(Result<RefreshOwner, String>),
     Tick,
     RefreshNow,
+    ToggleProviderPicker,
+    OpenProviderPickerProvider(ProviderId),
     ProviderRefreshed(Box<ProviderRefreshResult>),
     SelectProvider(ProviderId),
     NavigateTo(PopupRoute),
@@ -365,6 +368,7 @@ impl cosmic::Application for AppModel {
             detection,
             selected_provider,
             popup_route: PopupRoute::ProviderDetail,
+            provider_picker_open: false,
             update_status: UpdateStatus::Unchecked,
             launch_mode,
             popup_size: None,
@@ -474,6 +478,7 @@ impl cosmic::Application for AppModel {
             &self.config,
             &self.detection,
             ProviderLoginStates {
+                provider_picker_open: self.provider_picker_open,
                 codex: self.codex_login.as_ref(),
                 claude: self.claude_login.as_ref(),
                 cursor_scan: &self.cursor_scan,
@@ -585,6 +590,13 @@ impl AppModel {
             Message::RefreshNow => {
                 return Some(self.handle_refresh_now());
             }
+            Message::ToggleProviderPicker => {
+                self.provider_picker_open = !self.provider_picker_open;
+            }
+            Message::OpenProviderPickerProvider(provider) => {
+                self.provider_picker_open = false;
+                return self.navigate_to(PopupRoute::Settings(SettingsRoute::Provider(provider)));
+            }
             Message::ProviderRefreshed(refresh_result) => {
                 return Some(self.handle_provider_refreshed(*refresh_result));
             }
@@ -598,6 +610,7 @@ impl AppModel {
                 return Some(self.select_provider_tab(provider));
             }
             Message::NavigateTo(route) => {
+                self.provider_picker_open = false;
                 return self.navigate_to(route);
             }
             Message::UpdateChecked { status, attempt } => {
