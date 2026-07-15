@@ -111,6 +111,15 @@ pub(super) fn badge_neutral_soft(label: impl Into<String>) -> Element<'static, M
     })
 }
 
+pub(super) fn badge_accent(label: impl Into<String>) -> Element<'static, Message> {
+    let label = label.into();
+    badge_container(label, move |theme| {
+        let cosmic = theme.cosmic();
+        let color = cosmic.accent.base.into();
+        badge_style(apply_alpha(color, 0.14), color, color, theme)
+    })
+}
+
 pub(super) fn plan_badge(label: &str) -> Element<'static, Message> {
     badge_with_tooltip(
         badge_neutral(format_plan_label(label)),

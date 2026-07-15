@@ -472,6 +472,7 @@ impl cosmic::Application for AppModel {
         let content = popup_view::popup_content(
             &self.state,
             &self.config,
+            &self.detection,
             ProviderLoginStates {
                 codex: self.codex_login.as_ref(),
                 claude: self.claude_login.as_ref(),

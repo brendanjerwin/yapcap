@@ -44,3 +44,10 @@ Started: 2026-07-15T14:53:37+02:00
 - Files changed: src/provider_enablement.rs, src/config.rs, src/runtime.rs, app enablement call sites/tests, docs/spec.md, issue metadata
 - Checks run: cargo fmt, cargo test (518 passed), cargo check, just check (clippy -D warnings), git diff --check
 - Learnings: Keeping the resolved flag in AppState lets refresh work stay independent of filesystem detection while reconciliation remains the one place that recomputes enablement.
+
+## 2026-07-15T19:42:28+02:00 - 013-detected-tab-and-cta.md
+
+- Implemented: Added a detection-aware provider detail treatment: an accent Detected chip beside the provider title plus the specified Settings deep-link CTA, only when detection is positive and no YapCap account exists. Added localized copy and documented the behavior.
+- Files changed: src/app/mod.rs, src/app/popup_view.rs, src/app/popup_view/badges.rs, src/app/popup_view/detail.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/provider-discovery/issues/013-detected-tab-and-cta.md, issues/provider-discovery/progress.txt
+- Checks run: cargo fmt, cargo test (519 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
+- Learnings: Detection belongs in the popup render inputs rather than AppState, keeping runtime state filesystem-independent. The existing login-required action card has the same measured height as the new CTA, so popup sizing remains stable.

@@ -6,9 +6,9 @@ mod measure;
 mod settings;
 
 use self::badges::{
-    account_label_text, apply_alpha, badge_destructive, badge_destructive_soft, badge_neutral,
-    badge_neutral_soft, badge_success, badge_success_soft, badge_warning, badge_warning_soft,
-    badge_with_tooltip, plan_badge,
+    account_label_text, apply_alpha, badge_accent, badge_destructive, badge_destructive_soft,
+    badge_neutral, badge_neutral_soft, badge_success, badge_success_soft, badge_warning,
+    badge_warning_soft, badge_with_tooltip, plan_badge,
 };
 use self::detail::{
     active_snapshot, empty_state_view, provider_body_height_multi, selected_provider_view,
@@ -18,6 +18,7 @@ use self::settings::{general_settings_view, provider_settings_view, settings_bod
 use super::provider_assets::{provider_icon_handle, provider_icon_variant};
 use crate::app::{Message, PopupRoute, SettingsRoute};
 use crate::config::{Config, PanelIconStyle, ResetTimeFormat, UsageAmountFormat};
+use crate::detection::DetectionSnapshot;
 use crate::fl;
 use crate::model::{
     AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState, UsageWindow,
@@ -87,6 +88,7 @@ pub enum PopupBodyMeasureTarget {
 pub fn popup_content<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     selected_provider: ProviderId,
     route: &'a PopupRoute,
@@ -108,11 +110,11 @@ pub fn popup_content<'a>(
     let body = popup_body_view(
         state,
         config,
+        detection,
         logins,
         selected,
         route,
         update_status,
-        empty_state,
     );
 
     let footer_action: Element<'_, Message> = match route {
@@ -134,7 +136,7 @@ pub fn popup_content<'a>(
         .height(Length::Fill)
         .into();
 
-    let body_stack = popup_body_stack(state, config, logins, update_status, body_panel);
+    let body_stack = popup_body_stack(state, config, detection, logins, update_status, body_panel);
 
     let mut content = column![narrow_chrome(header)];
     if let Some(nav_row) = nav_row {
@@ -154,15 +156,15 @@ pub fn popup_content<'a>(
 fn popup_body_view<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     selected: Option<&'a ProviderRuntimeState>,
     route: &'a PopupRoute,
     update_status: &'a UpdateStatus,
-    empty_state: bool,
 ) -> Element<'a, Message> {
     match route {
-        PopupRoute::ProviderDetail if empty_state => empty_state_view(),
-        PopupRoute::ProviderDetail => selected_provider_view(selected, state, config),
+        PopupRoute::ProviderDetail if popup_empty_state_active(state) => empty_state_view(),
+        PopupRoute::ProviderDetail => selected_provider_view(selected, state, config, detection),
         PopupRoute::Settings(SettingsRoute::General) => {
             general_settings_view(config, update_status)
         }
@@ -175,6 +177,7 @@ fn popup_body_view<'a>(
 fn popup_body_stack<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     update_status: &'a UpdateStatus,
     body_panel: Element<'a, Message>,
@@ -193,7 +196,7 @@ fn popup_body_stack<'a>(
     for provider in state.providers.iter().filter(|provider| provider.enabled) {
         let provider_id = provider.provider;
         let width = selected_account_count(state, provider_id) * POPUP_WIDTH;
-        let body = selected_provider_view(Some(provider), state, config);
+        let body = selected_provider_view(Some(provider), state, config, detection);
         stack = stack.push(Measure::new(body, width, move |size| {
             Message::PopupBodyMeasured(PopupBodyMeasureTarget::Provider(provider_id), size)
         }));
@@ -739,8 +742,11 @@ fn tab_button_style(
     style
 }
 
-fn provider_summary(provider: &ProviderRuntimeState) -> Element<'static, Message> {
-    let title = row![
+fn provider_summary(
+    provider: &ProviderRuntimeState,
+    detected_without_accounts: bool,
+) -> Element<'static, Message> {
+    let mut title = row![
         widget::icon::icon(provider_icon_handle(
             provider.provider,
             provider_icon_variant(),
@@ -752,6 +758,10 @@ fn provider_summary(provider: &ProviderRuntimeState) -> Element<'static, Message
     ]
     .spacing(10)
     .align_y(Alignment::Center);
+
+    if detected_without_accounts {
+        title = title.push(badge_accent(fl!("provider-detected-chip")));
+    }
 
     card(title)
 }

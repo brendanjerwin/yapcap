@@ -24,16 +24,19 @@ pub(super) fn selected_provider_view<'a>(
     provider: Option<&'a ProviderRuntimeState>,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Element<'a, Message> {
     let Some(provider) = provider else {
         return empty_state_view();
     };
     let accounts = state.display_selected_accounts(provider.provider);
-    let summary = provider_summary(provider);
+    let detected_without_accounts =
+        is_detected_without_accounts(state, detection, provider.provider);
+    let summary = provider_summary(provider, detected_without_accounts);
 
     if accounts.len() <= 1 {
         let account = accounts.first().copied();
-        let items = account_column_items(account, provider, state, config);
+        let items = account_column_items(account, provider, state, config, detection);
         let mut content = column![summary]
             .spacing(PROVIDER_CARD_SPACING)
             .width(Length::Fill);
@@ -47,7 +50,9 @@ pub(super) fn selected_provider_view<'a>(
             .width(Length::Fill);
         let mut cols_row = row![].spacing(8);
         for account in &accounts {
-            cols_row = cols_row.push(account_column_view(account, provider, state, config));
+            cols_row = cols_row.push(account_column_view(
+                account, provider, state, config, detection,
+            ));
         }
         content = content.push(cols_row);
         Element::from(content)
@@ -86,12 +91,15 @@ fn account_column_items<'a>(
     provider: &'a ProviderRuntimeState,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Vec<Element<'a, Message>> {
     let mut items = Vec::new();
     if let Some(account) = account {
         items.push(account_column_header(account, provider));
     }
-    items.extend(account_column_body_items(account, provider, state, config));
+    items.extend(account_column_body_items(
+        account, provider, state, config, detection,
+    ));
     items
 }
 
@@ -100,12 +108,13 @@ fn account_column_body_items<'a>(
     provider: &'a ProviderRuntimeState,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Vec<Element<'a, Message>> {
     let mut items = Vec::new();
     let snapshot = active_snapshot_for_account(account, provider);
     if let Some(snapshot) = snapshot {
         if account.is_some_and(|account| account.health == ProviderHealth::Error) {
-            items.extend(provider_status_info(provider, state, account));
+            items.extend(provider_status_info(provider, state, account, detection));
         }
         let mut previous_group: Option<&str> = None;
         for window in &snapshot.windows {
@@ -140,7 +149,7 @@ fn account_column_body_items<'a>(
             }
         }
     } else {
-        items.extend(provider_status_info(provider, state, account));
+        items.extend(provider_status_info(provider, state, account, detection));
     }
     items
 }
@@ -195,9 +204,10 @@ fn account_column_view<'a>(
     provider: &'a ProviderRuntimeState,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Element<'a, Message> {
     let header = account_column_header(account, provider);
-    let body = account_column_body_items(Some(account), provider, state, config);
+    let body = account_column_body_items(Some(account), provider, state, config, detection);
     let mut content = column![header]
         .spacing(PROVIDER_CARD_SPACING)
         .width(Length::Fill);
@@ -268,7 +278,11 @@ fn provider_status_info(
     provider: &ProviderRuntimeState,
     state: &AppState,
     active_account: Option<&ProviderAccountRuntimeState>,
+    detection: &crate::detection::DetectionSnapshot,
 ) -> Option<Element<'static, Message>> {
+    if is_detected_without_accounts(state, detection, provider.provider) {
+        return Some(detected_provider_cta(provider.provider));
+    }
     let message = provider_status_message(provider, state, active_account);
     if message.is_empty() {
         return None;
@@ -279,6 +293,29 @@ fn provider_status_info(
         None,
         login_required_settings_action(provider, state, active_account),
     ))
+}
+
+fn detected_provider_cta(provider: ProviderId) -> Element<'static, Message> {
+    info_block(
+        fl!("provider-detected-chip"),
+        fl!("provider-detected-cta", provider = provider.label()),
+        None,
+        Some(
+            widget::button::suggested(fl!("provider-detected-add-account"))
+                .on_press(Message::NavigateTo(PopupRoute::Settings(
+                    SettingsRoute::Provider(provider),
+                )))
+                .into(),
+        ),
+    )
+}
+
+fn is_detected_without_accounts(
+    state: &AppState,
+    detection: &crate::detection::DetectionSnapshot,
+    provider: ProviderId,
+) -> bool {
+    detection.detected(provider) && state.accounts_for(provider).is_empty()
 }
 
 fn login_required_settings_action(
@@ -970,6 +1007,39 @@ mod tests {
 
         assert!(!should_show_login_required_settings_action(
             &provider, &state, None
+        ));
+    }
+
+    #[test]
+    fn detected_provider_without_accounts_shows_detected_cta() {
+        let home = tempfile::tempdir().expect("create temporary home");
+        std::fs::create_dir(home.path().join(".codex")).expect("create Codex marker");
+        let detection = crate::detection::detect(home.path());
+        let state = AppState::empty();
+
+        assert!(is_detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Codex
+        ));
+        assert!(!is_detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Claude
+        ));
+
+        let mut with_account = state.clone();
+        with_account
+            .provider_accounts
+            .push(ProviderAccountRuntimeState::empty(
+                ProviderId::Codex,
+                "codex-test",
+                "test@example.com",
+            ));
+        assert!(!is_detected_without_accounts(
+            &with_account,
+            &detection,
+            ProviderId::Codex
         ));
     }
 }
