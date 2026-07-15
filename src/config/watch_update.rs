@@ -34,6 +34,15 @@ impl Config {
             "copilot_enabled" => self.copilot_enabled = update.copilot_enabled,
             "minimax_enabled" => self.minimax_enabled = update.minimax_enabled,
             "antigravity_enabled" => self.antigravity_enabled = update.antigravity_enabled,
+            "codex_enablement" => self.codex_enablement = update.codex_enablement,
+            "claude_enablement" => self.claude_enablement = update.claude_enablement,
+            "cursor_enablement" => self.cursor_enablement = update.cursor_enablement,
+            "gemini_enablement" => self.gemini_enablement = update.gemini_enablement,
+            "copilot_enablement" => self.copilot_enablement = update.copilot_enablement,
+            "minimax_enablement" => self.minimax_enablement = update.minimax_enablement,
+            "antigravity_enablement" => {
+                self.antigravity_enablement = update.antigravity_enablement;
+            }
             "show_all_accounts" => self.show_all_accounts = update.show_all_accounts.clone(),
             "log_level" => self.log_level.clone_from(&update.log_level),
             _ => return false,

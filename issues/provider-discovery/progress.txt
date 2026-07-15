@@ -31,3 +31,10 @@ Started: 2026-07-15T14:53:37+02:00
 - Files changed: src/app/popup_view.rs, src/app/popup_view/detail.rs, src/app/mod.rs, src/app/provider_actions.rs, i18n/en/yapcap.ftl, docs/spec.md, issues/provider-discovery/issues/010-popup-empty-state.md, issues/provider-discovery/progress.txt
 - Checks run: cargo fmt, cargo test (512 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
 - Learnings: The measured body needs its own target and cached height because the provider-height aggregation intentionally has no value with zero enabled providers.
+
+## 2026-07-15T19:25:22+02:00 - 011-tri-state-config-migration.md
+
+- Implemented: Added `ProviderEnablement` (`auto` / `enabled` / `disabled`) and seven defaulted config fields at v503. Startup now uses raw config-key reads to migrate only missing enablement keys from legacy booleans, while settings writes keep both representations synchronized.
+- Files changed: src/config.rs, src/config/watch_update.rs, src/app/mod.rs, issues/provider-discovery/issues/011-tri-state-config-migration.md, issues/provider-discovery/progress.txt
+- Checks run: cargo fmt, cargo test (517 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
+- Learnings: `cosmic_config::Config::get` reports a missing key as `NoConfigDirectory` when no system-default config path exists; migration treats that equivalent to `NotFound` but deliberately leaves malformed values as `Auto`.

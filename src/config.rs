@@ -2,7 +2,9 @@
 
 use crate::model::ProviderId;
 use chrono::{DateTime, Utc};
-use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
+use cosmic::cosmic_config::{
+    self, ConfigGet, ConfigSet, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry,
+};
 use dirs::{cache_dir, state_dir};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
@@ -34,6 +36,20 @@ pub struct Config {
     pub minimax_enabled: bool,
     #[serde(default = "default_antigravity_enabled")]
     pub antigravity_enabled: bool,
+    #[serde(default)]
+    pub codex_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub claude_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub cursor_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub gemini_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub copilot_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub minimax_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub antigravity_enablement: ProviderEnablement,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -93,6 +109,13 @@ impl Default for Config {
             copilot_enabled: true,
             minimax_enabled: true,
             antigravity_enabled: true,
+            codex_enablement: ProviderEnablement::Auto,
+            claude_enablement: ProviderEnablement::Auto,
+            cursor_enablement: ProviderEnablement::Auto,
+            gemini_enablement: ProviderEnablement::Auto,
+            copilot_enablement: ProviderEnablement::Auto,
+            minimax_enablement: ProviderEnablement::Auto,
+            antigravity_enablement: ProviderEnablement::Auto,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -174,18 +197,89 @@ impl Config {
     }
 
     pub fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> bool {
-        let target = match provider {
-            ProviderId::Codex => &mut self.codex_enabled,
-            ProviderId::Claude => &mut self.claude_enabled,
-            ProviderId::Cursor => &mut self.cursor_enabled,
-            ProviderId::Gemini => &mut self.gemini_enabled,
-            ProviderId::Copilot => &mut self.copilot_enabled,
-            ProviderId::Minimax => &mut self.minimax_enabled,
-            ProviderId::Antigravity => &mut self.antigravity_enabled,
+        let (legacy, enablement) = match provider {
+            ProviderId::Codex => (&mut self.codex_enabled, &mut self.codex_enablement),
+            ProviderId::Claude => (&mut self.claude_enabled, &mut self.claude_enablement),
+            ProviderId::Cursor => (&mut self.cursor_enabled, &mut self.cursor_enablement),
+            ProviderId::Gemini => (&mut self.gemini_enabled, &mut self.gemini_enablement),
+            ProviderId::Copilot => (&mut self.copilot_enabled, &mut self.copilot_enablement),
+            ProviderId::Minimax => (&mut self.minimax_enabled, &mut self.minimax_enablement),
+            ProviderId::Antigravity => (
+                &mut self.antigravity_enabled,
+                &mut self.antigravity_enablement,
+            ),
         };
-        let changed = *target != enabled;
-        *target = enabled;
+        let explicit = if enabled {
+            ProviderEnablement::Enabled
+        } else {
+            ProviderEnablement::Disabled
+        };
+        let changed = *legacy != enabled || *enablement != explicit;
+        *legacy = enabled;
+        *enablement = explicit;
         changed
+    }
+}
+
+pub fn migrate_provider_enablement(context: &cosmic_config::Config, config: &mut Config) -> bool {
+    let mut migrated = false;
+    for provider in ProviderId::ALL {
+        let enablement_key = provider_enablement_key(provider);
+        if !matches!(
+            context.get::<ProviderEnablement>(enablement_key),
+            Err(cosmic_config::Error::NotFound | cosmic_config::Error::NoConfigDirectory)
+        ) {
+            continue;
+        }
+        let Ok(enabled) = context.get::<bool>(provider_enabled_key(provider)) else {
+            continue;
+        };
+        let enablement = if enabled {
+            ProviderEnablement::Enabled
+        } else {
+            ProviderEnablement::Disabled
+        };
+        if context.set(enablement_key, enablement).is_ok() {
+            *provider_enablement_mut(config, provider) = enablement;
+            migrated = true;
+        }
+    }
+    migrated
+}
+
+fn provider_enabled_key(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::Codex => "codex_enabled",
+        ProviderId::Claude => "claude_enabled",
+        ProviderId::Cursor => "cursor_enabled",
+        ProviderId::Gemini => "gemini_enabled",
+        ProviderId::Copilot => "copilot_enabled",
+        ProviderId::Minimax => "minimax_enabled",
+        ProviderId::Antigravity => "antigravity_enabled",
+    }
+}
+
+fn provider_enablement_key(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::Codex => "codex_enablement",
+        ProviderId::Claude => "claude_enablement",
+        ProviderId::Cursor => "cursor_enablement",
+        ProviderId::Gemini => "gemini_enablement",
+        ProviderId::Copilot => "copilot_enablement",
+        ProviderId::Minimax => "minimax_enablement",
+        ProviderId::Antigravity => "antigravity_enablement",
+    }
+}
+
+fn provider_enablement_mut(config: &mut Config, provider: ProviderId) -> &mut ProviderEnablement {
+    match provider {
+        ProviderId::Codex => &mut config.codex_enablement,
+        ProviderId::Claude => &mut config.claude_enablement,
+        ProviderId::Cursor => &mut config.cursor_enablement,
+        ProviderId::Gemini => &mut config.gemini_enablement,
+        ProviderId::Copilot => &mut config.copilot_enablement,
+        ProviderId::Minimax => &mut config.minimax_enablement,
+        ProviderId::Antigravity => &mut config.antigravity_enablement,
     }
 }
 
@@ -197,6 +291,15 @@ pub enum PanelIconStyle {
     BarsOnly,
     LogoAndPercent,
     PercentOnly,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderEnablement {
+    #[default]
+    Auto,
+    Enabled,
+    Disabled,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -513,6 +616,75 @@ pub fn paths() -> AppPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmic::cosmic_config::{ConfigGet, ConfigSet};
+
+    #[test]
+    fn provider_enablement_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ProviderEnablement::Auto).unwrap(),
+            "\"auto\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderEnablement::Enabled).unwrap(),
+            "\"enabled\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderEnablement>("\"disabled\"").unwrap(),
+            ProviderEnablement::Disabled
+        );
+    }
+
+    #[test]
+    fn provider_enablement_migrates_legacy_bools() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        ctx.set("codex_enabled", true).unwrap();
+        ctx.set("claude_enabled", false).unwrap();
+        let mut config = Config::default();
+
+        assert!(migrate_provider_enablement(&ctx, &mut config));
+        assert_eq!(config.codex_enablement, ProviderEnablement::Enabled);
+        assert_eq!(config.claude_enablement, ProviderEnablement::Disabled);
+        assert_eq!(
+            ctx.get::<ProviderEnablement>("codex_enablement").unwrap(),
+            ProviderEnablement::Enabled
+        );
+        assert!(ctx.get::<bool>("codex_enabled").unwrap());
+    }
+
+    #[test]
+    fn provider_enablement_migration_leaves_fresh_config_on_auto() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let mut config = Config::default();
+
+        assert!(!migrate_provider_enablement(&ctx, &mut config));
+        assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
+        assert!(ctx.get::<ProviderEnablement>("codex_enablement").is_err());
+    }
+
+    #[test]
+    fn provider_enablement_migration_is_idempotent() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        ctx.set("cursor_enabled", false).unwrap();
+        let mut config = Config::default();
+
+        assert!(migrate_provider_enablement(&ctx, &mut config));
+        config.cursor_enablement = ProviderEnablement::Auto;
+
+        assert!(!migrate_provider_enablement(&ctx, &mut config));
+        assert_eq!(config.cursor_enablement, ProviderEnablement::Auto);
+    }
+
+    #[test]
+    fn set_provider_enabled_keeps_legacy_and_tristate_fields_in_sync() {
+        let mut config = Config::default();
+
+        assert!(config.set_provider_enabled(ProviderId::Gemini, false));
+        assert!(!config.gemini_enabled);
+        assert_eq!(config.gemini_enablement, ProviderEnablement::Disabled);
+        assert!(config.set_provider_enabled(ProviderId::Gemini, true));
+        assert!(config.gemini_enabled);
+        assert_eq!(config.gemini_enablement, ProviderEnablement::Enabled);
+    }
 
     #[test]
     fn default_config_enables_all_providers() {
@@ -533,6 +705,7 @@ mod tests {
         assert_eq!(config.usage_amount_format, UsageAmountFormat::Used);
         assert_eq!(config.panel_icon_style, PanelIconStyle::LogoAndBars);
         assert_eq!(config.selected_provider, ProviderId::Codex);
+        assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
     }
 
     #[test]

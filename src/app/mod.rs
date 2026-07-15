@@ -314,7 +314,8 @@ impl cosmic::Application for AppModel {
                     Ok(cfg) => cfg,
                     Err((_errors, cfg)) => cfg,
                 };
-                let mut changed = registry::startup_sync(&mut config);
+                let mut changed = crate::config::migrate_provider_enablement(&ctx, &mut config);
+                changed |= registry::startup_sync(&mut config);
                 changed |= registry::initialize_provider_visibility(&mut config, &ProviderId::ALL);
                 changed |= registry::finalize_provider_visibility_initialization(&mut config);
                 changed |= demo_env::strip_leaked_state(&mut config);
