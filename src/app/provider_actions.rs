@@ -359,7 +359,10 @@ impl AppModel {
         provider: ProviderId,
         enabled: bool,
     ) -> Task<Message> {
-        let previous = self.config.provider_enabled(provider);
+        let previous = self
+            .state
+            .provider(provider)
+            .is_some_and(|entry| entry.enabled);
         if let Some(entry) = self.state.provider_mut(provider) {
             entry.enabled = enabled;
         }
@@ -377,7 +380,7 @@ impl AppModel {
             selected_provider = self.selected_provider.label(),
             "provider enabled setting changed"
         );
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::reconcile_provider(&self.config, &self.detection, &mut self.state, provider);
         self.sync_panel_suggested_bounds();
         if enabled
             && self
@@ -469,7 +472,7 @@ impl AppModel {
             selected_account_count = self.config.selected_account_ids(provider).len(),
             "show all accounts setting changed"
         );
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::reconcile_provider(&self.config, &self.detection, &mut self.state, provider);
         if self
             .state
             .provider(provider)
@@ -491,9 +494,24 @@ impl AppModel {
             "host CLI auth change detected"
         );
         let previous_state = self.state.clone();
-        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
-        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Claude);
-        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Gemini);
+        runtime::reconcile_provider(
+            &self.config,
+            &self.detection,
+            &mut self.state,
+            ProviderId::Codex,
+        );
+        runtime::reconcile_provider(
+            &self.config,
+            &self.detection,
+            &mut self.state,
+            ProviderId::Claude,
+        );
+        runtime::reconcile_provider(
+            &self.config,
+            &self.detection,
+            &mut self.state,
+            ProviderId::Gemini,
+        );
         if self.state == previous_state {
             tracing::info!(
                 process_id = %self.process_info.id,
@@ -523,13 +541,13 @@ impl AppModel {
             owner_status = self.owner_status(),
             changed_keys = %keys.join(","),
             selected_provider = config.selected_provider.label(),
-            enabled_provider_count = enabled_provider_count(&config),
+            enabled_provider_count = enabled_provider_count(&self.state),
             selected_account_count = selected_account_count(&config),
             managed_account_count = managed_account_count(&config),
             "config watcher update applied"
         );
         self.config = config;
-        runtime::reconcile_state(&self.config, &mut self.state);
+        runtime::reconcile_state(&self.config, &self.detection, &mut self.state);
         demo_env::apply(&self.config, &mut self.state);
         self.selected_provider = select_provider(self.config.selected_provider, &self.state);
         self.persist_runtime_if_owner("external_config_update");
@@ -541,7 +559,7 @@ impl AppModel {
         shared_runtime: crate::shared_state::SharedRuntimeState,
     ) {
         let mut next_state = shared_runtime.app_state;
-        runtime::reconcile_shared_state(&self.config, &mut next_state);
+        runtime::reconcile_shared_state(&self.config, &self.detection, &mut next_state);
         demo_env::apply(&self.config, &mut next_state);
         if self.state == next_state {
             return;
@@ -575,7 +593,7 @@ impl AppModel {
         self.write_config(|new_config| {
             registry::toggle_account_selection(provider, new_config, account_id);
         });
-        runtime::reconcile_provider(&self.config, &mut self.state, provider);
+        runtime::reconcile_provider(&self.config, &self.detection, &mut self.state, provider);
         let is_selected = self
             .state
             .provider(provider)
@@ -649,10 +667,11 @@ pub(super) fn popup_route_provider_label(
     }
 }
 
-fn enabled_provider_count(config: &Config) -> usize {
-    ProviderId::ALL
-        .into_iter()
-        .filter(|provider| config.provider_enabled(*provider))
+fn enabled_provider_count(state: &crate::model::AppState) -> usize {
+    state
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled)
         .count()
 }
 

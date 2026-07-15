@@ -55,15 +55,17 @@ pub(crate) fn applet_settings() -> cosmic::app::Settings {
         Ok(cfg) | Err((_, cfg)) => cfg,
     })
     .unwrap_or_default();
-    let no_enabled_provider_has_selected_accounts = ProviderId::ALL
-        .iter()
-        .all(|&p| !config.provider_enabled(p) || config.selected_account_ids(p).is_empty());
+    let detection = crate::detection::startup_snapshot(crate::config::host_user_home_dir());
+    let no_enabled_provider_has_selected_accounts = ProviderId::ALL.iter().all(|&p| {
+        !crate::provider_enablement::provider_enabled(&config, &detection, p)
+            || config.selected_account_ids(p).is_empty()
+    });
     let (width, height) = if no_enabled_provider_has_selected_accounts {
         applet_fallback_button_size(&preview_core)
     } else {
         let n_accounts = ProviderId::ALL
             .iter()
-            .filter(|&&p| config.provider_enabled(p))
+            .filter(|&&p| crate::provider_enablement::provider_enabled(&config, &detection, p))
             .map(|&p| {
                 config
                     .selected_account_ids(p)

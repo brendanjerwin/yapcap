@@ -3,7 +3,7 @@
 use crate::config::{
     Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
     ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
-    ManagedMinimaxAccountConfig, ProviderVisibilityMode, paths,
+    ManagedMinimaxAccountConfig, ProviderEnablement, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -54,13 +54,13 @@ pub fn apply_config(config: &mut Config) {
         return;
     }
 
-    config.codex_enabled = true;
-    config.claude_enabled = true;
-    config.cursor_enabled = true;
-    config.gemini_enabled = true;
-    config.copilot_enabled = true;
-    config.minimax_enabled = true;
-    config.antigravity_enabled = true;
+    config.codex_enablement = ProviderEnablement::Enabled;
+    config.claude_enablement = ProviderEnablement::Enabled;
+    config.cursor_enablement = ProviderEnablement::Enabled;
+    config.gemini_enablement = ProviderEnablement::Enabled;
+    config.copilot_enablement = ProviderEnablement::Enabled;
+    config.minimax_enablement = ProviderEnablement::Enabled;
+    config.antigravity_enablement = ProviderEnablement::Enabled;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
@@ -146,7 +146,7 @@ pub fn apply(config: &Config, state: &mut AppState) {
     }
     state.provider_accounts.clear();
     for provider in ProviderId::ALL {
-        if !config.provider_enabled(provider) {
+        if !state.provider(provider).is_some_and(|entry| entry.enabled) {
             state.upsert_provider(ProviderRuntimeState::disabled(provider));
             continue;
         }
@@ -1061,8 +1061,8 @@ mod tests {
         assert_eq!(config.selected_gemini_account_ids.len(), 1);
         assert_eq!(config.selected_copilot_account_ids.len(), 2);
         assert_eq!(config.selected_minimax_account_ids.len(), 1);
-        assert!(config.copilot_enabled);
-        assert!(config.minimax_enabled);
+        assert_eq!(config.copilot_enablement, ProviderEnablement::Enabled);
+        assert_eq!(config.minimax_enablement, ProviderEnablement::Enabled);
         assert!(config.show_all_accounts(ProviderId::Codex));
         assert!(config.show_all_accounts(ProviderId::Claude));
         assert!(!config.show_all_accounts(ProviderId::Cursor));

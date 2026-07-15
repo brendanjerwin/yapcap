@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::config::{Config, ProviderVisibilityMode};
+use crate::config::Config;
 use crate::model::{AppState, ProviderAccountRuntimeState, ProviderId, UsageSnapshot};
 use crate::providers::adapters::adapter;
 use crate::providers::interface::{
@@ -30,26 +30,6 @@ pub fn startup_sync(config: &mut Config) -> bool {
         | copilot_changed
         | minimax_changed
         | antigravity_changed
-}
-
-pub fn initialize_provider_visibility(config: &mut Config, providers: &[ProviderId]) -> bool {
-    if config.provider_visibility_mode != ProviderVisibilityMode::AutoInitPending {
-        return false;
-    }
-
-    let mut changed = false;
-    for &provider in providers {
-        changed |= config.set_provider_enabled(provider, true);
-    }
-    changed
-}
-
-pub fn finalize_provider_visibility_initialization(config: &mut Config) -> bool {
-    if config.provider_visibility_mode != ProviderVisibilityMode::AutoInitPending {
-        return false;
-    }
-    config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
-    true
 }
 
 pub fn discover_accounts(provider: ProviderId, config: &Config) -> Vec<ProviderAccountDescriptor> {

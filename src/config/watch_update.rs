@@ -27,13 +27,6 @@ impl Config {
             "provider_visibility_mode" => {
                 self.provider_visibility_mode = update.provider_visibility_mode;
             }
-            "codex_enabled" => self.codex_enabled = update.codex_enabled,
-            "claude_enabled" => self.claude_enabled = update.claude_enabled,
-            "cursor_enabled" => self.cursor_enabled = update.cursor_enabled,
-            "gemini_enabled" => self.gemini_enabled = update.gemini_enabled,
-            "copilot_enabled" => self.copilot_enabled = update.copilot_enabled,
-            "minimax_enabled" => self.minimax_enabled = update.minimax_enabled,
-            "antigravity_enabled" => self.antigravity_enabled = update.antigravity_enabled,
             "codex_enablement" => self.codex_enablement = update.codex_enablement,
             "claude_enablement" => self.claude_enablement = update.claude_enablement,
             "cursor_enablement" => self.cursor_enablement = update.cursor_enablement,

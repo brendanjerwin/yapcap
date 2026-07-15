@@ -132,7 +132,7 @@ pub(super) fn selected_account_refresh_due(
     state: &AppState,
     provider: ProviderId,
 ) -> bool {
-    if !config.provider_enabled(provider) {
+    if !state.provider(provider).is_some_and(|entry| entry.enabled) {
         return false;
     }
     let Some(entry) = state.provider(provider) else {
@@ -200,7 +200,7 @@ pub(super) fn refresh_provider_task_for_process(
         provider = provider.label(),
         "provider refresh scheduled"
     );
-    let enabled = config.provider_enabled(provider);
+    let enabled = state.provider(provider).is_some_and(|entry| entry.enabled);
     let already_refreshing = state
         .provider(provider)
         .is_some_and(|entry| entry.is_refreshing);
@@ -317,6 +317,7 @@ pub(super) fn refresh_provider_task_for_process(
                     runtime::refresh_account(
                         config,
                         provider,
+                        enabled,
                         account_id,
                         previous,
                         previous_accounts,
@@ -342,10 +343,10 @@ fn account_status_label(status: crate::model::AccountSelectionStatus) -> &'stati
 }
 
 #[must_use]
-pub fn should_refresh_account_statuses(config: &Config, provider: ProviderId) -> bool {
-    config.provider_enabled(provider)
+pub fn should_refresh_account_statuses(state: &AppState, provider: ProviderId) -> bool {
+    state.provider(provider).is_some_and(|entry| entry.enabled)
         && registry::supports_background_status_refresh(provider)
-        && !registry::discover_accounts(provider, config).is_empty()
+        && !state.accounts_for(provider).is_empty()
 }
 
 pub fn refresh_provider_account_statuses_task(
@@ -353,7 +354,7 @@ pub fn refresh_provider_account_statuses_task(
     state: &AppState,
     provider: ProviderId,
 ) -> Task<Message> {
-    if !should_refresh_account_statuses(config, provider) {
+    if !should_refresh_account_statuses(state, provider) {
         return Task::none();
     }
 
@@ -499,13 +500,13 @@ mod tests {
     fn refresh_tasks_skip_disabled_provider() {
         let _env = test_env_without_demo();
         let config = Config {
-            cursor_enabled: false,
+            cursor_enablement: crate::config::ProviderEnablement::Disabled,
             ..Config::default()
         };
         let mut state = AppState::empty();
         mark_all_ready(&mut state);
         for p in &mut state.providers {
-            p.enabled = config.provider_enabled(p.provider);
+            p.enabled = p.provider != ProviderId::Cursor;
         }
 
         let _tasks = refresh_provider_tasks(&config, &mut state);

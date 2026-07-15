@@ -167,12 +167,12 @@ sequenceDiagram
   config before redraw. Shared control updates are retained locally for later
   owner-driven refresh handling.
 - The panel opens on the persisted `selected_provider` from config. Selecting a provider tab writes that provider back to config so all applet processes switch to the same provider and the next launch opens on the same provider; if the saved provider is disabled, startup falls back to the first enabled provider. When the selected enabled provider has missing or stale selected-account runtime data, the selecting process writes a provider-selected shared refresh request for the refresh owner.
-- On a brand-new config, YapCap does one provider-visibility initialization pass:
-  all providers stay enabled so providers without accounts surface `Login required`
-  instead of disappearing. The login-required provider detail includes an action
-  that opens that provider’s Settings page so the user can add an account. The
-  auto-init mode is then marked complete so later launches preserve the user’s
-  explicit provider toggles.
+- Provider enablement is resolved from a per-provider `Auto` / `Enabled` /
+  `Disabled` setting. `Auto` enables only providers detected on the machine or
+  with a YapCap account; explicit settings override that result. New configs
+  use `Auto`, while the one-shot legacy migration preserves prior boolean
+  settings as explicit enablement. The settings toggle writes only explicit
+  `Enabled` or `Disabled` values.
 - `Message::Tick` polls automatic-refresh eligibility every 10 seconds. Provider
   data remains eligible only after `refresh_interval_seconds` has elapsed since
   its last successful refresh, so a due refresh can begin up to 10 seconds after

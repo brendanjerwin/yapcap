@@ -99,7 +99,6 @@ pub(super) fn reconcile_provider_account_descriptors(
     }
 
     if let Some(provider_state) = state.provider_mut(provider) {
-        provider_state.enabled = config.provider_enabled(provider);
         provider_state.account_status = account_status(&selected_ids, accounts.len());
         provider_state.error = match provider_state.account_status {
             AccountSelectionStatus::LoginRequired => Some("Login required".to_string()),

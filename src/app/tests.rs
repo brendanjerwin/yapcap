@@ -90,7 +90,8 @@ fn non_owner_tick_does_not_run_automatic_refresh() {
 fn owner_tick_skips_disabled_provider() {
     let owner = refresh_owner("owner-disabled");
     let mut app = test_app(Some(owner));
-    app.config.cursor_enabled = false;
+    app.config.cursor_enablement = crate::config::ProviderEnablement::Disabled;
+    app.state.provider_mut(ProviderId::Cursor).unwrap().enabled = false;
     ready_selected_provider(&mut app.state, ProviderId::Cursor);
 
     let _task = app.handle_message(Message::Tick);
@@ -120,7 +121,8 @@ fn non_owner_refresh_now_writes_shared_control_requests_without_refreshing() {
 #[test]
 fn refresh_now_excludes_disabled_providers_from_requests() {
     let mut app = test_app(None);
-    app.config.claude_enabled = false;
+    app.config.claude_enablement = crate::config::ProviderEnablement::Disabled;
+    app.state.provider_mut(ProviderId::Claude).unwrap().enabled = false;
 
     let _task = app.handle_message(Message::RefreshNow);
 
@@ -277,6 +279,7 @@ fn shared_runtime_metadata_notification_does_not_apply_partial_document() {
 #[test]
 fn shared_runtime_update_preserves_refreshing_provider() {
     let mut app = test_app(None);
+    app.config.codex_enablement = crate::config::ProviderEnablement::Enabled;
     let mut shared_state = app.state.clone();
     shared_state
         .provider_mut(ProviderId::Codex)
@@ -344,10 +347,11 @@ fn config_update_applies_selected_provider_without_changing_popup_route() {
     app.popup_route = PopupRoute::Settings(super::SettingsRoute::General);
     let mut config = app.config.clone();
     config.selected_provider = ProviderId::Claude;
+    config.claude_enablement = crate::config::ProviderEnablement::Enabled;
 
     let _task = app.handle_message(Message::UpdateConfig(
         Box::new(config),
-        vec!["selected_provider"],
+        vec!["selected_provider", "claude_enablement"],
     ));
 
     assert_eq!(app.selected_provider, ProviderId::Claude);
@@ -403,7 +407,7 @@ fn selecting_stale_enabled_provider_writes_provider_selected_request() {
 #[test]
 fn selecting_disabled_provider_does_not_request_refresh() {
     let mut app = test_app(None);
-    app.config.cursor_enabled = false;
+    app.config.cursor_enablement = crate::config::ProviderEnablement::Disabled;
     if let Some(cursor) = app.state.provider_mut(ProviderId::Cursor) {
         cursor.enabled = false;
     }
@@ -493,7 +497,10 @@ fn non_owner_provider_disable_reconciles_locally_without_publishing_runtime() {
     let task = app.handle_message(Message::SetProviderEnabled(ProviderId::Copilot, false));
 
     assert_eq!(task.units(), 0);
-    assert!(!app.config.provider_enabled(ProviderId::Copilot));
+    assert_eq!(
+        app.config.provider_enablement(ProviderId::Copilot),
+        crate::config::ProviderEnablement::Disabled
+    );
     assert!(!app.state.provider(ProviderId::Copilot).unwrap().enabled);
     assert!(app.shared_control.requests.is_empty());
 }
@@ -1028,7 +1035,12 @@ fn selected_account_without_usage(state: &mut AppState, provider: ProviderId) {
 }
 
 fn runtime_reconcile_provider(config: &Config, state: &mut AppState, provider: ProviderId) {
-    crate::runtime::reconcile_provider(config, state, provider);
+    crate::runtime::reconcile_provider(
+        config,
+        &crate::detection::DetectionSnapshot::default(),
+        state,
+        provider,
+    );
 }
 
 fn control_request(provider: ProviderId) -> SharedControlState {
@@ -1145,9 +1157,12 @@ fn cursor_status_refresh_skipped_without_accounts() {
     let _env = crate::test_support::test_env();
     let config = Config::default();
 
-    assert!(config.cursor_enabled);
+    assert_eq!(
+        config.cursor_enablement,
+        crate::config::ProviderEnablement::Auto
+    );
     assert!(!should_refresh_account_statuses(
-        &config,
+        &AppState::empty(),
         ProviderId::Cursor
     ));
 }
@@ -1166,7 +1181,14 @@ fn cursor_status_refresh_runs_with_accounts() {
         .cursor_managed_accounts
         .push(cursor_account("one", "one@example.com"));
 
-    assert!(should_refresh_account_statuses(&config, ProviderId::Cursor));
+    let mut state = AppState::empty();
+    state.provider_mut(ProviderId::Cursor).unwrap().enabled = true;
+    state.upsert_account(ProviderAccountRuntimeState::empty(
+        ProviderId::Cursor,
+        "cursor".to_string(),
+        "Cursor".to_string(),
+    ));
+    assert!(should_refresh_account_statuses(&state, ProviderId::Cursor));
 }
 
 fn seed_account_storage(dir: PathBuf, provider: ProviderId, id: &str, email: &str) {

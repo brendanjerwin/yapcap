@@ -316,8 +316,6 @@ impl cosmic::Application for AppModel {
                 };
                 let mut changed = crate::config::migrate_provider_enablement(&ctx, &mut config);
                 changed |= registry::startup_sync(&mut config);
-                changed |= registry::initialize_provider_visibility(&mut config, &ProviderId::ALL);
-                changed |= registry::finalize_provider_visibility_initialization(&mut config);
                 changed |= demo_env::strip_leaked_state(&mut config);
                 if changed {
                     let _ = config.write_entry(&ctx);
@@ -327,6 +325,15 @@ impl cosmic::Application for AppModel {
             })
             .unwrap_or_default();
 
+        let detection = if demo_env::is_active() {
+            demo_env::detection_snapshot()
+        } else {
+            crate::detection::startup_snapshot(crate::config::host_user_home_dir())
+        };
+        tracing::info!(
+            detected_providers = ?detection.detected_providers(),
+            "startup provider detection"
+        );
         let initial_config = config.clone();
         let shared_runtime = shared_state::load_runtime(Self::APP_ID);
         let mut shared_control = shared_state::load_control(Self::APP_ID);
@@ -338,19 +345,10 @@ impl cosmic::Application for AppModel {
             StartupDiagnostics::new(shared_runtime_generation, shared_control_generation);
         let (refresh_owner, ownership_task) =
             initialize_refresh_ownership(&process_info, &startup_diagnostics, &mut shared_control);
-        let mut state = runtime::load_initial_state(&initial_config, shared_runtime);
+        let mut state = runtime::load_initial_state(&initial_config, &detection, shared_runtime);
         #[cfg(debug_assertions)]
         crate::debug_env::apply(&mut state);
         demo_env::apply(&initial_config, &mut state);
-        let detection = if demo_env::is_active() {
-            demo_env::detection_snapshot()
-        } else {
-            crate::detection::startup_snapshot(crate::config::host_user_home_dir())
-        };
-        tracing::info!(
-            detected_providers = ?detection.detected_providers(),
-            "startup provider detection"
-        );
         let selected_provider = select_provider(initial_config.selected_provider, &state);
         let (applet_width, applet_height) = panel_button_size(
             &core,
@@ -403,7 +401,7 @@ impl cosmic::Application for AppModel {
             selected_provider = app.selected_provider.label(),
             enabled_provider_count = ProviderId::ALL
                 .into_iter()
-                .filter(|provider| app.config.provider_enabled(*provider))
+                .filter(|provider| app.state.provider(*provider).is_some_and(|state| state.enabled))
                 .count(),
             account_count = app.state.provider_accounts.len(),
             refresh_interval_seconds = app.config.refresh_interval_seconds,
@@ -781,10 +779,14 @@ impl AppModel {
     fn handle_refresh_now(&mut self) -> Task<Message> {
         let requested_provider_count = ProviderId::ALL
             .into_iter()
-            .filter(|provider| self.config.provider_enabled(*provider))
+            .filter(|provider| {
+                self.state
+                    .provider(*provider)
+                    .is_some_and(|state| state.enabled)
+            })
             .count();
         let shared_control = shared_control_with_user_refresh_requests(
-            &self.config,
+            &self.state,
             &self.shared_control,
             &self.process_info.id,
         );
@@ -976,7 +978,10 @@ fn owner_shared_control_refresh_task(
                 request.reason,
                 RefreshRequestReason::User | RefreshRequestReason::AccountAction
             );
-            if !config.provider_enabled(request.provider) {
+            if !state
+                .provider(request.provider)
+                .is_some_and(|entry| entry.enabled)
+            {
                 evaluation.record_outcome(request.provider, "disabled");
                 consumed_providers.push(request.provider);
                 return None;
@@ -1116,13 +1121,13 @@ impl SharedRefreshEvaluationLog {
 }
 
 fn shared_control_with_user_refresh_requests(
-    config: &Config,
+    state: &AppState,
     shared_control: &SharedControlState,
     process_id: &str,
 ) -> SharedControlState {
     let mut next = shared_control.clone();
     for provider in ProviderId::ALL {
-        if !config.provider_enabled(provider) {
+        if !state.provider(provider).is_some_and(|entry| entry.enabled) {
             continue;
         }
         next.upsert_request(ProviderRefreshRequest {

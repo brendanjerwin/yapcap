@@ -3,7 +3,6 @@
 Feature: provider-discovery
 Started: 2026-07-15T14:53:37+02:00
 
-
 ## 2026-07-15T15:05:00+02:00 - 007-detection-module.md
 
 - Implemented: src/detection.rs — pure path-existence detection module encoding the PRD marker table (Gemini = settings.json file only, kind-checked dir/file markers), with detect(home) -> DetectionSnapshot and a nothing-detected Default. Declared dark in main.rs via #[cfg_attr(not(test), allow(dead_code))].
@@ -38,3 +37,10 @@ Started: 2026-07-15T14:53:37+02:00
 - Files changed: src/config.rs, src/config/watch_update.rs, src/app/mod.rs, issues/provider-discovery/issues/011-tri-state-config-migration.md, issues/provider-discovery/progress.txt
 - Checks run: cargo fmt, cargo test (517 passed), cargo check, just check (clippy -D warnings, clean), git diff --check
 - Learnings: `cosmic_config::Config::get` reports a missing key as `NoConfigDirectory` when no system-default config path exists; migration treats that equivalent to `NotFound` but deliberately leaves malformed values as `Auto`.
+
+## 2026-07-15T19:38:35+02:00 - 012-enablement-resolution-switch.md
+
+- Implemented: Centralized tri-state enablement resolution from config, detection, and discovered account presence; removed legacy in-memory booleans and first-run force-enablement; refreshed runtime, refresh, panel sizing, and demo flows to consume resolved state.
+- Files changed: src/provider_enablement.rs, src/config.rs, src/runtime.rs, app enablement call sites/tests, docs/spec.md, issue metadata
+- Checks run: cargo fmt, cargo test (518 passed), cargo check, just check (clippy -D warnings), git diff --check
+- Learnings: Keeping the resolved flag in AppState lets refresh work stay independent of filesystem detection while reconciliation remains the one place that recomputes enablement.

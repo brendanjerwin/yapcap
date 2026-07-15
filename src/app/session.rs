@@ -21,7 +21,7 @@ pub(super) fn delete_account(
     }
 
     log_account_deleted(&app.process_info.id, provider, account_id);
-    runtime::reconcile_provider(&app.config, &mut app.state, provider);
+    runtime::reconcile_provider(&app.config, &app.detection, &mut app.state, provider);
     app.persist_runtime_if_owner("account_deleted");
 
     if app

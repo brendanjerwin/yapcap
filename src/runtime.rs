@@ -31,7 +31,11 @@ pub struct RefreshProcessContext {
     pub owner_status: &'static str,
 }
 
-pub fn load_initial_state(config: &Config, shared_runtime: Option<SharedRuntimeState>) -> AppState {
+pub fn load_initial_state(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    shared_runtime: Option<SharedRuntimeState>,
+) -> AppState {
     let mut state = match shared_runtime {
         Some(shared) => shared.app_state,
         None => {
@@ -39,7 +43,7 @@ pub fn load_initial_state(config: &Config, shared_runtime: Option<SharedRuntimeS
             AppState::empty()
         }
     };
-    reconcile_state(config, &mut state);
+    reconcile_state(config, detection, &mut state);
     state
 }
 
@@ -166,6 +170,7 @@ pub async fn refresh_provider_account_statuses(
 pub async fn refresh_account(
     config: Config,
     provider: ProviderId,
+    enabled: bool,
     account_id: String,
     previous: Option<ProviderRuntimeState>,
     previous_accounts: Vec<ProviderAccountRuntimeState>,
@@ -184,7 +189,6 @@ pub async fn refresh_account(
         account_id = %account_id,
         "provider account refresh started"
     );
-    let enabled = config.provider_enabled(provider);
     let client = http_client();
     let accounts = providers::registry::discover_accounts(provider, &config);
 
@@ -365,21 +369,35 @@ where
     }
 }
 
-pub fn reconcile_state(config: &Config, state: &mut AppState) {
-    reconcile_state_with_refresh(config, state, false);
+pub fn reconcile_state(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+) {
+    reconcile_state_with_refresh(config, detection, state, false);
 }
 
-pub fn reconcile_shared_state(config: &Config, state: &mut AppState) {
-    reconcile_state_with_refresh(config, state, true);
+pub fn reconcile_shared_state(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+) {
+    reconcile_state_with_refresh(config, detection, state, true);
 }
 
-fn reconcile_state_with_refresh(config: &Config, state: &mut AppState, preserve_refreshing: bool) {
+fn reconcile_state_with_refresh(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+    preserve_refreshing: bool,
+) {
     ensure_provider_states(state);
     for provider in ProviderId::ALL {
         providers::registry::reconcile_provider_accounts(provider, config, state);
     }
     for provider in &mut state.providers {
-        provider.enabled = config.provider_enabled(provider.provider);
+        provider.enabled =
+            crate::provider_enablement::provider_enabled(config, detection, provider.provider);
         if !preserve_refreshing {
             provider.is_refreshing = false;
             provider.refresh_started_at = None;
@@ -393,11 +411,16 @@ fn reconcile_state_with_refresh(config: &Config, state: &mut AppState, preserve_
     }
 }
 
-pub fn reconcile_provider(config: &Config, state: &mut AppState, provider: ProviderId) {
+pub fn reconcile_provider(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+    provider: ProviderId,
+) {
     ensure_provider_states(state);
     providers::registry::reconcile_provider_accounts(provider, config, state);
     if let Some(entry) = state.provider_mut(provider) {
-        entry.enabled = config.provider_enabled(provider);
+        entry.enabled = crate::provider_enablement::provider_enabled(config, detection, provider);
         entry.is_refreshing = false;
         entry.refresh_started_at = None;
         if !entry.enabled {
@@ -527,7 +550,11 @@ mod tests {
     #[test]
     fn load_initial_state_returns_empty_when_shared_runtime_is_missing() {
         let config = Config::default();
-        let state = load_initial_state(&config, None);
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            None,
+        );
         assert_eq!(state.providers.len(), ProviderId::ALL.len());
         for provider in &state.providers {
             assert!(!provider.is_refreshing);
@@ -544,7 +571,11 @@ mod tests {
             .unwrap()
             .is_refreshing = true;
 
-        let state = load_initial_state(&config, Some(SharedRuntimeState::new(shared_state, 1)));
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            Some(SharedRuntimeState::new(shared_state, 1)),
+        );
 
         let order: Vec<ProviderId> = state.providers.iter().map(|entry| entry.provider).collect();
         assert_eq!(order, ProviderId::ALL.to_vec());
@@ -560,7 +591,11 @@ mod tests {
             .provider_mut(ProviderId::Codex)
             .unwrap()
             .is_refreshing = true;
-        let state = load_initial_state(&config, Some(SharedRuntimeState::new(shared_state, 1)));
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            Some(SharedRuntimeState::new(shared_state, 1)),
+        );
 
         assert_eq!(state.providers.len(), ProviderId::ALL.len());
         assert!(state.provider(ProviderId::Cursor).is_some());
@@ -569,11 +604,18 @@ mod tests {
 
     #[test]
     fn reconcile_shared_state_preserves_refreshing_provider() {
-        let config = Config::default();
+        let config = Config {
+            codex_enablement: crate::config::ProviderEnablement::Enabled,
+            ..Config::default()
+        };
         let mut state = AppState::empty();
         state.provider_mut(ProviderId::Codex).unwrap().is_refreshing = true;
 
-        reconcile_shared_state(&config, &mut state);
+        reconcile_shared_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            &mut state,
+        );
 
         assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }

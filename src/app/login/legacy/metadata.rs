@@ -26,7 +26,12 @@ impl AppModel {
                 }
             }
         });
-        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Codex);
+        runtime::reconcile_provider(
+            &self.config,
+            &self.detection,
+            &mut self.state,
+            ProviderId::Codex,
+        );
     }
 
     pub(in crate::app) fn clear_codex_legacy_snapshot_after_success(&mut self) {
@@ -66,7 +71,12 @@ impl AppModel {
                 }
             }
         });
-        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Claude);
+        runtime::reconcile_provider(
+            &self.config,
+            &self.detection,
+            &mut self.state,
+            ProviderId::Claude,
+        );
     }
 
     pub(in crate::app) fn clear_claude_legacy_snapshot_after_success(&mut self) {

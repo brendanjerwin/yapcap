@@ -14,6 +14,7 @@ mod error;
 mod i18n;
 mod logging;
 mod model;
+mod provider_enablement;
 mod providers;
 mod refresh_owner;
 mod runtime;

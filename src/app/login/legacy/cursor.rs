@@ -72,7 +72,12 @@ impl AppModel {
                 self.write_config(|new_config| {
                     applied_account = cursor::upsert_managed_account(new_config, new_account);
                 });
-                runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Cursor);
+                runtime::reconcile_provider(
+                    &self.config,
+                    &self.detection,
+                    &mut self.state,
+                    ProviderId::Cursor,
+                );
                 self.cursor_scan = CursorScanState::Idle;
                 self.sync_panel_suggested_bounds();
                 tracing::info!(
@@ -128,7 +133,12 @@ impl AppModel {
                 }
             }
         });
-        runtime::reconcile_provider(&self.config, &mut self.state, ProviderId::Cursor);
+        runtime::reconcile_provider(
+            &self.config,
+            &self.detection,
+            &mut self.state,
+            ProviderId::Cursor,
+        );
     }
 
     pub(in crate::app) fn update_cursor_active_account(&mut self) {

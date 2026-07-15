@@ -25,17 +25,6 @@ pub struct Config {
     pub selected_provider: ProviderId,
     #[serde(default = "default_provider_visibility_mode")]
     pub provider_visibility_mode: ProviderVisibilityMode,
-    pub codex_enabled: bool,
-    pub claude_enabled: bool,
-    pub cursor_enabled: bool,
-    #[serde(default = "default_gemini_enabled")]
-    pub gemini_enabled: bool,
-    #[serde(default = "default_copilot_enabled")]
-    pub copilot_enabled: bool,
-    #[serde(default = "default_minimax_enabled")]
-    pub minimax_enabled: bool,
-    #[serde(default = "default_antigravity_enabled")]
-    pub antigravity_enabled: bool,
     #[serde(default)]
     pub codex_enablement: ProviderEnablement,
     #[serde(default)]
@@ -77,22 +66,6 @@ pub struct Config {
     pub log_level: String,
 }
 
-fn default_gemini_enabled() -> bool {
-    true
-}
-
-fn default_copilot_enabled() -> bool {
-    true
-}
-
-fn default_minimax_enabled() -> bool {
-    true
-}
-
-fn default_antigravity_enabled() -> bool {
-    true
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -101,14 +74,7 @@ impl Default for Config {
             usage_amount_format: UsageAmountFormat::Used,
             panel_icon_style: PanelIconStyle::LogoAndBars,
             selected_provider: ProviderId::Codex,
-            provider_visibility_mode: ProviderVisibilityMode::AutoInitPending,
-            codex_enabled: true,
-            claude_enabled: true,
-            cursor_enabled: true,
-            gemini_enabled: true,
-            copilot_enabled: true,
-            minimax_enabled: true,
-            antigravity_enabled: true,
+            provider_visibility_mode: ProviderVisibilityMode::UserManaged,
             codex_enablement: ProviderEnablement::Auto,
             claude_enablement: ProviderEnablement::Auto,
             cursor_enablement: ProviderEnablement::Auto,
@@ -146,15 +112,15 @@ fn default_selected_provider() -> ProviderId {
 
 impl Config {
     #[must_use]
-    pub fn provider_enabled(&self, provider: ProviderId) -> bool {
+    pub fn provider_enablement(&self, provider: ProviderId) -> ProviderEnablement {
         match provider {
-            ProviderId::Codex => self.codex_enabled,
-            ProviderId::Claude => self.claude_enabled,
-            ProviderId::Cursor => self.cursor_enabled,
-            ProviderId::Gemini => self.gemini_enabled,
-            ProviderId::Copilot => self.copilot_enabled,
-            ProviderId::Minimax => self.minimax_enabled,
-            ProviderId::Antigravity => self.antigravity_enabled,
+            ProviderId::Codex => self.codex_enablement,
+            ProviderId::Claude => self.claude_enablement,
+            ProviderId::Cursor => self.cursor_enablement,
+            ProviderId::Gemini => self.gemini_enablement,
+            ProviderId::Copilot => self.copilot_enablement,
+            ProviderId::Minimax => self.minimax_enablement,
+            ProviderId::Antigravity => self.antigravity_enablement,
         }
     }
 
@@ -197,25 +163,13 @@ impl Config {
     }
 
     pub fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> bool {
-        let (legacy, enablement) = match provider {
-            ProviderId::Codex => (&mut self.codex_enabled, &mut self.codex_enablement),
-            ProviderId::Claude => (&mut self.claude_enabled, &mut self.claude_enablement),
-            ProviderId::Cursor => (&mut self.cursor_enabled, &mut self.cursor_enablement),
-            ProviderId::Gemini => (&mut self.gemini_enabled, &mut self.gemini_enablement),
-            ProviderId::Copilot => (&mut self.copilot_enabled, &mut self.copilot_enablement),
-            ProviderId::Minimax => (&mut self.minimax_enabled, &mut self.minimax_enablement),
-            ProviderId::Antigravity => (
-                &mut self.antigravity_enabled,
-                &mut self.antigravity_enablement,
-            ),
-        };
+        let enablement = provider_enablement_mut(self, provider);
         let explicit = if enabled {
             ProviderEnablement::Enabled
         } else {
             ProviderEnablement::Disabled
         };
-        let changed = *legacy != enabled || *enablement != explicit;
-        *legacy = enabled;
+        let changed = *enablement != explicit;
         *enablement = explicit;
         changed
     }
@@ -675,30 +629,21 @@ mod tests {
     }
 
     #[test]
-    fn set_provider_enabled_keeps_legacy_and_tristate_fields_in_sync() {
+    fn set_provider_enabled_writes_explicit_enablement() {
         let mut config = Config::default();
 
         assert!(config.set_provider_enabled(ProviderId::Gemini, false));
-        assert!(!config.gemini_enabled);
         assert_eq!(config.gemini_enablement, ProviderEnablement::Disabled);
         assert!(config.set_provider_enabled(ProviderId::Gemini, true));
-        assert!(config.gemini_enabled);
         assert_eq!(config.gemini_enablement, ProviderEnablement::Enabled);
     }
 
     #[test]
-    fn default_config_enables_all_providers() {
+    fn default_config_uses_auto_enablement() {
         let config = Config::default();
-        assert!(config.provider_enabled(ProviderId::Codex));
-        assert!(config.provider_enabled(ProviderId::Claude));
-        assert!(config.provider_enabled(ProviderId::Cursor));
-        assert!(config.provider_enabled(ProviderId::Gemini));
-        assert!(config.provider_enabled(ProviderId::Copilot));
-        assert!(config.provider_enabled(ProviderId::Minimax));
-        assert!(config.provider_enabled(ProviderId::Antigravity));
         assert_eq!(
             config.provider_visibility_mode,
-            ProviderVisibilityMode::AutoInitPending
+            ProviderVisibilityMode::UserManaged
         );
         assert_eq!(config.refresh_interval_seconds, 300);
         assert_eq!(config.reset_time_format, ResetTimeFormat::Relative);
