@@ -6,13 +6,13 @@ Paths used below:
 
 **Native** (default XDG layout on typical Linux installs):
 
-- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v502/`
+- Config: `~/.config/cosmic/io.github.TopiCsarno.YapCap/v503/`
 - Former snapshot cache, no longer active runtime state: `~/.cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.local/state/yapcap/` (e.g. `…/logs/yapcap.log`)
 
 **Flatpak** (app id `io.github.TopiCsarno.YapCap`; paths use passwd `pw_dir` as `~`):
 
-- Config: same COSMIC config schema `v502` dir (manifest mounts `~/.config/cosmic`)
+- Config: same COSMIC config schema `v503` dir (manifest mounts `~/.config/cosmic`)
 - Former snapshot cache, no longer active runtime state: `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`
 - Accounts + logs: `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`
 
@@ -22,11 +22,58 @@ Do not expect the Flatpak build to use `~/.local/state/yapcap/` for YapCap data�
 
 ## 1. Fresh install
 
-- `just clear-all-data` then install. All five provider tabs visible with "Login required" state (not hidden).
-- Existing `v501` COSMIC settings are not loaded after the `v502` schema boundary; users must re-add accounts.
+- For an isolated Native check, run `just run-empty-discovery`. It clears and
+  uses `/tmp/yapcap-empty-home`, `/tmp/yapcap-empty-config`, and
+  `/tmp/yapcap-empty-state`; do not use `just clear-all-data` unless wiping
+  your real YapCap accounts and settings is intentional.
+- With no detection markers and no YapCap accounts, the panel shows only the
+  YapCap app icon. The popup shows the centered "No providers set up yet" hero
+  and its `Open Settings` action; it has no provider tabs and hides both
+  `Refresh now` and `Add provider` (`+`).
+- The hero's `Open Settings` action opens Settings → General. From there, every
+  provider remains reachable through the settings categories.
+- Add an account from Settings with no detection marker. Its provider becomes
+  visible and normal panel rendering replaces the app-icon fallback.
+- Existing `v502` COSMIC settings are not loaded after the `v503` schema boundary; users must re-add accounts.
 - Existing account directories, old snapshot caches, and logs are not automatically deleted by the schema boundary and may remain orphaned.
 - Settings → General → About shows correct version and dist label ("Native" or "Flatpak").
 - Panel icon renders without clipping or overflow.
+
+### 1.1 Provider discovery
+
+- Start `just run-empty-discovery`, then create and remove the marker paths
+  below while YapCap is running. The matching provider tab, detected hint, and
+  effective enablement should change without a restart; unrelated filesystem
+  changes must not affect the UI.
+
+  | Provider | Marker path | Expected kind |
+  | --- | --- | --- |
+  | Codex | `~/.codex` | directory |
+  | Claude | `~/.claude` or `~/.claude.json` | directory or file |
+  | Cursor | `~/.config/Cursor` | directory |
+  | Gemini | `~/.gemini/settings.json` | file |
+  | Antigravity | `~/.config/Antigravity` | directory |
+  | Copilot | `~/.config/github-copilot` or `~/.copilot` | directory |
+  | Minimax | `~/.mmx` | directory |
+
+- A bare `~/.gemini/` directory must not detect Gemini; neither may a directory
+  named `settings.json`. File/dir kind mismatches for the other markers must
+  also remain undetected.
+- A detected provider with no YapCap account has a normal provider tab. Its
+  detail view shows an accent `Detected` chip and an add-account action that
+  opens that provider's Settings category.
+- The same detected-and-unconfigured provider has an accent dot on its Settings
+  tab and a `Detected on this machine` caption on its Settings page. Explicitly
+  disabling it hides its provider tab but does not hide those Settings hints.
+- On a non-empty popup, `Add provider` (`+`) opens a picker containing all
+  providers. Detected providers without accounts appear first with add-account
+  emphasis; every entry opens the matching Settings category, including already
+  configured and undetected providers.
+- Removing a detection marker hides an `Auto` provider with no account. Add an
+  account first, then remove its marker: the provider must remain visible,
+  because account presence wins over detection.
+- Change a detected provider's settings toggle off and on. It must write an
+  explicit disabled/enabled choice; detection does not override either choice.
 
 ---
 
@@ -191,9 +238,14 @@ In Settings → General, cycle through all four panel icon styles and verify the
 
 ## 9. Gemini
 
-### 9.1 Fresh install / Login required
+### 9.1 Detection and Login required
 
-- With no Gemini accounts configured, the Gemini provider tab is visible and shows the **Login required** empty state pointing to Settings → Gemini → Add account.
+- With no Gemini accounts configured, `~/.gemini/settings.json` detects Gemini
+  and makes its provider tab visible. The tab shows the detected call to action
+  pointing to Settings → Gemini → Add account.
+- Without that marker, Gemini remains available through Settings and the
+  `Add provider` picker; explicitly enabling it makes its tab visible and shows
+  the normal **Login required** state.
 - Pre-existing host `~/.gemini/oauth_creds.json` is **not** imported. YapCap does not read host tokens.
 
 ### 9.2 Add account (Native and Flatpak)
@@ -367,7 +419,12 @@ In Settings → General, cycle through all four panel icon styles and verify the
 - Disable a provider via its settings toggle — provider tab disappears from popup nav.
 - All provider-specific settings below the toggle are dimmed and non-interactive when disabled.
 - Re-enable — tab reappears and a refresh is triggered.
-- Fresh install with `auto_init_pending`: all providers enabled even with no accounts.
+- On a fresh config, all provider enablement values start as `Auto`: only
+  detected providers and providers with YapCap accounts are visible.
+- Upgrade an existing config containing legacy `<provider>_enabled` booleans.
+  Restart twice and verify each legacy value is migrated once to the equivalent
+  explicit `<provider>_enablement` value, preserves its visible/hidden state,
+  and does not change again on the second start.
 
 ---
 
@@ -391,8 +448,11 @@ In Settings → General, cycle through all four panel icon styles and verify the
 ## 16. Config state file manipulation
 
 - Delete old cached snapshots (native `~/.cache/yapcap/snapshots.json`, Flatpak `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/snapshots.json`). Restart. Verify runtime comes from shared COSMIC runtime state, not the old file.
-- Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults apply: all providers enabled, refresh interval 300s, relative reset time, used amount format.
-- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v501/` config in place. Restart the current build and verify `v502` defaults are used instead.
+- Delete the COSMIC config dir (`just clear-config`). Restart. Verify defaults
+  apply: all provider enablement values are `Auto`, refresh interval is 300s,
+  reset time is relative, and usage amount is used.
+- Leave an older `~/.config/cosmic/io.github.TopiCsarno.YapCap/v502/` config in
+  place. Restart the current build and verify `v503` defaults are used instead.
 - Manually edit config to add a non-existent account id to `selected_codex_account_ids`. Restart. Verify graceful fallback to first valid account or Login Required — no crash.
 - Set `refresh_interval_seconds = 5` in config. Verify it is clamped to 10s at runtime (not 5s).
 
