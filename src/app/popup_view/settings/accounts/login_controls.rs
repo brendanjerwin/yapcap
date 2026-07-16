@@ -259,7 +259,6 @@ fn copilot_user_code_row<'a>(code: &'a str, copied: bool, enabled: bool) -> Elem
 fn copilot_login_status(login: &CopilotLoginState) -> String {
     match login.status {
         CopilotLoginStatus::Running => fl!("copilot-login-running"),
-        CopilotLoginStatus::Succeeded => fl!("copilot-login-succeeded"),
         CopilotLoginStatus::Failed => login
             .error
             .clone()
@@ -270,7 +269,6 @@ fn copilot_login_status(login: &CopilotLoginState) -> String {
 fn gemini_login_status(login: &GeminiLoginState) -> String {
     match login.status {
         GeminiLoginStatus::Running => fl!("gemini-login-running"),
-        GeminiLoginStatus::Succeeded => fl!("gemini-login-succeeded"),
         GeminiLoginStatus::Failed => login
             .error
             .clone()
@@ -328,7 +326,6 @@ pub(super) fn antigravity_login_controls(
 fn antigravity_login_status(login: &AntigravityLoginState) -> String {
     match login.status {
         AntigravityLoginStatus::Running => fl!("antigravity-login-running"),
-        AntigravityLoginStatus::Succeeded => fl!("antigravity-login-succeeded"),
         AntigravityLoginStatus::Failed => login
             .error
             .clone()
@@ -413,7 +410,6 @@ pub(super) fn cursor_scan_controls(scan: &CursorScanState, enabled: bool) -> Ele
 fn codex_login_status(login: &CodexLoginState) -> String {
     match login.status {
         CodexLoginStatus::Running => fl!("codex-login-running"),
-        CodexLoginStatus::Succeeded => fl!("codex-login-succeeded"),
         CodexLoginStatus::Failed => login
             .error
             .clone()
@@ -424,7 +420,6 @@ fn codex_login_status(login: &CodexLoginState) -> String {
 fn claude_login_status(login: &ClaudeLoginState) -> String {
     match login.status {
         ClaudeLoginStatus::Running => fl!("claude-login-running"),
-        ClaudeLoginStatus::Succeeded => fl!("claude-login-succeeded"),
         ClaudeLoginStatus::Failed => match login.error.as_deref() {
             Some("invalid-code") => fl!("claude-login-code-invalid"),
             Some(msg) => msg.to_string(),
@@ -505,7 +500,6 @@ pub(super) fn minimax_login_controls(
 fn minimax_login_status(login: &MinimaxLoginState) -> String {
     match login.status {
         MinimaxLoginStatus::Editing => fl!("minimax-login-editing"),
-        MinimaxLoginStatus::Saved => fl!("minimax-login-saved"),
         MinimaxLoginStatus::Failed => login
             .error
             .clone()

@@ -39,7 +39,6 @@ pub struct GeminiLoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeminiLoginStatus {
     Running,
-    Succeeded,
     Failed,
 }
 

@@ -40,7 +40,6 @@ pub struct AntigravityLoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AntigravityLoginStatus {
     Running,
-    Succeeded,
     Failed,
 }
 

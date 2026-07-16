@@ -89,10 +89,7 @@ impl LoginFlow for GeminiLoginFlow {
                 match *result {
                     Ok(success) => {
                         let account_id = success.account.id.clone();
-                        if let Some(login) = app.gemini_login.as_mut() {
-                            login.status = GeminiLoginStatus::Succeeded;
-                            login.error = None;
-                        }
+                        app.gemini_login = None;
                         apply_login_success(
                             app,
                             ProviderId::Gemini,

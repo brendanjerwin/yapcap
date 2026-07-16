@@ -79,10 +79,7 @@ impl LoginFlow for ClaudeLoginFlow {
                 match *result {
                     Ok(success) => {
                         let account_id = success.account.id.clone();
-                        if let Some(login) = app.claude_login.as_mut() {
-                            login.status = ClaudeLoginStatus::Succeeded;
-                            login.error = None;
-                        }
+                        app.claude_login = None;
                         apply_login_success(
                             app,
                             ProviderId::Claude,

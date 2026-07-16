@@ -37,7 +37,6 @@ pub struct ClaudeLoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaudeLoginStatus {
     Running,
-    Succeeded,
     Failed,
 }
 

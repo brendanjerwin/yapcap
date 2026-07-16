@@ -34,8 +34,7 @@ fn minimax_on_event_saved_persists_account_and_seeds_runtime_state() {
 
     let _ = MinimaxLoginFlow::on_event(&mut app, MinimaxLoginEvent::Saved);
 
-    let login = app.minimax_login.as_ref().unwrap();
-    assert_eq!(login.status, MinimaxLoginStatus::Saved);
+    assert!(app.minimax_login.is_none());
     assert!(
         app.config
             .minimax_managed_accounts

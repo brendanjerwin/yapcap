@@ -206,6 +206,10 @@ sequenceDiagram
   request; only the refresh owner executes provider refresh and publishes shared
   runtime status, usage snapshots, account health, auth state, refresh errors,
   or runtime cleanup.
+- A successful login (or Minimax API key save) clears the login state
+  immediately: the account controls return to the normal add-account state with
+  no confirmation message or dismiss step. Failed logins keep showing the error
+  with `Add another` / `Dismiss` controls.
 - Each provider has a persisted `show_all_accounts` setting. When it is off, selecting an account makes that provider single-account and YapCap keeps only one selected account for it. When it is on, the provider can keep multiple selected accounts and render up to four accounts. Enabling it selects at most four account ids per provider: the current active account when still available, then additional stored accounts in stable account order. If older or manually edited state contains more than four selected account ids, the panel and provider detail popup still render only the first four. This is a multi-account selection and rendering cap, not a storage limit.
 - Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Refresh dispatch runs only when the provider is enabled and its account resolver is `Ready`.

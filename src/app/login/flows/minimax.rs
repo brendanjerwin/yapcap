@@ -98,8 +98,7 @@ impl LoginFlow for MinimaxLoginFlow {
                             }
                         }
                         app.persist_runtime_if_owner("minimax_account_saved");
-                        let login = app.minimax_login.as_mut().unwrap();
-                        login.status = MinimaxLoginStatus::Saved;
+                        app.minimax_login = None;
                         let process = app.refresh_task_process();
                         refresh_provider_task_for_process(
                             &app.config,

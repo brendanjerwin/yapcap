@@ -92,10 +92,7 @@ impl LoginFlow for AntigravityLoginFlow {
                 match *result {
                     Ok(success) => {
                         let account_id = success.account.id.clone();
-                        if let Some(login) = app.antigravity_login.as_mut() {
-                            login.status = AntigravityLoginStatus::Succeeded;
-                            login.error = None;
-                        }
+                        app.antigravity_login = None;
                         apply_login_success(
                             app,
                             ProviderId::Antigravity,

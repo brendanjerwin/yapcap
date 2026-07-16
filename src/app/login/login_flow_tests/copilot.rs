@@ -58,8 +58,7 @@ fn copilot_on_event_finished_ok_applies_account_and_succeeds() {
         },
     );
 
-    let login = app.copilot_login.as_ref().unwrap();
-    assert_eq!(login.status, CopilotLoginStatus::Succeeded);
+    assert!(app.copilot_login.is_none());
     assert!(
         app.config
             .copilot_managed_accounts

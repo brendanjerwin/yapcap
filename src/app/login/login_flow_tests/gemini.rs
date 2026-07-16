@@ -24,8 +24,7 @@ fn gemini_on_event_finished_ok_applies_account_and_succeeds() {
         },
     );
 
-    let login = app.gemini_login.as_ref().unwrap();
-    assert_eq!(login.status, GeminiLoginStatus::Succeeded);
+    assert!(app.gemini_login.is_none());
     assert!(
         app.config
             .gemini_managed_accounts

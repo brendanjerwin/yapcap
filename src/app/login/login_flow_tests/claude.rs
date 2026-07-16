@@ -29,8 +29,7 @@ fn claude_on_event_finished_ok_applies_account_and_succeeds() {
         },
     );
 
-    let login = app.claude_login.as_ref().unwrap();
-    assert_eq!(login.status, ClaudeLoginStatus::Succeeded);
+    assert!(app.claude_login.is_none());
     assert!(
         app.config
             .claude_managed_accounts

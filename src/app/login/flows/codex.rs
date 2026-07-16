@@ -83,10 +83,7 @@ impl LoginFlow for CodexLoginFlow {
                 match *result {
                     Ok(success) => {
                         let account_id = success.account.id.clone();
-                        if let Some(login) = app.codex_login.as_mut() {
-                            login.status = CodexLoginStatus::Succeeded;
-                            login.error = None;
-                        }
+                        app.codex_login = None;
                         apply_login_success(
                             app,
                             ProviderId::Codex,

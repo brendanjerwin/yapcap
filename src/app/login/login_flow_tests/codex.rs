@@ -78,9 +78,7 @@ fn codex_on_event_finished_ok_applies_account_and_succeeds() {
         },
     );
 
-    let login = app.codex_login.as_ref().unwrap();
-    assert_eq!(login.status, CodexLoginStatus::Succeeded);
-    assert!(login.error.is_none());
+    assert!(app.codex_login.is_none());
     assert!(
         app.config
             .codex_managed_accounts

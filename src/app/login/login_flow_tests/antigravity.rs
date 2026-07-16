@@ -30,8 +30,7 @@ fn on_event_finished_ok_applies_account_and_succeeds() {
         },
     );
 
-    let login = app.antigravity_login.as_ref().unwrap();
-    assert_eq!(login.status, AntigravityLoginStatus::Succeeded);
+    assert!(app.antigravity_login.is_none());
     assert!(
         app.config
             .antigravity_managed_accounts

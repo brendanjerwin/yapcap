@@ -111,10 +111,7 @@ impl LoginFlow for CopilotLoginFlow {
                 match *result {
                     Ok(success) => {
                         let account_id = success.account.id.clone();
-                        if let Some(login) = app.copilot_login.as_mut() {
-                            login.status = CopilotLoginStatus::Succeeded;
-                            login.error = None;
-                        }
+                        app.copilot_login = None;
                         apply_login_success(
                             app,
                             ProviderId::Copilot,
