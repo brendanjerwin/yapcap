@@ -107,12 +107,9 @@ pub fn popup_content<'a>(
     let nav_row: Option<Element<'_, Message>> = match route {
         PopupRoute::ProviderDetail if empty_state => None,
         PopupRoute::ProviderDetail => Some(provider_tab_rows(state, selected_provider)),
-        PopupRoute::Settings(settings_route) => Some(settings_category_row(
-            state,
-            detection,
-            settings_route,
-            update_status,
-        )),
+        PopupRoute::Settings(settings_route) => {
+            Some(settings_category_row(settings_route, update_status))
+        }
     };
 
     let body = popup_body_view(
@@ -350,14 +347,8 @@ fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Messa
     .spacing(12);
 
     if matches!(route, PopupRoute::ProviderDetail) && !empty_state {
-        let add_provider = widget::tooltip::tooltip(
-            widget::button::standard("+").on_press(Message::ToggleProviderPicker),
-            widget::text(fl!("add-provider")).size(12),
-            widget::tooltip::Position::Top,
-        );
-        header = header
-            .push(add_provider)
-            .push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
+        header =
+            header.push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
     }
 
     header.into()
@@ -472,8 +463,6 @@ fn settings_block_enabled<'a>(
 }
 
 fn settings_category_row(
-    state: &AppState,
-    detection: &DetectionSnapshot,
     route: &SettingsRoute,
     update_status: &UpdateStatus,
 ) -> Element<'static, Message> {
@@ -491,7 +480,7 @@ fn settings_category_row(
             settings_category_icon(&target_route),
             matches!(route, SettingsRoute::Provider(id) if *id == provider),
             target_route,
-            detected_without_accounts(state, detection, provider),
+            false,
         ));
     }
 
@@ -503,20 +492,20 @@ fn settings_category_tab(
     icon: widget::icon::Handle,
     selected: bool,
     route: SettingsRoute,
-    detected: bool,
+    notify: bool,
 ) -> Element<'static, Message> {
     let icon = widget::icon::icon(icon)
         .size(PROVIDER_TAB_ICON_SIZE)
         .width(Length::Fixed(PROVIDER_TAB_ICON_LENGTH))
         .height(Length::Fixed(PROVIDER_TAB_ICON_LENGTH));
-    let label: Element<'static, Message> = if detected {
+    let label: Element<'static, Message> = if notify {
         container(
             row![
                 widget::text(label)
                     .size(PROVIDER_TAB_LABEL_SIZE)
                     .width(Length::Shrink)
                     .align_x(Alignment::Center),
-                accent_notification_dot(6.0)
+                update_notification_dot(6.0)
             ]
             .spacing(5)
             .align_y(Alignment::Center),
@@ -593,28 +582,6 @@ fn notification_dot(size: f32) -> Element<'static, Message> {
         .style(move |_theme: &cosmic::Theme| widget::container::Style {
             text_color: None,
             background: Some(Background::Color(UPDATE_NOTIFICATION_DOT_COLOR)),
-            border: cosmic::iced::Border {
-                radius: (size / 2.0).into(),
-                width: 0.0,
-                color: Color::TRANSPARENT,
-            },
-            shadow: cosmic::iced::Shadow::default(),
-            icon_color: None,
-            snap: true,
-        }),
-    )
-}
-
-fn accent_notification_dot(size: f32) -> Element<'static, Message> {
-    Element::from(
-        container(
-            cosmic::iced::widget::Space::new()
-                .width(Length::Fixed(size))
-                .height(Length::Fixed(size)),
-        )
-        .style(move |theme: &cosmic::Theme| widget::container::Style {
-            text_color: None,
-            background: Some(Background::Color(theme.cosmic().accent.base.into())),
             border: cosmic::iced::Border {
                 radius: (size / 2.0).into(),
                 width: 0.0,
