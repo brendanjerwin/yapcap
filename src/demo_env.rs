@@ -27,6 +27,7 @@ const COPILOT_FREE_ID: &str = "yapcap-demo:copilot-casey-free";
 const COPILOT_PRO_ID: &str = "yapcap-demo:copilot-morgan-pro";
 const MINIMAX_PRIMARY_ID: &str = "yapcap-demo:minimax-primary";
 const ANTIGRAVITY_PRIMARY_ID: &str = "yapcap-demo:antigravity-primary";
+const ANTIGRAVITY_FREE_ID: &str = "yapcap-demo:antigravity-free";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -90,8 +91,11 @@ pub fn apply_config(config: &mut Config) {
     config.set_provider_show_all(ProviderId::Copilot, true);
     config.selected_minimax_account_ids = vec![MINIMAX_PRIMARY_ID.to_string()];
     config.set_provider_show_all(ProviderId::Minimax, false);
-    config.selected_antigravity_account_ids = vec![ANTIGRAVITY_PRIMARY_ID.to_string()];
-    config.set_provider_show_all(ProviderId::Antigravity, false);
+    config.selected_antigravity_account_ids = vec![
+        ANTIGRAVITY_PRIMARY_ID.to_string(),
+        ANTIGRAVITY_FREE_ID.to_string(),
+    ];
+    config.set_provider_show_all(ProviderId::Antigravity, true);
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -321,18 +325,32 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 snapshot: snapshot_minimax_primary(),
             },
         )],
-        ProviderId::Antigravity => vec![demo_account(
-            provider,
-            DemoAccount {
-                account_id: ANTIGRAVITY_PRIMARY_ID,
-                label: "pro@example.com",
-                last_success_at: now - Duration::minutes(2),
-                health: ProviderHealth::Ok,
-                auth_state: AuthState::Ready,
-                error: None,
-                snapshot: snapshot_antigravity_primary(),
-            },
-        )],
+        ProviderId::Antigravity => vec![
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: ANTIGRAVITY_PRIMARY_ID,
+                    label: "pro@example.com",
+                    last_success_at: now - Duration::minutes(2),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_antigravity_primary(),
+                },
+            ),
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: ANTIGRAVITY_FREE_ID,
+                    label: "free@example.com",
+                    last_success_at: now - Duration::minutes(4),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_antigravity_free(),
+                },
+            ),
+        ],
     }
 }
 
@@ -904,17 +922,30 @@ fn demo_copilot_accounts() -> Vec<ManagedCopilotAccountConfig> {
 
 fn demo_antigravity_accounts() -> Vec<ManagedAntigravityAccountConfig> {
     let now = demo_timestamp();
-    vec![ManagedAntigravityAccountConfig {
-        id: ANTIGRAVITY_PRIMARY_ID.to_string(),
-        label: "pro@example.com".to_string(),
-        account_root: demo_root().join("antigravity-primary"),
-        email: "pro@example.com".to_string(),
-        sub: "demo-antigravity-sub".to_string(),
-        last_tier_id: Some("g1-pro-tier".to_string()),
-        created_at: now,
-        updated_at: now,
-        last_authenticated_at: Some(now),
-    }]
+    vec![
+        ManagedAntigravityAccountConfig {
+            id: ANTIGRAVITY_PRIMARY_ID.to_string(),
+            label: "pro@example.com".to_string(),
+            account_root: demo_root().join("antigravity-primary"),
+            email: "pro@example.com".to_string(),
+            sub: "demo-antigravity-pro-sub".to_string(),
+            last_tier_id: Some("g1-pro-tier".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
+        ManagedAntigravityAccountConfig {
+            id: ANTIGRAVITY_FREE_ID.to_string(),
+            label: "free@example.com".to_string(),
+            account_root: demo_root().join("antigravity-free"),
+            email: "free@example.com".to_string(),
+            sub: "demo-antigravity-free-sub".to_string(),
+            last_tier_id: Some("free-tier".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
+    ]
 }
 
 fn snapshot_antigravity_primary() -> UsageSnapshot {
@@ -974,6 +1005,33 @@ fn snapshot_antigravity_primary() -> UsageSnapshot {
     }
 }
 
+fn snapshot_antigravity_free() -> UsageSnapshot {
+    let now = Utc::now();
+    let weekly = now + Duration::days(3);
+    UsageSnapshot {
+        provider: ProviderId::Antigravity,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 27.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: Some("Free Tier".to_string()),
+        }],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("free@example.com".to_string()),
+            account_id: None,
+            plan: Some("Free".to_string()),
+            display_name: Some("Free".to_string()),
+        },
+    }
+}
+
 fn demo_root() -> PathBuf {
     paths().cache_dir.join("demo")
 }
@@ -1010,6 +1068,7 @@ mod tests {
             snapshot_gemini_primary(),
             snapshot_cursor_primary(),
             snapshot_antigravity_primary(),
+            snapshot_antigravity_free(),
         ] {
             assert!(!snapshot.windows.is_empty());
             assert!(snapshot.identity.email.is_some());
@@ -1042,14 +1101,14 @@ mod tests {
         assert_eq!(config.gemini_managed_accounts.len(), 1);
         assert_eq!(config.copilot_managed_accounts.len(), 2);
         assert_eq!(config.minimax_managed_accounts.len(), 1);
-        assert_eq!(config.antigravity_managed_accounts.len(), 1);
+        assert_eq!(config.antigravity_managed_accounts.len(), 2);
         assert_eq!(config.selected_codex_account_ids.len(), 3);
         assert_eq!(config.selected_claude_account_ids.len(), 2);
         assert_eq!(config.selected_cursor_account_ids.len(), 1);
         assert_eq!(config.selected_gemini_account_ids.len(), 1);
         assert_eq!(config.selected_copilot_account_ids.len(), 2);
         assert_eq!(config.selected_minimax_account_ids.len(), 1);
-        assert_eq!(config.selected_antigravity_account_ids.len(), 1);
+        assert_eq!(config.selected_antigravity_account_ids.len(), 2);
         for provider in ProviderId::ALL {
             assert_eq!(
                 config.provider_enablement(provider),
@@ -1061,6 +1120,7 @@ mod tests {
         assert!(!config.show_all_accounts(ProviderId::Cursor));
         assert!(!config.show_all_accounts(ProviderId::Gemini));
         assert!(config.show_all_accounts(ProviderId::Copilot));
+        assert!(config.show_all_accounts(ProviderId::Antigravity));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
@@ -1227,6 +1287,40 @@ mod tests {
                     .is_some_and(|updated| { Utc::now() - updated < Duration::minutes(10) })
             );
         }
+    }
+
+    #[test]
+    fn antigravity_demo_seeds_selected_pro_and_free_accounts() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let mut state = AppState::empty();
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        assert_eq!(
+            config.selected_antigravity_account_ids,
+            vec![
+                ANTIGRAVITY_PRIMARY_ID.to_string(),
+                ANTIGRAVITY_FREE_ID.to_string(),
+            ]
+        );
+        assert!(config.show_all_accounts(ProviderId::Antigravity));
+        let free = state
+            .provider_accounts
+            .iter()
+            .find(|account| account.account_id == ANTIGRAVITY_FREE_ID)
+            .and_then(|account| account.snapshot.as_ref())
+            .expect("free Antigravity demo snapshot");
+        assert_eq!(free.identity.email.as_deref(), Some("free@example.com"));
+        assert_eq!(free.identity.plan.as_deref(), Some("Free"));
+        assert_eq!(free.windows.len(), 1);
+        assert_eq!(free.windows[0].label, "Weekly Limit");
     }
 
     #[test]
