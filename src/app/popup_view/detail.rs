@@ -245,7 +245,7 @@ pub(super) fn empty_state_view<'a>() -> Element<'a, Message> {
         .size(22),
         widget::icon::icon(app_icon_handle()).size(48),
         widget::icon::icon(provider_icon_handle(
-            ProviderId::Gemini,
+            ProviderId::Codex,
             provider_icon_variant()
         ))
         .size(22),
@@ -269,7 +269,7 @@ pub(super) fn empty_state_view<'a>() -> Element<'a, Message> {
         .height(Length::Fill)
         .align_x(Alignment::Center)
         .align_y(Alignment::Center)
-        .padding(24)
+        .padding(32)
         .into()
 }
 

@@ -777,13 +777,18 @@ fn popup_grows_taller_when_provider_tabs_wrap_to_second_row() {
 
     assert!(five_enabled.height > four_enabled.height);
 
-    for provider in [ProviderId::Claude, ProviderId::Cursor, ProviderId::Gemini] {
+    for provider in [ProviderId::Cursor, ProviderId::Gemini] {
         state.provider_mut(provider).unwrap().enabled = false;
     }
     state.provider_mut(ProviderId::Minimax).unwrap().enabled = false;
+    let two_enabled = popup_session_size(&state, ProviderId::Codex);
+
+    assert_eq!(two_enabled.height, four_enabled.height);
+
+    state.provider_mut(ProviderId::Claude).unwrap().enabled = false;
     let one_enabled = popup_session_size(&state, ProviderId::Codex);
 
-    assert_eq!(one_enabled.height, four_enabled.height);
+    assert!(one_enabled.height < four_enabled.height);
 }
 
 #[test]

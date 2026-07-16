@@ -52,7 +52,7 @@ const PROVIDER_TAB_ROW_SPACING: f32 = 8.0;
 const POPUP_FOOTER_HEIGHT: f32 = 28.0;
 const POPUP_BODY_PANEL_PADDING: f32 = 24.0;
 const POPUP_BODY_BOTTOM_SLACK: f32 = 8.0;
-const EMPTY_STATE_BODY_HEIGHT: f32 = 194.0;
+const EMPTY_STATE_BODY_HEIGHT: f32 = 240.0;
 const PROVIDER_CARD_SPACING: f32 = 8.0;
 const PROVIDER_SUMMARY_HEIGHT: f32 = 58.0;
 const PROVIDER_ACCOUNT_HEADER_HEIGHT: f32 = 96.0;
@@ -106,7 +106,9 @@ pub fn popup_content<'a>(
 
     let nav_row: Option<Element<'_, Message>> = match route {
         PopupRoute::ProviderDetail if empty_state => None,
-        PopupRoute::ProviderDetail => Some(provider_tab_rows(state, selected_provider)),
+        PopupRoute::ProviderDetail => {
+            (enabled_provider_count(state) > 1).then(|| provider_tab_rows(state, selected_provider))
+        }
         PopupRoute::Settings(settings_route) => {
             Some(settings_category_row(settings_route, update_status))
         }
@@ -196,14 +198,16 @@ fn popup_body_stack<'a>(
         .height(Length::Fill);
 
     if popup_empty_state_active(state) {
-        stack = stack.push(Measure::new(empty_state_view(), POPUP_WIDTH, |size| {
-            Message::PopupBodyMeasured(PopupBodyMeasureTarget::EmptyState, size)
-        }));
+        stack = stack.push(Measure::new(
+            empty_state_view(),
+            body_measure_width(1.0),
+            |size| Message::PopupBodyMeasured(PopupBodyMeasureTarget::EmptyState, size),
+        ));
     }
 
     for provider in state.providers.iter().filter(|provider| provider.enabled) {
         let provider_id = provider.provider;
-        let width = selected_account_count(state, provider_id) * POPUP_WIDTH;
+        let width = body_measure_width(selected_account_count(state, provider_id));
         let body = selected_provider_view(Some(provider), state, config, detection);
         stack = stack.push(Measure::new(body, width, move |size| {
             Message::PopupBodyMeasured(PopupBodyMeasureTarget::Provider(provider_id), size)
@@ -211,7 +215,7 @@ fn popup_body_stack<'a>(
     }
 
     let general = general_settings_view(config, update_status);
-    stack = stack.push(Measure::new(general, POPUP_WIDTH, |size| {
+    stack = stack.push(Measure::new(general, body_measure_width(1.0), |size| {
         Message::PopupBodyMeasured(
             PopupBodyMeasureTarget::Settings(SettingsRoute::General),
             size,
@@ -220,7 +224,7 @@ fn popup_body_stack<'a>(
 
     for provider in ProviderId::ALL {
         let body = provider_settings_view(state, config, detection, logins, provider);
-        stack = stack.push(Measure::new(body, POPUP_WIDTH, move |size| {
+        stack = stack.push(Measure::new(body, body_measure_width(1.0), move |size| {
             Message::PopupBodyMeasured(
                 PopupBodyMeasureTarget::Settings(SettingsRoute::Provider(provider)),
                 size,
@@ -276,22 +280,27 @@ pub fn popup_session_size_with_body_height(
 pub fn popup_settings_size(state: &AppState) -> Size {
     Size::new(
         POPUP_WIDTH,
-        popup_total_height(settings_nav_height(), settings_body_height(state)),
+        popup_total_height(Some(settings_nav_height()), settings_body_height(state)),
     )
 }
 
 pub fn popup_settings_size_with_body_height(body_height: f32) -> Size {
     Size::new(
         POPUP_WIDTH,
-        popup_total_height(settings_nav_height(), body_height),
+        popup_total_height(Some(settings_nav_height()), body_height),
     )
 }
 
-fn popup_total_height(nav_height: f32, body_height: f32) -> f32 {
+fn popup_total_height(nav_height: Option<f32>, body_height: f32) -> f32 {
+    let chrome_spacing = if nav_height.is_some() {
+        POPUP_CHROME_SPACING
+    } else {
+        POPUP_EMPTY_CHROME_SPACING
+    };
     let height = POPUP_PADDING
-        + POPUP_CHROME_SPACING
+        + chrome_spacing
         + POPUP_HEADER_HEIGHT
-        + nav_height
+        + nav_height.unwrap_or(0.0)
         + POPUP_FOOTER_HEIGHT
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
@@ -320,6 +329,10 @@ pub(super) fn detected_without_accounts(
     provider: ProviderId,
 ) -> bool {
     detection.detected(provider) && state.accounts_for(provider).is_empty()
+}
+
+fn body_measure_width(columns: f32) -> f32 {
+    columns * POPUP_WIDTH - POPUP_PADDING - POPUP_BODY_PANEL_PADDING
 }
 
 fn selected_account_count(state: &AppState, provider: ProviderId) -> f32 {
@@ -663,12 +676,20 @@ impl ButtonInteraction {
 }
 
 fn provider_tab_rows(state: &AppState, selected_provider: ProviderId) -> Element<'static, Message> {
-    let tabs = state
+    let tabs: Vec<Element<'static, Message>> = state
         .providers
         .iter()
         .filter(|provider| provider.enabled)
         .map(|provider| provider_tab(state, provider, provider.provider == selected_provider))
         .collect();
+
+    if tabs.len() < PROVIDER_TABS_PER_ROW {
+        let mut tab_row = row![].spacing(8);
+        for tab in tabs {
+            tab_row = tab_row.push(tab);
+        }
+        return tab_row.into();
+    }
 
     wrap_tab_rows(tabs)
 }
@@ -697,14 +718,17 @@ fn nav_rows_height(tab_count: usize) -> f32 {
     rows * POPUP_TAB_HEIGHT + (rows - 1.0) * PROVIDER_TAB_ROW_SPACING
 }
 
-fn provider_nav_height(state: &AppState) -> f32 {
-    nav_rows_height(
-        state
-            .providers
-            .iter()
-            .filter(|provider| provider.enabled)
-            .count(),
-    )
+fn enabled_provider_count(state: &AppState) -> usize {
+    state
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled)
+        .count()
+}
+
+fn provider_nav_height(state: &AppState) -> Option<f32> {
+    let count = enabled_provider_count(state);
+    (count > 1).then(|| nav_rows_height(count))
 }
 
 fn settings_nav_height() -> f32 {
