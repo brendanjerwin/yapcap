@@ -37,8 +37,8 @@ pub struct RawBucket {
 
 fn window_rank(window: Option<&str>) -> u8 {
     match window {
-        Some("weekly") => 0,
-        Some("5h") => 1,
+        Some("5h") => 0,
+        Some("weekly") => 1,
         _ => 2,
     }
 }
@@ -144,22 +144,22 @@ mod tests {
         assert_eq!(windows.len(), 4);
 
         assert_eq!(windows[0].group.as_deref(), Some("Gemini Models"));
-        assert_eq!(windows[0].label, "Weekly Limit");
-        assert_eq!(windows[0].window_seconds, Some(WEEKLY_WINDOW_SECONDS));
-        assert!((windows[0].used_percent - (100.0 - 99.77627)).abs() < 0.01);
-        assert!(windows[0].reset_at.is_some());
+        assert_eq!(windows[0].label, "Five Hour Limit");
+        assert_eq!(windows[0].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
 
         assert_eq!(windows[1].group.as_deref(), Some("Gemini Models"));
-        assert_eq!(windows[1].label, "Five Hour Limit");
-        assert_eq!(windows[1].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
+        assert_eq!(windows[1].label, "Weekly Limit");
+        assert_eq!(windows[1].window_seconds, Some(WEEKLY_WINDOW_SECONDS));
+        assert!((windows[1].used_percent - (100.0 - 99.77627)).abs() < 0.01);
+        assert!(windows[1].reset_at.is_some());
 
         assert_eq!(windows[2].group.as_deref(), Some("Claude and GPT models"));
-        assert_eq!(windows[2].label, "Weekly Limit");
-        assert!((windows[2].used_percent - 0.0).abs() < 0.01);
+        assert_eq!(windows[2].label, "Five Hour Limit");
+        assert_eq!(windows[2].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
 
         assert_eq!(windows[3].group.as_deref(), Some("Claude and GPT models"));
-        assert_eq!(windows[3].label, "Five Hour Limit");
-        assert_eq!(windows[3].window_seconds, Some(FIVE_HOUR_WINDOW_SECONDS));
+        assert_eq!(windows[3].label, "Weekly Limit");
+        assert!((windows[3].used_percent - 0.0).abs() < 0.01);
     }
 
     #[test]
@@ -187,15 +187,15 @@ mod tests {
     }
 
     #[test]
-    fn weekly_ordered_before_five_hour_regardless_of_input_order() {
+    fn five_hour_ordered_before_weekly_regardless_of_input_order() {
         let raw = r#"{"groups":[{"displayName":"G","buckets":[
-            {"displayName":"Five Hour Limit","window":"5h","remainingFraction":0.5,"resetTime":"2026-07-14T15:00:00Z"},
-            {"displayName":"Weekly Limit","window":"weekly","remainingFraction":0.9,"resetTime":"2026-07-21T15:00:00Z"}
+            {"displayName":"Weekly Limit","window":"weekly","remainingFraction":0.9,"resetTime":"2026-07-21T15:00:00Z"},
+            {"displayName":"Five Hour Limit","window":"5h","remainingFraction":0.5,"resetTime":"2026-07-14T15:00:00Z"}
         ]}]}"#;
         let response = parse_quota_summary(raw).unwrap();
         let windows = normalize_quota_summary(&response);
-        assert_eq!(windows[0].label, "Weekly Limit");
-        assert_eq!(windows[1].label, "Five Hour Limit");
+        assert_eq!(windows[0].label, "Five Hour Limit");
+        assert_eq!(windows[1].label, "Weekly Limit");
     }
 
     #[test]

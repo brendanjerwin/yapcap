@@ -87,6 +87,13 @@
     <keyword>Applet</keyword>
   </keywords>
   <releases>
+    <release type="stable" version="0.6.0" date="2026-07-16">
+      <description>
+        <p>Adds Google Antigravity as a provider with Google OAuth login and grouped usage windows.</p>
+        <p>Adds automatic provider detection at startup with live re-detection, tri-state provider enablement, and a popup empty-state that suggests detected providers.</p>
+        <p>Improves the popup with adaptive provider tab rows and streamlined login flow.</p>
+      </description>
+    </release>
     <release type="stable" version="0.5.2" date="2026-06-19">
       <description>
         <p>Fixes automatic refresh scheduling and in-progress state synchronization across multiple panel instances.</p>

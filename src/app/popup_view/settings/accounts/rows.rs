@@ -3,7 +3,7 @@ use super::super::super::{
     ProviderAccountRuntimeState, ProviderId, accent_selection_fill, account_label_text,
     apply_alpha, badge_destructive, badge_destructive_soft, badge_neutral, badge_neutral_soft,
     badge_success, badge_success_soft, badge_warning, badge_warning_soft, badge_with_tooltip,
-    container, fl, registry, row, widget,
+    container, disabled_account_label_text, fl, registry, row, widget,
 };
 use crate::model::{AuthState, ProviderHealth, STALE_THRESHOLD};
 
@@ -141,7 +141,12 @@ pub(super) fn account_settings_row<'a>(
     let account_id = account.account_id.clone();
     let label = row_label(provider, account, config);
 
-    let mut title_row = row![account_label_text(&label, 14)]
+    let account_label = if enabled {
+        account_label_text(&label, 14)
+    } else {
+        disabled_account_label_text(&label, 14)
+    };
+    let mut title_row = row![account_label]
         .spacing(8)
         .align_y(Alignment::Center)
         .width(Length::Fill);
@@ -495,10 +500,7 @@ fn account_row_button_class(selected: bool) -> cosmic::theme::Button {
         active: Box::new(move |focused, theme| {
             account_row_button_style(theme, selected, focused, 1.0)
         }),
-        disabled: Box::new(move |theme| {
-            let opacity = if selected { 1.0 } else { 0.45 };
-            account_row_button_style(theme, selected, false, opacity)
-        }),
+        disabled: Box::new(move |theme| account_row_button_style(theme, selected, false, 0.45)),
         hovered: Box::new(move |focused, theme| {
             account_row_button_style(theme, selected, focused, 1.0)
         }),

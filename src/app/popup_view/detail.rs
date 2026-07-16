@@ -1,12 +1,13 @@
 use super::super::provider_assets::app_icon_handle;
 use super::{
-    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_GROUP_HEADER_HEIGHT,
+    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_PADDING, PROVIDER_CARD_SPACING,
+    PROVIDER_GROUP_HEADER_HEIGHT, PROVIDER_GROUP_PADDING, PROVIDER_GROUP_SPACING,
     PROVIDER_SECTION_HEIGHT, PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT,
     PopupRoute, SettingsRoute, account_label_text, apply_alpha, badge_destructive, badge_neutral,
     badge_success, badge_warning, badge_with_tooltip, card, detected_without_accounts, info_block,
     plan_badge, provider_icon_handle, provider_icon_variant, provider_summary,
 };
-use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
+use crate::config::{Config, UsageAmountFormat};
 use crate::currency_format;
 use crate::fl;
 use crate::model::{
@@ -115,21 +116,7 @@ fn account_column_body_items<'a>(
         if account.is_some_and(|account| account.health == ProviderHealth::Error) {
             items.extend(provider_status_info(provider, state, account, detection));
         }
-        let mut previous_group: Option<&str> = None;
-        for window in &snapshot.windows {
-            if let Some(group) = window.group.as_deref()
-                && previous_group != Some(group)
-            {
-                items.push(group_header(group));
-            }
-            previous_group = window.group.as_deref();
-            items.push(usage_section(
-                window,
-                window_display_label(snapshot.provider, &window.label),
-                config.reset_time_format,
-                config.usage_amount_format,
-            ));
-        }
+        items.extend(window_sections(snapshot, config));
         match snapshot.provider {
             ProviderId::Claude => {
                 if let Some(extra) = snapshot.extra_usage.as_ref() {
@@ -189,7 +176,7 @@ fn account_column_header<'a>(
 
     card(
         column![
-            widget::text(fl!("account-label")).size(18),
+            widget::text(fl!("account-label")).size(15),
             label_row,
             status_row,
         ]
@@ -216,24 +203,26 @@ fn account_column_view<'a>(
     container(content)
         .width(Length::FillPortion(1))
         .padding([0, 8])
-        .style(|theme: &cosmic::Theme| {
-            let cosmic = theme.cosmic();
-            widget::container::Style {
-                text_color: None,
-                background: Some(Background::Color(
-                    cosmic.background(theme.transparent).component.base.into(),
-                )),
-                border: cosmic::iced::Border {
-                    radius: cosmic.corner_radii.radius_m.into(),
-                    width: 0.0,
-                    color: Color::TRANSPARENT,
-                },
-                shadow: cosmic::iced::Shadow::default(),
-                icon_color: None,
-                snap: false,
-            }
-        })
+        .style(component_card_style)
         .into()
+}
+
+fn component_card_style(theme: &cosmic::Theme) -> widget::container::Style {
+    let cosmic = theme.cosmic();
+    widget::container::Style {
+        text_color: None,
+        background: Some(Background::Color(
+            cosmic.background(theme.transparent).component.base.into(),
+        )),
+        border: cosmic::iced::Border {
+            radius: cosmic.corner_radii.radius_m.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        shadow: cosmic::iced::Shadow::default(),
+        icon_color: None,
+        snap: false,
+    }
 }
 
 pub(super) fn empty_state_view<'a>() -> Element<'a, Message> {
@@ -397,15 +386,17 @@ fn provider_body_height_for_account(
             cards += 1;
         }
 
-        let window_count = f32::from(u16::try_from(snapshot.windows.len()).unwrap_or(u16::MAX));
-        height += window_count * PROVIDER_SECTION_HEIGHT;
-        cards += snapshot.windows.len();
+        let ungrouped = snapshot
+            .windows
+            .iter()
+            .filter(|window| window.group.is_none())
+            .count();
+        height += f32::from(u16::try_from(ungrouped).unwrap_or(u16::MAX)) * PROVIDER_SECTION_HEIGHT;
+        cards += ungrouped;
 
-        let group_headers = group_header_count(&snapshot.windows);
-        if group_headers > 0 {
-            height += f32::from(u16::try_from(group_headers).unwrap_or(u16::MAX))
-                * (PROVIDER_GROUP_HEADER_HEIGHT + PROVIDER_CARD_SPACING);
-            cards += group_headers;
+        for run in grouped_run_lengths(&snapshot.windows) {
+            height += group_card_height(run);
+            cards += 1;
         }
         match snapshot.provider {
             ProviderId::Claude => {
@@ -445,47 +436,101 @@ fn active_snapshot_for_account<'a>(
         .or(provider.legacy_display_snapshot.as_ref())
 }
 
-fn usage_section(
+fn window_sections<'a>(
+    snapshot: &'a UsageSnapshot,
+    config: &'a Config,
+) -> Vec<Element<'static, Message>> {
+    let mut items = Vec::new();
+    let mut windows = snapshot.windows.iter().peekable();
+    while let Some(window) = windows.next() {
+        let Some(group) = window.group.as_deref() else {
+            items.push(card(usage_section_content(
+                window,
+                snapshot.provider,
+                config,
+            )));
+            continue;
+        };
+        let mut sections = vec![usage_section_content(window, snapshot.provider, config)];
+        while let Some(next) = windows.next_if(|next| next.group.as_deref() == Some(group)) {
+            sections.push(usage_section_content(next, snapshot.provider, config));
+        }
+        items.push(usage_group_card(group, sections));
+    }
+    items
+}
+
+fn usage_group_card(
+    group: &str,
+    sections: Vec<Element<'static, Message>>,
+) -> Element<'static, Message> {
+    let mut content = column![widget::text(group.to_string()).size(18)]
+        .spacing(PROVIDER_GROUP_SPACING)
+        .width(Length::Fill);
+    for section in sections {
+        content = content.push(section);
+    }
+    container(content)
+        .width(Length::Fill)
+        .padding(PROVIDER_GROUP_PADDING / 2.0)
+        .style(group_card_style)
+        .into()
+}
+
+fn group_card_style(theme: &cosmic::Theme) -> widget::container::Style {
+    let cosmic = theme.cosmic();
+    let mut style = component_card_style(theme);
+    style.border.width = 1.0;
+    style.border.color = cosmic
+        .background(theme.transparent)
+        .component
+        .divider
+        .into();
+    style
+}
+
+fn usage_section_content(
     window: &UsageWindow,
-    display_label: String,
-    reset_time_format: ResetTimeFormat,
-    usage_amount_format: UsageAmountFormat,
+    provider: ProviderId,
+    config: &Config,
 ) -> Element<'static, Message> {
     let now = chrono::Utc::now();
     let pace = usage_display::pace(window, now);
-    usage_block(
-        display_label,
-        usage_display::displayed_amount_percent(window, now, usage_amount_format),
-        usage_display::usage_amount_label(window, now, usage_amount_format),
+    usage_block_content(
+        window_display_label(provider, &window.label),
+        usage_display::displayed_amount_percent(window, now, config.usage_amount_format),
+        usage_display::usage_amount_label(window, now, config.usage_amount_format),
         UsageBlockDetails {
-            secondary: usage_display::reset_label(window, now, reset_time_format),
+            secondary: usage_display::reset_label(window, now, config.reset_time_format),
             secondary_tooltip: None,
             pace,
-            pace_marker_percent: pace_marker_percent(pace, usage_amount_format),
+            pace_marker_percent: pace_marker_percent(pace, config.usage_amount_format),
             overage: overage_text(window),
         },
     )
 }
 
-fn group_header_count(windows: &[UsageWindow]) -> usize {
-    let mut count = 0;
+fn group_card_height(windows: usize) -> f32 {
+    let n = f32::from(u16::try_from(windows).unwrap_or(u16::MAX));
+    PROVIDER_GROUP_PADDING
+        + PROVIDER_GROUP_HEADER_HEIGHT
+        + n * (PROVIDER_SECTION_HEIGHT - PROVIDER_CARD_PADDING)
+        + n * PROVIDER_GROUP_SPACING
+}
+
+fn grouped_run_lengths(windows: &[UsageWindow]) -> Vec<usize> {
+    let mut runs = Vec::new();
     let mut previous: Option<&str> = None;
     for window in windows {
-        if let Some(group) = window.group.as_deref()
-            && previous != Some(group)
-        {
-            count += 1;
+        if let Some(group) = window.group.as_deref() {
+            match runs.last_mut() {
+                Some(last) if previous == Some(group) => *last += 1,
+                _ => runs.push(1),
+            }
         }
         previous = window.group.as_deref();
     }
-    count
-}
-
-fn group_header(group: &str) -> Element<'static, Message> {
-    container(widget::text(group.to_string()).size(15))
-        .width(Length::Fill)
-        .padding([4, 4])
-        .into()
+    runs
 }
 
 fn window_display_label(provider: ProviderId, label: &str) -> String {
@@ -573,7 +618,7 @@ fn cost_section(provider: ProviderId, cost: &ProviderCost) -> Element<'static, M
         widget::text(iso_tip).size(12),
         widget::tooltip::Position::Top,
     );
-    card(column![widget::text(fl!("extra-usage-label")).size(18), body,].spacing(6))
+    card(column![widget::text(fl!("extra-usage-label")).size(15), body,].spacing(6))
 }
 
 fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
@@ -585,7 +630,7 @@ fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
 
     card(
         column![
-            widget::text(fl!("credits-label")).size(18),
+            widget::text(fl!("credits-label")).size(15),
             widget::text(fl!("credits-available", balance = balance.as_str())).size(14),
         ]
         .spacing(6),
@@ -593,6 +638,15 @@ fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
 }
 
 fn usage_block(
+    title: String,
+    percent: f32,
+    primary: String,
+    details: UsageBlockDetails,
+) -> Element<'static, Message> {
+    card(usage_block_content(title, percent, primary, details))
+}
+
+fn usage_block_content(
     title: String,
     percent: f32,
     primary: String,
@@ -609,7 +663,7 @@ fn usage_block(
     .align_y(Alignment::Center);
 
     let mut content = column![
-        widget::text(title).size(18),
+        widget::text(title).size(15),
         paced_progress_bar(
             percent,
             details.pace_marker_percent,
@@ -622,7 +676,7 @@ fn usage_block(
         content = content.push(overage_line(overage));
     }
 
-    card(content.push(pct_row))
+    content.push(pct_row).into()
 }
 
 struct UsageBlockDetails {
@@ -841,20 +895,31 @@ mod tests {
     }
 
     #[test]
-    fn group_header_count_counts_only_group_boundaries() {
+    fn grouped_run_lengths_splits_runs_at_group_boundaries() {
         let windows = vec![
             grouped_window("Gemini Models"),
             grouped_window("Gemini Models"),
             grouped_window("Claude and GPT models"),
             grouped_window("Claude and GPT models"),
         ];
-        assert_eq!(group_header_count(&windows), 2);
+        assert_eq!(grouped_run_lengths(&windows), vec![2, 2]);
     }
 
     #[test]
-    fn group_header_count_is_zero_for_ungrouped_providers() {
+    fn grouped_run_lengths_skips_ungrouped_windows() {
+        let windows = vec![
+            ungrouped_window(),
+            grouped_window("Gemini Models"),
+            ungrouped_window(),
+            grouped_window("Gemini Models"),
+        ];
+        assert_eq!(grouped_run_lengths(&windows), vec![1, 1]);
+    }
+
+    #[test]
+    fn grouped_run_lengths_is_empty_for_ungrouped_providers() {
         let windows = vec![ungrouped_window(), ungrouped_window()];
-        assert_eq!(group_header_count(&windows), 0);
+        assert!(grouped_run_lengths(&windows).is_empty());
     }
 
     #[test]

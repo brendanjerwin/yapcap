@@ -8,7 +8,7 @@ mod settings;
 use self::badges::{
     account_label_text, apply_alpha, badge_accent, badge_destructive, badge_destructive_soft,
     badge_neutral, badge_neutral_soft, badge_success, badge_success_soft, badge_warning,
-    badge_warning_soft, badge_with_tooltip, plan_badge,
+    badge_warning_soft, badge_with_tooltip, disabled_account_label_text, plan_badge,
 };
 use self::detail::{
     active_snapshot, empty_state_view, provider_body_height_multi, selected_provider_view,
@@ -59,6 +59,9 @@ const PROVIDER_ACCOUNT_HEADER_HEIGHT: f32 = 96.0;
 const PROVIDER_SECTION_HEIGHT: f32 = 84.0;
 const PROVIDER_SECTION_WITH_ACTION_HEIGHT: f32 = 120.0;
 const PROVIDER_GROUP_HEADER_HEIGHT: f32 = 28.0;
+const PROVIDER_GROUP_PADDING: f32 = 24.0;
+const PROVIDER_GROUP_SPACING: f32 = 12.0;
+const PROVIDER_CARD_PADDING: f32 = 16.0;
 const SETTINGS_SECTION_HEIGHT: f32 = 104.0;
 const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
 const PROVIDER_TAB_ICON_SIZE: u16 = 16;
@@ -866,7 +869,7 @@ fn info_block(
     secondary: Option<String>,
     action: Option<Element<'static, Message>>,
 ) -> Element<'static, Message> {
-    let mut col = column![widget::text(title).size(18), widget::text(primary).size(14)].spacing(6);
+    let mut col = column![widget::text(title).size(15), widget::text(primary).size(14)].spacing(6);
 
     if let Some(secondary) = secondary {
         col = col.push(widget::text(secondary).size(13));

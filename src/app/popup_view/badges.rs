@@ -140,10 +140,30 @@ pub(super) fn badge_with_tooltip(
 }
 
 pub(super) fn account_label_text(label: &str, size: u16) -> Element<'static, Message> {
+    account_label(label, size, None)
+}
+
+pub(super) fn disabled_account_label_text(label: &str, size: u16) -> Element<'static, Message> {
+    account_label(
+        label,
+        size,
+        Some(cosmic::theme::Text::Custom(disabled_account_label_style)),
+    )
+}
+
+fn account_label(
+    label: &str,
+    size: u16,
+    class: Option<cosmic::theme::Text>,
+) -> Element<'static, Message> {
     let truncated = truncate_account_label(label);
     let text = widget::text(truncated.clone())
         .size(size)
         .width(Length::Fill);
+    let text = match class {
+        Some(class) => text.class(class),
+        None => text,
+    };
     if truncated == label {
         return text.into();
     }
@@ -153,6 +173,21 @@ pub(super) fn account_label_text(label: &str, size: u16) -> Element<'static, Mes
         widget::tooltip::Position::Top,
     )
     .into()
+}
+
+fn disabled_account_label_style(theme: &cosmic::Theme) -> cosmic::iced::widget::text::Style {
+    cosmic::iced::widget::text::Style {
+        color: Some(apply_alpha(
+            theme
+                .cosmic()
+                .background(theme.transparent)
+                .component
+                .on
+                .into(),
+            0.45,
+        )),
+        ..Default::default()
+    }
 }
 
 fn badge_container(

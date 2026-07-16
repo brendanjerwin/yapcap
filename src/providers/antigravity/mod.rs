@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(snapshot.windows.len(), 4);
         assert_eq!(snapshot.identity.plan.as_deref(), Some("Free"));
         assert_eq!(snapshot.identity.email.as_deref(), Some("user@example.com"));
-        assert_eq!(snapshot.headline, UsageHeadline(1));
+        assert_eq!(snapshot.headline, UsageHeadline(0));
         let requests = handle.await.unwrap();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].contains("\"ideType\":\"ANTIGRAVITY\""));
