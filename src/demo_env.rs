@@ -72,40 +72,26 @@ pub fn apply_config(config: &mut Config) {
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
-    if config.selected_codex_account_ids.is_empty() {
-        config.selected_codex_account_ids = vec![
-            CODEX_PRIMARY_ID.to_string(),
-            CODEX_SECONDARY_ID.to_string(),
-            CODEX_PRO_ID.to_string(),
-        ];
-        config.set_provider_show_all(ProviderId::Codex, true);
-    }
-    if config.selected_claude_account_ids.is_empty() {
-        config.selected_claude_account_ids =
-            vec![CLAUDE_PRIMARY_ID.to_string(), CLAUDE_MAX_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Claude, true);
-    }
-    if config.selected_cursor_account_ids.is_empty() {
-        config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Cursor, false);
-    }
-    if config.selected_gemini_account_ids.is_empty() {
-        config.selected_gemini_account_ids = vec![GEMINI_PRIMARY_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Gemini, false);
-    }
-    if config.selected_copilot_account_ids.is_empty() {
-        config.selected_copilot_account_ids =
-            vec![COPILOT_FREE_ID.to_string(), COPILOT_PRO_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Copilot, true);
-    }
-    if config.selected_minimax_account_ids.is_empty() {
-        config.selected_minimax_account_ids = vec![MINIMAX_PRIMARY_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Minimax, false);
-    }
-    if config.selected_antigravity_account_ids.is_empty() {
-        config.selected_antigravity_account_ids = vec![ANTIGRAVITY_PRIMARY_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Antigravity, false);
-    }
+    config.selected_codex_account_ids = vec![
+        CODEX_PRIMARY_ID.to_string(),
+        CODEX_SECONDARY_ID.to_string(),
+        CODEX_PRO_ID.to_string(),
+    ];
+    config.set_provider_show_all(ProviderId::Codex, true);
+    config.selected_claude_account_ids =
+        vec![CLAUDE_PRIMARY_ID.to_string(), CLAUDE_MAX_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Claude, true);
+    config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Cursor, false);
+    config.selected_gemini_account_ids = vec![GEMINI_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Gemini, false);
+    config.selected_copilot_account_ids =
+        vec![COPILOT_FREE_ID.to_string(), COPILOT_PRO_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Copilot, true);
+    config.selected_minimax_account_ids = vec![MINIMAX_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Minimax, false);
+    config.selected_antigravity_account_ids = vec![ANTIGRAVITY_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Antigravity, false);
 }
 
 pub fn strip_leaked_state(config: &mut Config) -> bool {
@@ -937,14 +923,6 @@ fn snapshot_antigravity_primary() -> UsageSnapshot {
     let five_hour = now + Duration::hours(4);
     let windows = vec![
         UsageWindow {
-            label: "Weekly Limit".to_string(),
-            used_percent: 12.0,
-            reset_at: Some(weekly),
-            window_seconds: Some(7 * 24 * 3600),
-            reset_description: None,
-            group: Some("Gemini Models".to_string()),
-        },
-        UsageWindow {
             label: "Five Hour Limit".to_string(),
             used_percent: 44.0,
             reset_at: Some(five_hour),
@@ -954,17 +932,25 @@ fn snapshot_antigravity_primary() -> UsageSnapshot {
         },
         UsageWindow {
             label: "Weekly Limit".to_string(),
-            used_percent: 3.0,
+            used_percent: 12.0,
             reset_at: Some(weekly),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
-            group: Some("Claude and GPT models".to_string()),
+            group: Some("Gemini Models".to_string()),
         },
         UsageWindow {
             label: "Five Hour Limit".to_string(),
             used_percent: 0.0,
             reset_at: Some(five_hour),
             window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some("Claude and GPT models".to_string()),
+        },
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 3.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
             group: Some("Claude and GPT models".to_string()),
         },
@@ -1023,6 +1009,7 @@ mod tests {
             snapshot_claude_max(),
             snapshot_gemini_primary(),
             snapshot_cursor_primary(),
+            snapshot_antigravity_primary(),
         ] {
             assert!(!snapshot.windows.is_empty());
             assert!(snapshot.identity.email.is_some());
@@ -1055,14 +1042,20 @@ mod tests {
         assert_eq!(config.gemini_managed_accounts.len(), 1);
         assert_eq!(config.copilot_managed_accounts.len(), 2);
         assert_eq!(config.minimax_managed_accounts.len(), 1);
+        assert_eq!(config.antigravity_managed_accounts.len(), 1);
         assert_eq!(config.selected_codex_account_ids.len(), 3);
         assert_eq!(config.selected_claude_account_ids.len(), 2);
         assert_eq!(config.selected_cursor_account_ids.len(), 1);
         assert_eq!(config.selected_gemini_account_ids.len(), 1);
         assert_eq!(config.selected_copilot_account_ids.len(), 2);
         assert_eq!(config.selected_minimax_account_ids.len(), 1);
-        assert_eq!(config.copilot_enablement, ProviderEnablement::Enabled);
-        assert_eq!(config.minimax_enablement, ProviderEnablement::Enabled);
+        assert_eq!(config.selected_antigravity_account_ids.len(), 1);
+        for provider in ProviderId::ALL {
+            assert_eq!(
+                config.provider_enablement(provider),
+                ProviderEnablement::Enabled
+            );
+        }
         assert!(config.show_all_accounts(ProviderId::Codex));
         assert!(config.show_all_accounts(ProviderId::Claude));
         assert!(!config.show_all_accounts(ProviderId::Cursor));
@@ -1072,6 +1065,113 @@ mod tests {
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
         );
+    }
+
+    #[test]
+    fn demo_replaces_existing_account_selections() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config {
+            selected_codex_account_ids: vec!["real-codex".to_string()],
+            selected_claude_account_ids: vec!["real-claude".to_string()],
+            selected_cursor_account_ids: vec!["real-cursor".to_string()],
+            selected_gemini_account_ids: vec!["real-gemini".to_string()],
+            selected_copilot_account_ids: vec!["real-copilot".to_string()],
+            selected_minimax_account_ids: vec!["real-minimax".to_string()],
+            selected_antigravity_account_ids: vec!["real-antigravity".to_string()],
+            ..Config::default()
+        };
+        apply_config(&mut config);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        for provider in ProviderId::ALL {
+            let selected = config.selected_account_ids(provider);
+            assert!(
+                !selected.is_empty(),
+                "{} should have demo accounts selected",
+                provider.label()
+            );
+            let managed_ids: Vec<&String> = match provider {
+                ProviderId::Codex => config
+                    .codex_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Claude => config
+                    .claude_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Cursor => config
+                    .cursor_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Gemini => config
+                    .gemini_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Copilot => config
+                    .copilot_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Minimax => config
+                    .minimax_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Antigravity => config
+                    .antigravity_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+            };
+            for id in selected {
+                assert!(
+                    managed_ids.contains(&id),
+                    "{} selection {id} should reference a demo account",
+                    provider.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn demo_enables_all_providers_with_accounts() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let detection = detection_snapshot();
+        let mut state = crate::runtime::load_initial_state(&config, &detection, None);
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        for provider in ProviderId::ALL {
+            assert!(
+                state.provider(provider).is_some_and(|entry| entry.enabled),
+                "{} should be enabled in demo mode",
+                provider.label()
+            );
+            assert!(
+                state
+                    .provider_accounts
+                    .iter()
+                    .any(|account| account.provider == provider),
+                "{} should have demo accounts",
+                provider.label()
+            );
+        }
     }
 
     #[test]
