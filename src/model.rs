@@ -12,8 +12,8 @@ pub enum ProviderId {
     Codex,
     Claude,
     Cursor,
-    Gemini,
     Antigravity,
+    Gemini,
     Copilot,
     Minimax,
 }
@@ -23,8 +23,8 @@ impl ProviderId {
         Self::Codex,
         Self::Claude,
         Self::Cursor,
-        Self::Gemini,
         Self::Antigravity,
+        Self::Gemini,
         Self::Copilot,
         Self::Minimax,
     ];

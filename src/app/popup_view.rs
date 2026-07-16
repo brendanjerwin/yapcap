@@ -950,8 +950,8 @@ mod tests {
                 ProviderId::Codex,
                 ProviderId::Claude,
                 ProviderId::Cursor,
-                ProviderId::Gemini,
                 ProviderId::Antigravity,
+                ProviderId::Gemini,
                 ProviderId::Copilot,
                 ProviderId::Minimax,
             ]
