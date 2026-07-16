@@ -342,8 +342,11 @@ Usage request: `GET https://chatgpt.com/backend-api/wham/usage` with:
 
 Response shape (subset consumed):
 
-- `rate_limit.primary_window.used_percent` / `reset_at` → 5h window.
-- `rate_limit.secondary_window.used_percent` / `reset_at` → 7d window.
+- Each non-null `rate_limit.primary_window` and `rate_limit.secondary_window`
+  supplies `used_percent` and `reset_at`. YapCap derives the label from
+  `limit_window_seconds`: values within 60 seconds of 5h are Session and values
+  within 60 seconds of 7d are Weekly. Missing or unknown durations retain the
+  positional fallback: primary is Session and secondary is Weekly.
 - `credits.balance` (string or number, nullable) → parsed into a `ProviderCost { units: "credits" }`; null or absent balance is silently ignored.
 
 OAuth refresh:
