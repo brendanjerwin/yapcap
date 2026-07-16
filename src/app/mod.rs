@@ -162,7 +162,6 @@ pub enum Message {
     RefreshOwnershipAcquired(Result<RefreshOwner, String>),
     Tick,
     RefreshNow,
-    #[allow(dead_code)]
     ToggleProviderPicker,
     OpenProviderPickerProvider(ProviderId),
     ProviderRefreshed(Box<ProviderRefreshResult>),
@@ -191,10 +190,7 @@ pub enum Message {
     SetPanelIconStyle(PanelIconStyle),
     SetShowAllAccounts(ProviderId, bool),
     CheckUpdates,
-    UpdateChecked {
-        status: UpdateStatus,
-        attempt: u32,
-    },
+    UpdateChecked { status: UpdateStatus, attempt: u32 },
     RetryUpdateCheck(u32),
     OpenUrl(String),
     Quit,
@@ -596,6 +592,8 @@ impl AppModel {
             }
             Message::ToggleProviderPicker => {
                 self.provider_picker_open = !self.provider_picker_open;
+                let route = self.popup_route;
+                return self.resize_popup_to_route(&route);
             }
             Message::OpenProviderPickerProvider(provider) => {
                 self.provider_picker_open = false;

@@ -137,6 +137,9 @@ impl AppModel {
     }
 
     pub(super) fn popup_size_for_route(&self, route: &PopupRoute) -> Size {
+        if self.provider_picker_open && matches!(route, PopupRoute::ProviderDetail) {
+            return popup_view::popup_provider_picker_size();
+        }
         if let Some(size) = self.measured_popup_size_for_route(route) {
             return size;
         }

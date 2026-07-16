@@ -67,6 +67,9 @@ const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
 const PROVIDER_TAB_ICON_SIZE: u16 = 16;
 const PROVIDER_TAB_ICON_LENGTH: f32 = 16.0;
 const PROVIDER_TAB_LABEL_SIZE: u16 = 11;
+const PROVIDER_PICKER_TILE_HEIGHT: f32 = 104.0;
+const PROVIDER_PICKER_COMPACT_TILE_HEIGHT: f32 = 48.0;
+const PROVIDER_PICKER_HEIGHT: f32 = 680.0;
 const UPDATE_NOTIFICATION_DOT_COLOR: Color = Color::from_rgb(0.93, 0.11, 0.15);
 const ACCENT_SOFT_FILL_ALPHA: f32 = 0.14;
 
@@ -101,31 +104,34 @@ pub fn popup_content<'a>(
     let selected = selected_state(state, selected_provider);
     let empty_state = popup_empty_state_active(state);
 
+    let picker_open =
+        logins.provider_picker_open && matches!(route, PopupRoute::ProviderDetail) && !empty_state;
     let header = popup_header(route, empty_state);
-    let picker = (logins.provider_picker_open
-        && matches!(route, PopupRoute::ProviderDetail)
-        && !empty_state)
-        .then(|| provider_picker_view(state, detection));
 
     let nav_row: Option<Element<'_, Message>> = match route {
         PopupRoute::ProviderDetail if empty_state => None,
-        PopupRoute::ProviderDetail => {
+        PopupRoute::ProviderDetail if !picker_open => {
             (enabled_provider_count(state) > 1).then(|| provider_tab_rows(state, selected_provider))
         }
+        PopupRoute::ProviderDetail => None,
         PopupRoute::Settings(settings_route) => {
             Some(settings_category_row(settings_route, update_status))
         }
     };
 
-    let body = popup_body_view(
-        state,
-        config,
-        detection,
-        logins,
-        selected,
-        route,
-        update_status,
-    );
+    let body = if picker_open {
+        provider_picker_view(state, detection)
+    } else {
+        popup_body_view(
+            state,
+            config,
+            detection,
+            logins,
+            selected,
+            route,
+            update_status,
+        )
+    };
 
     let footer_action: Element<'_, Message> = match route {
         PopupRoute::ProviderDetail => settings_footer_action(update_status),
@@ -149,9 +155,6 @@ pub fn popup_content<'a>(
     let body_stack = popup_body_stack(state, config, detection, logins, update_status, body_panel);
 
     let mut content = column![narrow_chrome(header)];
-    if let Some(picker) = picker {
-        content = content.push(narrow_chrome(picker));
-    }
     if let Some(nav_row) = nav_row {
         content = content.push(narrow_chrome(nav_row));
     }
@@ -264,6 +267,10 @@ pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Si
     )
 }
 
+pub const fn popup_provider_picker_size() -> Size {
+    Size::new(POPUP_WIDTH, PROVIDER_PICKER_HEIGHT)
+}
+
 pub fn popup_session_size_with_body_height(
     state: &AppState,
     selected_provider: ProviderId,
@@ -363,8 +370,14 @@ fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Messa
     .spacing(12);
 
     if matches!(route, PopupRoute::ProviderDetail) && !empty_state {
-        header =
-            header.push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
+        let add_provider = widget::tooltip::tooltip(
+            widget::button::standard("+").on_press(Message::ToggleProviderPicker),
+            widget::text(fl!("add-account")).size(12),
+            widget::tooltip::Position::Top,
+        );
+        header = header
+            .push(add_provider)
+            .push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
     }
 
     header.into()
@@ -386,41 +399,85 @@ fn provider_picker_view(
         .take_while(|provider| detected_without_accounts(state, detection, **provider))
         .count();
     let (detected, remaining) = providers.split_at(detected_count);
-    let mut content = column!().spacing(4).width(Length::Fill);
+    let mut content = column![].spacing(5).width(Length::Fill);
 
     if !detected.is_empty() {
-        content = content.push(widget::text(fl!("provider-picker-detected-section")).size(12));
-        for provider in detected {
-            content = content.push(provider_picker_item(*provider, true));
-        }
+        content = content
+            .push(widget::text(fl!("provider-picker-detected-section")).size(12))
+            .push(provider_picker_tile_rows(detected, true));
     }
 
-    content = content.push(widget::text(fl!("provider-picker-all-section")).size(12));
-    for provider in remaining {
-        content = content.push(provider_picker_item(*provider, false));
+    if !remaining.is_empty() {
+        content = content
+            .push(widget::text(fl!("provider-picker-all-section")).size(12))
+            .push(provider_picker_tile_rows(remaining, false));
     }
 
-    row![
-        cosmic::iced::widget::Space::new().width(Length::Fill),
-        container(content.padding(8)).width(Length::Fixed(240.0)),
-    ]
-    .into()
+    container(content).padding(4).into()
 }
 
-fn provider_picker_item(provider: ProviderId, detected: bool) -> Element<'static, Message> {
-    let mut content = row![
-        widget::icon::icon(provider_icon_handle(provider, provider_icon_variant())).size(16),
-        widget::text(provider.label()),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-    if detected {
-        content = content.push(cosmic::iced::widget::Space::new().width(Length::Fill));
-        content = content.push(badge_accent(fl!("provider-detected-add-account")));
+fn provider_picker_tile_rows(
+    providers: &[ProviderId],
+    detected: bool,
+) -> Element<'static, Message> {
+    let mut rows = column![].spacing(8);
+    for pair in providers.chunks(2) {
+        let mut row = row![].spacing(8);
+        for provider in pair {
+            row = row.push(provider_picker_tile(*provider, detected));
+        }
+        if pair.len() == 1 {
+            row = row.push(cosmic::iced::widget::Space::new().width(Length::FillPortion(1)));
+        }
+        rows = rows.push(row);
     }
-    widget::button::custom(content)
+    rows.into()
+}
+
+fn provider_picker_tile(provider: ProviderId, detected: bool) -> Element<'static, Message> {
+    let content: Element<'static, Message> = if detected {
+        column![
+            provider_picker_icon(provider),
+            widget::text(provider.label()).size(14),
+            widget::text(fl!("provider-picker-connect-account")).size(12),
+        ]
+        .spacing(8)
         .width(Length::Fill)
+        .into()
+    } else {
+        row![
+            provider_picker_icon(provider),
+            widget::text(provider.label()).size(14),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    };
+    let height = if detected {
+        PROVIDER_PICKER_TILE_HEIGHT
+    } else {
+        PROVIDER_PICKER_COMPACT_TILE_HEIGHT
+    };
+    let padding = if detected { [12, 12] } else { [4, 12] };
+    let content = container(content).padding(padding);
+    let content = if detected {
+        content
+    } else {
+        content.height(Length::Fill).align_y(Alignment::Center)
+    };
+    widget::button::custom(content)
+        .class(provider_tab_class(false))
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(height))
         .on_press(Message::OpenProviderPickerProvider(provider))
+        .into()
+}
+
+fn provider_picker_icon(provider: ProviderId) -> Element<'static, Message> {
+    widget::icon::icon(provider_icon_handle(provider, provider_icon_variant()))
+        .size(22)
+        .width(Length::Fixed(22.0))
+        .height(Length::Fixed(22.0))
         .into()
 }
 
@@ -983,5 +1040,10 @@ mod tests {
                 ProviderId::Minimax,
             ]
         );
+    }
+
+    #[test]
+    fn provider_picker_has_room_for_the_complete_chooser() {
+        assert_eq!(popup_provider_picker_size(), Size::new(POPUP_WIDTH, 680.0));
     }
 }
