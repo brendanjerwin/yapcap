@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Gemini, Minimax, and GitHub Copilot.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, and GitHub Copilot.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -26,11 +26,12 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Codex** — 5h/weekly windows + credits
     - **Claude** — session/weekly/extra usage
     - **Cursor** — Auto/Composer and API usage 
+    - **Antigravity** — grouped Gemini and Claude/GPT model quota (5h + weekly)
     - **Gemini** — Pro / Flash / Lite quota bars (OAuth accounts only)
     - **Minimax** — API key usage tracking
     - **GitHub Copilot** — Free chat/completions or paid premium interactions
 - 👥 **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
-- 🔐 **In-app login** — guided browser login for Codex, Claude, Gemini, and Copilot; Cursor scans the local IDE state.
+- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, and Copilot; Cursor scans the local IDE state.
 - ✅ **Active badge** — marks the account currently in use by your host CLI for Codex, Claude, and Gemini.
 - ⚙️ **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times.
 
@@ -159,11 +160,11 @@ just install
 
 Each provider supports multiple accounts. Manage them from the popup under **Settings → [Provider]**.
 
-- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, Gemini browser OAuth, GitHub Copilot browser device flow, or Cursor IDE account scanning, without leaving YapCap.
+- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, Antigravity and Gemini browser OAuth, GitHub Copilot browser device flow, or Cursor IDE account scanning, without leaving YapCap.
 - **Switch account** — tap any account row to make it active; the panel and popup update immediately.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 
-Codex, Claude, Cursor, Gemini, and Minimax keep at most one account per email address. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username.
+Codex, Claude, Cursor, Antigravity, Gemini, and Minimax keep at most one account per email address. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username.
 
 ## Panel styles
 
