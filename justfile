@@ -40,6 +40,10 @@ clear-config:
 clear-accounts:
     rm -rf ~/.local/state/yapcap
 
+# Clears native logs at ~/.local/state/yapcap/logs
+clear-logs:
+    rm -rf ~/.local/state/yapcap/logs
+
 # Removes vendored dependencies
 clean-vendor:
     rm -rf .cargo vendor vendor.tar
