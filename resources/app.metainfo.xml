@@ -45,12 +45,20 @@
       <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-cursor.png</image>
     </screenshot>
     <screenshot>
+      <caption>Antigravity usage with grouped Gemini and Claude/GPT model quotas</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-antigravity.png</image>
+    </screenshot>
+    <screenshot>
       <caption>Gemini usage across Pro, Flash, and Lite quota bars</caption>
       <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-gemini.png</image>
     </screenshot>
     <screenshot>
       <caption>GitHub Copilot usage for chat and completions</caption>
       <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-copilot.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Minimax API key usage tracking</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-minimax.png</image>
     </screenshot>
   </screenshots>
   <icon type="remote" width="64" height="64" scale="1">
