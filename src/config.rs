@@ -420,6 +420,85 @@ pub fn cosmic_config_context(
     cosmic_config::Config::with_custom_path(app_id, version, test_config_root())
 }
 
+pub fn write_changed_config_entries(
+    context: &cosmic_config::Config,
+    old: &Config,
+    new: &Config,
+) -> Result<(), cosmic_config::Error> {
+    let tx = context.transaction();
+    let Config {
+        refresh_interval_seconds,
+        reset_time_format,
+        usage_amount_format,
+        panel_icon_style,
+        selected_provider,
+        provider_visibility_mode,
+        codex_enablement,
+        claude_enablement,
+        cursor_enablement,
+        gemini_enablement,
+        copilot_enablement,
+        minimax_enablement,
+        antigravity_enablement,
+        show_all_accounts,
+        selected_codex_account_ids,
+        codex_managed_accounts,
+        selected_claude_account_ids,
+        claude_managed_accounts,
+        selected_cursor_account_ids,
+        cursor_managed_accounts,
+        selected_gemini_account_ids,
+        gemini_managed_accounts,
+        selected_copilot_account_ids,
+        copilot_managed_accounts,
+        selected_minimax_account_ids,
+        minimax_managed_accounts,
+        selected_antigravity_account_ids,
+        antigravity_managed_accounts,
+        log_level,
+    } = new;
+
+    macro_rules! set_changed {
+        ($field:ident) => {
+            if old.$field != *$field {
+                ConfigSet::set(&tx, stringify!($field), $field)?;
+            }
+        };
+    }
+
+    set_changed!(refresh_interval_seconds);
+    set_changed!(reset_time_format);
+    set_changed!(usage_amount_format);
+    set_changed!(panel_icon_style);
+    set_changed!(selected_provider);
+    set_changed!(provider_visibility_mode);
+    set_changed!(codex_enablement);
+    set_changed!(claude_enablement);
+    set_changed!(cursor_enablement);
+    set_changed!(gemini_enablement);
+    set_changed!(copilot_enablement);
+    set_changed!(minimax_enablement);
+    set_changed!(antigravity_enablement);
+    set_changed!(show_all_accounts);
+    set_changed!(selected_codex_account_ids);
+    set_changed!(codex_managed_accounts);
+    set_changed!(selected_claude_account_ids);
+    set_changed!(claude_managed_accounts);
+    set_changed!(selected_cursor_account_ids);
+    set_changed!(cursor_managed_accounts);
+    set_changed!(selected_gemini_account_ids);
+    set_changed!(gemini_managed_accounts);
+    set_changed!(selected_copilot_account_ids);
+    set_changed!(copilot_managed_accounts);
+    set_changed!(selected_minimax_account_ids);
+    set_changed!(minimax_managed_accounts);
+    set_changed!(selected_antigravity_account_ids);
+    set_changed!(antigravity_managed_accounts);
+    set_changed!(log_level);
+
+    tx.commit()
+}
+
 #[cfg(test)]
 fn test_config_root() -> PathBuf {
     thread_local! {
@@ -626,6 +705,37 @@ mod tests {
 
         assert!(!migrate_provider_enablement(&ctx, &mut config));
         assert_eq!(config.cursor_enablement, ProviderEnablement::Auto);
+    }
+
+    #[test]
+    fn write_changed_config_entries_persists_only_changed_fields() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let old = Config::default();
+        old.write_entry(&ctx).unwrap();
+
+        let mut new = old.clone();
+        new.panel_icon_style = match old.panel_icon_style {
+            PanelIconStyle::PercentOnly => PanelIconStyle::LogoAndBars,
+            _ => PanelIconStyle::PercentOnly,
+        };
+        new.refresh_interval_seconds = old.refresh_interval_seconds + 60;
+
+        write_changed_config_entries(&ctx, &old, &new).unwrap();
+
+        let reloaded = Config::get_entry(&ctx).expect("reload config");
+        assert_eq!(reloaded, new);
+    }
+
+    #[test]
+    fn write_changed_config_entries_noop_when_equal() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let config = Config::default();
+        config.write_entry(&ctx).unwrap();
+
+        write_changed_config_entries(&ctx, &config, &config).unwrap();
+
+        let reloaded = Config::get_entry(&ctx).expect("reload config");
+        assert_eq!(reloaded, config);
     }
 
     #[test]

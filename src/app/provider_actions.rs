@@ -324,6 +324,9 @@ impl AppModel {
     pub(super) fn write_config(&mut self, f: impl FnOnce(&mut Config)) {
         let mut new_config = self.config.clone();
         f(&mut new_config);
+        if new_config == self.config {
+            return;
+        }
         if demo_env::is_active() {
             self.config = new_config;
             return;
@@ -344,7 +347,9 @@ impl AppModel {
                 return;
             }
         };
-        if let Err(error) = new_config.write_entry(&ctx) {
+        if let Err(error) =
+            crate::config::write_changed_config_entries(&ctx, &self.config, &new_config)
+        {
             tracing::error!(
                 pid = self.process_info.pid,
                 process_id = %self.process_info.id,
