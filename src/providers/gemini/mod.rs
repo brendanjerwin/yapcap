@@ -3,7 +3,7 @@
 mod account;
 #[allow(dead_code)]
 pub mod buckets;
-mod code_assist;
+pub mod code_assist;
 mod host_session;
 pub mod id_token;
 mod login;
@@ -20,6 +20,8 @@ use std::path::PathBuf;
 use tracing::warn;
 
 pub use account::{apply_login_account, sync_managed_accounts};
+#[cfg(test)]
+pub use login::GeminiLoginSuccess;
 pub use login::{
     GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus, prepare, prepare_for_reauth,
 };
@@ -87,6 +89,7 @@ async fn fetch_at(
     let load = match code_assist::load_code_assist_typed(
         client,
         load_code_assist_endpoint,
+        code_assist::IDE_TYPE_UNSPECIFIED,
         &tokens.access_token,
     )
     .await
@@ -99,6 +102,7 @@ async fn fetch_at(
             code_assist::load_code_assist_typed(
                 client,
                 load_code_assist_endpoint,
+                code_assist::IDE_TYPE_UNSPECIFIED,
                 &tokens.access_token,
             )
             .await

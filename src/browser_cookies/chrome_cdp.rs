@@ -14,6 +14,7 @@ impl CookieSource for ChromeSource {
         find_cookie(cookie_name, domain).await
     }
 
+    #[allow(dead_code)]
     async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
         discover_workspaces().await
     }
@@ -147,6 +148,7 @@ pub async fn find_cookie(cookie_name: &str, domain: &str) -> Option<BrowserCooki
 ///
 /// Looks for open tabs with URLs matching /workspace/<wrk_...> and extracts
 /// the workspace IDs. Names are fetched separately via fetch_workspace_name.
+#[allow(dead_code)]
 pub async fn discover_workspaces() -> Vec<super::WorkspaceInfo> {
     if !cdp_is_available(CDP_DEFAULT_PORT) {
         return Vec::new();
@@ -184,6 +186,7 @@ pub async fn discover_workspaces() -> Vec<super::WorkspaceInfo> {
 }
 
 /// Extract a workspace ID from a URL like https://opencode.ai/workspace/wrk_XXXXX/go
+#[allow(dead_code)]
 fn extract_workspace_id(url: &str) -> Option<String> {
     let marker = "/workspace/";
     let start = url.find(marker)? + marker.len();

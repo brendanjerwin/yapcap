@@ -79,7 +79,7 @@ async fn fetch_at(
 ) -> Result<UsageSnapshot, MinimaxError> {
     let api_key = load_api_key(account_root)
         .ok()
-        .and_then(|key| if key.is_empty() { None } else { Some(key) })
+        .filter(|key| !key.is_empty())
         .or_else(|| std::env::var(MINIMAX_API_KEY_ENV).ok())
         .ok_or(MinimaxError::LoginRequired)?;
 
@@ -174,6 +174,7 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
                 reset_at: None,
                 window_seconds: Some(5 * 3600),
                 reset_description: Some("Resets every 5 hours".to_string()),
+                group: None,
             });
         }
 
@@ -198,6 +199,7 @@ pub fn parse(body: &str, updated_at: chrono::DateTime<Utc>) -> Result<UsageSnaps
                 reset_at: None,
                 window_seconds: Some(7 * 24 * 3600),
                 reset_description: Some("Resets weekly".to_string()),
+                group: None,
             });
         }
     }

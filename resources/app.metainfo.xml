@@ -9,17 +9,19 @@
   </developer>
   <developer_name>Tamás Csarnó</developer_name>
   <name>YapCap</name>
-  <summary>COSMIC panel applet for Codex, Claude Code, Cursor, Gemini, and Copilot usage</summary>
+  <summary>COSMIC panel applet for Codex, Claude Code, Cursor, Antigravity, Gemini, and Copilot usage</summary>
   <description>
-    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, Cursor, Gemini, and GitHub Copilot right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
+    <p>YapCap is a native COSMIC panel applet that tracks your AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, and GitHub Copilot right from the panel. Add accounts once and YapCap fetches usage directly from provider APIs. No telemetry, no cloud sync, no separate service account required.</p>
     <p>Use the popup to compare multiple accounts, see which CLI account is active, switch panel styles, and follow your COSMIC light, dark, and accent color settings.</p>
     <p>Main features:</p>
     <ul>
       <li>Codex usage tracking and credits</li>
       <li>Claude usage tracking and extra usage meter</li>
       <li>Cursor usage tracking: Total, Auto + Composer, and API</li>
+      <li>Antigravity usage tracking: grouped Gemini and Claude/GPT model quotas</li>
       <li>Gemini usage tracking: Pro, Flash and Lite quotas</li>
       <li>GitHub Copilot usage tracking: Free and paid quota shapes</li>
+      <li>Minimax usage tracking</li>
       <li>Multiple accounts per provider</li>
       <li>Active account badge</li>
       <li>COSMIC theme integration</li>
@@ -43,12 +45,20 @@
       <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-cursor.png</image>
     </screenshot>
     <screenshot>
+      <caption>Antigravity usage with grouped Gemini and Claude/GPT model quotas</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-antigravity.png</image>
+    </screenshot>
+    <screenshot>
       <caption>Gemini usage across Pro, Flash, and Lite quota bars</caption>
       <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-gemini.png</image>
     </screenshot>
     <screenshot>
       <caption>GitHub Copilot usage for chat and completions</caption>
       <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-copilot.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Minimax API key usage tracking</caption>
+      <image>https://github.com/TopiCsarno/yapcap/raw/main/resources/screenshots/screenshot-zoom-minimax.png</image>
     </screenshot>
   </screenshots>
   <icon type="remote" width="64" height="64" scale="1">
@@ -81,15 +91,31 @@
     <keyword>Codex</keyword>
     <keyword>Claude</keyword>
     <keyword>Cursor</keyword>
+    <keyword>Antigravity</keyword>
     <keyword>Gemini</keyword>
     <keyword>Copilot</keyword>
+    <keyword>Minimax</keyword>
     <keyword>Panel</keyword>
     <keyword>Applet</keyword>
   </keywords>
   <releases>
+    <release type="stable" version="0.6.0" date="2026-07-16">
+      <description>
+        <p>Adds Google Antigravity as a provider with Google OAuth login and grouped usage windows.</p>
+        <p>Adds automatic provider detection at startup with live re-detection, tri-state provider enablement, and a popup empty-state that suggests detected providers.</p>
+        <p>Improves the popup with adaptive provider tab rows and streamlined login flow.</p>
+      </description>
+    </release>
+    <release type="stable" version="0.5.2" date="2026-06-19">
+      <description>
+        <p>Fixes automatic refresh scheduling and in-progress state synchronization across multiple panel instances.</p>
+        <p>Improves multi-process lifecycle, refresh ownership, and support diagnostics.</p>
+      </description>
+    </release>
     <release type="stable" version="0.5.1" date="2026-06-16">
       <description>
         <p>Fixes the Claude OAuth token endpoint.</p>
+        <p>Adds shared runtime state for multi-process panel sync, owner-only refresh execution, refresh request coordination, selected-provider sync, and expanded diagnostics.</p>
       </description>
     </release>
     <release type="stable" version="0.5.0" date="2026-05-18">

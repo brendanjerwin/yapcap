@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
-    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ProviderVisibilityMode, paths,
+    Config, ManagedAntigravityAccountConfig,
+    ManagedOpencodeGoAccountConfig, ManagedOllamaCloudAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
+    ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
+    ManagedMinimaxAccountConfig, ProviderEnablement, ProviderVisibilityMode, paths,
 };
 use crate::model::{
     AccountSelectionStatus, AppState, AuthState, ExtraUsageState, ProviderAccountRuntimeState,
@@ -11,8 +13,10 @@ use crate::model::{
 };
 use chrono::{DateTime, Duration, Utc};
 use std::path::PathBuf;
+use std::sync::Once;
 
 const DEMO_ENV: &str = "YAPCAP_DEMO";
+const DEMO_ID_PREFIX: &str = "yapcap-demo:";
 const CODEX_PRIMARY_ID: &str = "yapcap-demo:codex-primary";
 const CODEX_SECONDARY_ID: &str = "yapcap-demo:codex-secondary";
 const CODEX_PRO_ID: &str = "yapcap-demo:codex-pro";
@@ -22,6 +26,11 @@ const CURSOR_PRIMARY_ID: &str = "yapcap-demo:cursor-primary";
 const GEMINI_PRIMARY_ID: &str = "yapcap-demo:gemini-primary";
 const COPILOT_FREE_ID: &str = "yapcap-demo:copilot-casey-free";
 const COPILOT_PRO_ID: &str = "yapcap-demo:copilot-morgan-pro";
+const MINIMAX_PRIMARY_ID: &str = "yapcap-demo:minimax-primary";
+const ANTIGRAVITY_PRIMARY_ID: &str = "yapcap-demo:antigravity-primary";
+const ANTIGRAVITY_FREE_ID: &str = "yapcap-demo:antigravity-free";
+const OPENCODE_GO_PRIMARY_ID: &str = "yapcap-demo:opencode-go-primary";
+const OLLAMA_CLOUD_PRIMARY_ID: &str = "yapcap-demo:ollama-cloud-primary";
 
 fn env_truthy() -> bool {
     std::env::var(DEMO_ENV).is_ok_and(|value| {
@@ -40,51 +49,96 @@ pub fn is_active() -> bool {
     std::env::var(DEMO_ENV).is_ok() && env_truthy()
 }
 
+pub fn detection_snapshot() -> crate::detection::DetectionSnapshot {
+    crate::detection::DetectionSnapshot::default()
+}
+
 pub fn apply_config(config: &mut Config) {
     if !is_active() {
         return;
     }
 
-    config.codex_enabled = true;
-    config.claude_enabled = true;
-    config.cursor_enabled = true;
-    config.gemini_enabled = true;
-    config.copilot_enabled = true;
+    config.codex_enablement = ProviderEnablement::Enabled;
+    config.claude_enablement = ProviderEnablement::Enabled;
+    config.cursor_enablement = ProviderEnablement::Enabled;
+    config.gemini_enablement = ProviderEnablement::Enabled;
+    config.copilot_enablement = ProviderEnablement::Enabled;
+    config.minimax_enablement = ProviderEnablement::Enabled;
+    config.antigravity_enablement = ProviderEnablement::Enabled;
+    config.opencode_go_enablement = ProviderEnablement::Enabled;
+    config.ollama_cloud_enablement = ProviderEnablement::Enabled;
 
     config.codex_managed_accounts = demo_codex_accounts();
     config.claude_managed_accounts = demo_claude_accounts();
     config.cursor_managed_accounts = demo_cursor_accounts();
     config.gemini_managed_accounts = demo_gemini_accounts();
     config.copilot_managed_accounts = demo_copilot_accounts();
+    config.minimax_managed_accounts = demo_minimax_accounts();
+    config.antigravity_managed_accounts = demo_antigravity_accounts();
+    config.opencode_go_managed_accounts = demo_opencode_go_accounts();
+    config.ollama_cloud_managed_accounts = demo_ollama_cloud_accounts();
 
     config.provider_visibility_mode = ProviderVisibilityMode::UserManaged;
 
-    if config.selected_codex_account_ids.is_empty() {
-        config.selected_codex_account_ids = vec![
-            CODEX_PRIMARY_ID.to_string(),
-            CODEX_SECONDARY_ID.to_string(),
-            CODEX_PRO_ID.to_string(),
-        ];
-        config.set_provider_show_all(ProviderId::Codex, true);
-    }
-    if config.selected_claude_account_ids.is_empty() {
-        config.selected_claude_account_ids =
-            vec![CLAUDE_PRIMARY_ID.to_string(), CLAUDE_MAX_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Claude, true);
-    }
-    if config.selected_cursor_account_ids.is_empty() {
-        config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Cursor, false);
-    }
-    if config.selected_gemini_account_ids.is_empty() {
-        config.selected_gemini_account_ids = vec![GEMINI_PRIMARY_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Gemini, false);
-    }
-    if config.selected_copilot_account_ids.is_empty() {
-        config.selected_copilot_account_ids =
-            vec![COPILOT_FREE_ID.to_string(), COPILOT_PRO_ID.to_string()];
-        config.set_provider_show_all(ProviderId::Copilot, true);
-    }
+    config.selected_codex_account_ids = vec![
+        CODEX_PRIMARY_ID.to_string(),
+        CODEX_SECONDARY_ID.to_string(),
+        CODEX_PRO_ID.to_string(),
+    ];
+    config.set_provider_show_all(ProviderId::Codex, true);
+    config.selected_claude_account_ids =
+        vec![CLAUDE_PRIMARY_ID.to_string(), CLAUDE_MAX_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Claude, true);
+    config.selected_cursor_account_ids = vec![CURSOR_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Cursor, false);
+    config.selected_gemini_account_ids = vec![GEMINI_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Gemini, false);
+    config.selected_copilot_account_ids =
+        vec![COPILOT_FREE_ID.to_string(), COPILOT_PRO_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Copilot, true);
+    config.selected_minimax_account_ids = vec![MINIMAX_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::Minimax, false);
+    config.selected_antigravity_account_ids = vec![
+        ANTIGRAVITY_PRIMARY_ID.to_string(),
+        ANTIGRAVITY_FREE_ID.to_string(),
+    ];
+    config.set_provider_show_all(ProviderId::Antigravity, true);
+    config.selected_opencode_go_account_ids = vec![OPENCODE_GO_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::OpencodeGo, false);
+    config.selected_ollama_cloud_account_ids = vec![OLLAMA_CLOUD_PRIMARY_ID.to_string()];
+    config.set_provider_show_all(ProviderId::OllamaCloud, false);
+}
+
+pub fn strip_leaked_state(config: &mut Config) -> bool {
+    let mut changed = strip_ids(&mut config.selected_codex_account_ids);
+    changed |= retain_len_changed(&mut config.codex_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_claude_account_ids);
+    changed |= retain_len_changed(&mut config.claude_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_cursor_account_ids);
+    changed |= retain_len_changed(&mut config.cursor_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_gemini_account_ids);
+    changed |= retain_len_changed(&mut config.gemini_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_copilot_account_ids);
+    changed |= retain_len_changed(&mut config.copilot_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_minimax_account_ids);
+    changed |= retain_len_changed(&mut config.minimax_managed_accounts, |account| &account.id);
+    changed |= strip_ids(&mut config.selected_antigravity_account_ids);
+    changed |= retain_len_changed(&mut config.antigravity_managed_accounts, |account| {
+        &account.id
+    });
+    changed
+}
+
+fn strip_ids(ids: &mut Vec<String>) -> bool {
+    let before = ids.len();
+    ids.retain(|id| !id.starts_with(DEMO_ID_PREFIX));
+    ids.len() != before
+}
+
+fn retain_len_changed<T>(accounts: &mut Vec<T>, id_of: impl Fn(&T) -> &String) -> bool {
+    let before = accounts.len();
+    accounts.retain(|account| !id_of(account).starts_with(DEMO_ID_PREFIX));
+    accounts.len() != before
 }
 
 pub fn apply(config: &Config, state: &mut AppState) {
@@ -93,7 +147,7 @@ pub fn apply(config: &Config, state: &mut AppState) {
     }
     state.provider_accounts.clear();
     for provider in ProviderId::ALL {
-        if !config.provider_enabled(provider) {
+        if !state.provider(provider).is_some_and(|entry| entry.enabled) {
             state.upsert_provider(ProviderRuntimeState::disabled(provider));
             continue;
         }
@@ -114,15 +168,19 @@ pub fn apply(config: &Config, state: &mut AppState) {
                 AccountSelectionStatus::LoginRequired
             },
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: None,
         });
     }
     state.updated_at = Utc::now();
-    tracing::warn!(
-        env = DEMO_ENV,
-        "using synthetic usage snapshots (see demo_env)"
-    );
+    static DEMO_WARNED: Once = Once::new();
+    DEMO_WARNED.call_once(|| {
+        tracing::warn!(
+            env = DEMO_ENV,
+            "using synthetic usage snapshots (see demo_env)"
+        );
+    });
 }
 
 fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
@@ -133,6 +191,7 @@ fn demo_system_active_account_id(provider: ProviderId) -> Option<String> {
         ProviderId::Gemini => GEMINI_PRIMARY_ID,
         ProviderId::Copilot => return None,
         ProviderId::Minimax => return None,
+        ProviderId::Antigravity => return None,
         ProviderId::OpencodeGo => return None,
         ProviderId::OllamaCloud => return None,
     };
@@ -144,7 +203,11 @@ fn demo_source(provider: ProviderId) -> String {
         ProviderId::Codex | ProviderId::Claude | ProviderId::Gemini | ProviderId::Copilot => {
             "OAuth".to_string()
         }
-        ProviderId::Cursor | ProviderId::Minimax | ProviderId::OpencodeGo | ProviderId::OllamaCloud => "Managed Account".to_string(),
+        ProviderId::Cursor => "Managed Account".to_string(),
+        ProviderId::Minimax => "API Key".to_string(),
+        ProviderId::Antigravity => "OAuth".to_string(),
+        ProviderId::OpencodeGo => "Managed Account".to_string(),
+        ProviderId::OllamaCloud => "Managed Account".to_string(),
     }
 }
 
@@ -156,7 +219,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 provider,
                 DemoAccount {
                     account_id: CODEX_PRIMARY_ID,
-                    label: "ada@example.com",
+                    label: "plus-1@example.com",
                     last_success_at: now - Duration::minutes(2),
                     health: ProviderHealth::Ok,
                     auth_state: AuthState::Ready,
@@ -168,7 +231,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 provider,
                 DemoAccount {
                     account_id: CODEX_SECONDARY_ID,
-                    label: "pair@example.com",
+                    label: "plus-2@example.com",
                     last_success_at: now - Duration::minutes(6),
                     health: ProviderHealth::Ok,
                     auth_state: AuthState::Ready,
@@ -194,7 +257,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 provider,
                 DemoAccount {
                     account_id: CLAUDE_PRIMARY_ID,
-                    label: "team@example.com",
+                    label: "pro@example.com",
                     last_success_at: now - Duration::minutes(3),
                     health: ProviderHealth::Ok,
                     auth_state: AuthState::Ready,
@@ -231,7 +294,7 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
             provider,
             DemoAccount {
                 account_id: CURSOR_PRIMARY_ID,
-                label: "solo@example.com",
+                label: "hobby@example.com",
                 last_success_at: now - Duration::minutes(1),
                 health: ProviderHealth::Ok,
                 auth_state: AuthState::Ready,
@@ -265,9 +328,68 @@ fn demo_runtime_accounts(provider: ProviderId) -> Vec<ProviderAccountRuntimeStat
                 },
             ),
         ],
-        ProviderId::Minimax => vec![],
-        ProviderId::OpencodeGo => vec![],
-        ProviderId::OllamaCloud => vec![],
+        ProviderId::Minimax => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: MINIMAX_PRIMARY_ID,
+                label: "jordan-minimax",
+                last_success_at: now - Duration::minutes(3),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_minimax_primary(),
+            },
+        )],
+        ProviderId::Antigravity => vec![
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: ANTIGRAVITY_PRIMARY_ID,
+                    label: "pro@example.com",
+                    last_success_at: now - Duration::minutes(2),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_antigravity_primary(),
+                },
+            ),
+            demo_account(
+                provider,
+                DemoAccount {
+                    account_id: ANTIGRAVITY_FREE_ID,
+                    label: "free@example.com",
+                    last_success_at: now - Duration::minutes(4),
+                    health: ProviderHealth::Ok,
+                    auth_state: AuthState::Ready,
+                    error: None,
+                    snapshot: snapshot_antigravity_free(),
+                },
+            ),
+        ],
+        ProviderId::OpencodeGo => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: OPENCODE_GO_PRIMARY_ID,
+                label: "dev@opencode.ai",
+                last_success_at: now - Duration::minutes(3),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_opencode_go_primary(),
+            },
+        )],
+        ProviderId::OllamaCloud => vec![demo_account(
+            provider,
+            DemoAccount {
+                account_id: OLLAMA_CLOUD_PRIMARY_ID,
+                label: "research@ollama.com",
+                last_success_at: now - Duration::minutes(4),
+                health: ProviderHealth::Ok,
+                auth_state: AuthState::Ready,
+                error: None,
+                snapshot: snapshot_ollama_cloud_primary(),
+            },
+        )],
     }
 }
 
@@ -292,8 +414,8 @@ fn demo_account(provider: ProviderId, account: DemoAccount) -> ProviderAccountRu
         health: account.health,
         auth_state: account.auth_state,
         error: account.error,
-        rate_limit_until: None,
-        consecutive_rate_limits: 0,
+        retry_after: None,
+        consecutive_failures: 0,
     }
 }
 
@@ -313,6 +435,7 @@ fn codex_demo_windows(
             reset_at: Some(session_end),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
@@ -320,6 +443,7 @@ fn codex_demo_windows(
             reset_at: Some(weekly_end),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
     ]
 }
@@ -339,10 +463,10 @@ fn snapshot_codex_primary() -> UsageSnapshot {
         }),
         extra_usage: None,
         identity: ProviderIdentity {
-            email: Some("ada@example.com".to_string()),
+            email: Some("plus-1@example.com".to_string()),
             account_id: Some("demo-acct-8f2a1c".to_string()),
             plan: Some("plus".to_string()),
-            display_name: Some("Ada".to_string()),
+            display_name: Some("Plus 1".to_string()),
         },
     }
 }
@@ -362,10 +486,10 @@ fn snapshot_codex_secondary() -> UsageSnapshot {
         }),
         extra_usage: None,
         identity: ProviderIdentity {
-            email: Some("pair@example.com".to_string()),
+            email: Some("plus-2@example.com".to_string()),
             account_id: Some("demo-acct-31be7d".to_string()),
             plan: Some("plus".to_string()),
-            display_name: Some("Pair".to_string()),
+            display_name: Some("Plus 2".to_string()),
         },
     }
 }
@@ -404,6 +528,7 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             reset_at: Some(s),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
@@ -411,6 +536,15 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
+        },
+        UsageWindow {
+            label: "Fable".to_string(),
+            used_percent: 15.0,
+            reset_at: Some(w),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -429,10 +563,10 @@ fn snapshot_claude_primary() -> UsageSnapshot {
             },
         }),
         identity: ProviderIdentity {
-            email: Some("team@example.com".to_string()),
+            email: Some("pro@example.com".to_string()),
             account_id: None,
             plan: Some("pro".to_string()),
-            display_name: Some("Team".to_string()),
+            display_name: Some("Pro".to_string()),
         },
     }
 }
@@ -448,6 +582,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(s),
             window_seconds: Some(5 * 60 * 60),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Weekly".to_string(),
@@ -455,6 +590,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Sonnet".to_string(),
@@ -462,6 +598,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Opus".to_string(),
@@ -469,6 +606,7 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Cowork".to_string(),
@@ -476,6 +614,15 @@ fn snapshot_claude_max() -> UsageSnapshot {
             reset_at: Some(w),
             window_seconds: Some(7 * 24 * 3600),
             reset_description: None,
+            group: None,
+        },
+        UsageWindow {
+            label: "Fable".to_string(),
+            used_percent: 8.0,
+            reset_at: Some(w),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -505,6 +652,7 @@ fn snapshot_gemini_primary() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Flash".to_string(),
@@ -512,6 +660,7 @@ fn snapshot_gemini_primary() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: None,
+            group: None,
         },
         UsageWindow {
             label: "Lite".to_string(),
@@ -519,6 +668,7 @@ fn snapshot_gemini_primary() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: None,
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -560,10 +710,10 @@ fn snapshot_cursor_primary() -> UsageSnapshot {
         provider_cost: None,
         extra_usage: None,
         identity: ProviderIdentity {
-            email: Some("solo@example.com".to_string()),
+            email: Some("hobby@example.com".to_string()),
             account_id: None,
             plan: Some("pro".to_string()),
-            display_name: Some("Solo".to_string()),
+            display_name: Some("Hobby".to_string()),
         },
     }
 }
@@ -578,6 +728,7 @@ fn snapshot_copilot_free() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some(reset.to_rfc3339()),
+            group: None,
         },
         UsageWindow {
             label: "completions".to_string(),
@@ -585,6 +736,7 @@ fn snapshot_copilot_free() -> UsageSnapshot {
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some(reset.to_rfc3339()),
+            group: None,
         },
     ];
     UsageSnapshot {
@@ -613,13 +765,18 @@ fn snapshot_copilot_pro() -> UsageSnapshot {
         updated_at: now,
         headline: UsageHeadline(0),
         windows: vec![UsageWindow {
-            label: "premium_interactions".to_string(),
-            used_percent: 100.0,
+            label: "credits".to_string(),
+            used_percent: 40.0,
             reset_at: Some(reset),
             window_seconds: None,
             reset_description: Some("+42 over plan".to_string()),
+            group: None,
         }],
-        provider_cost: None,
+        provider_cost: Some(ProviderCost {
+            used: 28.0,
+            limit: Some(70.0),
+            units: "USD".to_string(),
+        }),
         extra_usage: None,
         identity: ProviderIdentity {
             email: None,
@@ -630,14 +787,66 @@ fn snapshot_copilot_pro() -> UsageSnapshot {
     }
 }
 
-fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
+fn demo_timestamp() -> DateTime<Utc> {
+    DateTime::from_timestamp(1_767_225_600, 0).expect("valid demo timestamp")
+}
+
+fn demo_minimax_accounts() -> Vec<ManagedMinimaxAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedMinimaxAccountConfig {
+        id: MINIMAX_PRIMARY_ID.to_string(),
+        label: "jordan-minimax".to_string(),
+        api_key_source: "demo".to_string(),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
+fn snapshot_minimax_primary() -> UsageSnapshot {
     let now = Utc::now();
+    UsageSnapshot {
+        provider: ProviderId::Minimax,
+        source: "API Key".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![
+            UsageWindow {
+                label: "MiniMax-M2 (5h): 640/1000".to_string(),
+                used_percent: 36.0,
+                reset_at: None,
+                window_seconds: Some(5 * 3600),
+                reset_description: Some("Resets every 5 hours".to_string()),
+                group: None,
+            },
+            UsageWindow {
+                label: "MiniMax-M2 (Weekly): 3800/10000".to_string(),
+                used_percent: 62.0,
+                reset_at: None,
+                window_seconds: Some(7 * 24 * 3600),
+                reset_description: Some("Resets weekly".to_string()),
+                group: None,
+            },
+        ],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: None,
+            account_id: None,
+            plan: Some("Minimax.io".to_string()),
+            display_name: Some("jordan-minimax".to_string()),
+        },
+    }
+}
+
+fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
+    let now = demo_timestamp();
     vec![
         ManagedCodexAccountConfig {
             id: CODEX_PRIMARY_ID.to_string(),
-            label: "ada@example.com".to_string(),
+            label: "plus-1@example.com".to_string(),
             codex_home: demo_root().join("codex-primary"),
-            email: Some("ada@example.com".to_string()),
+            email: Some("plus-1@example.com".to_string()),
             provider_account_id: Some("demo-acct-8f2a1c".to_string()),
             created_at: now,
             updated_at: now,
@@ -645,9 +854,9 @@ fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
         },
         ManagedCodexAccountConfig {
             id: CODEX_SECONDARY_ID.to_string(),
-            label: "pair@example.com".to_string(),
+            label: "plus-2@example.com".to_string(),
             codex_home: demo_root().join("codex-secondary"),
-            email: Some("pair@example.com".to_string()),
+            email: Some("plus-2@example.com".to_string()),
             provider_account_id: Some("demo-acct-31be7d".to_string()),
             created_at: now,
             updated_at: now,
@@ -667,13 +876,13 @@ fn demo_codex_accounts() -> Vec<ManagedCodexAccountConfig> {
 }
 
 fn demo_claude_accounts() -> Vec<ManagedClaudeAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![
         ManagedClaudeAccountConfig {
             id: CLAUDE_PRIMARY_ID.to_string(),
-            label: "team@example.com".to_string(),
+            label: "pro@example.com".to_string(),
             config_dir: demo_root().join("claude-primary"),
-            email: Some("team@example.com".to_string()),
+            email: Some("pro@example.com".to_string()),
             organization: Some("YapCap".to_string()),
             subscription_type: Some("pro".to_string()),
             created_at: now,
@@ -695,13 +904,13 @@ fn demo_claude_accounts() -> Vec<ManagedClaudeAccountConfig> {
 }
 
 fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![ManagedCursorAccountConfig {
         id: CURSOR_PRIMARY_ID.to_string(),
-        email: "solo@example.com".to_string(),
-        label: "solo@example.com".to_string(),
+        email: "hobby@example.com".to_string(),
+        label: "hobby@example.com".to_string(),
         account_root: demo_root().join("cursor-primary"),
-        display_name: Some("Solo".to_string()),
+        display_name: Some("Hobby".to_string()),
         plan: Some("hobby".to_string()),
         created_at: now,
         updated_at: now,
@@ -710,7 +919,7 @@ fn demo_cursor_accounts() -> Vec<ManagedCursorAccountConfig> {
 }
 
 fn demo_gemini_accounts() -> Vec<ManagedGeminiAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![ManagedGeminiAccountConfig {
         id: GEMINI_PRIMARY_ID.to_string(),
         label: "pro@example.com".to_string(),
@@ -727,7 +936,7 @@ fn demo_gemini_accounts() -> Vec<ManagedGeminiAccountConfig> {
 }
 
 fn demo_copilot_accounts() -> Vec<ManagedCopilotAccountConfig> {
-    let now = Utc::now();
+    let now = demo_timestamp();
     vec![
         ManagedCopilotAccountConfig {
             id: COPILOT_FREE_ID.to_string(),
@@ -750,6 +959,216 @@ fn demo_copilot_accounts() -> Vec<ManagedCopilotAccountConfig> {
     ]
 }
 
+fn demo_antigravity_accounts() -> Vec<ManagedAntigravityAccountConfig> {
+    let now = demo_timestamp();
+    vec![
+        ManagedAntigravityAccountConfig {
+            id: ANTIGRAVITY_PRIMARY_ID.to_string(),
+            label: "pro@example.com".to_string(),
+            account_root: demo_root().join("antigravity-primary"),
+            email: "pro@example.com".to_string(),
+            sub: "demo-antigravity-pro-sub".to_string(),
+            last_tier_id: Some("g1-pro-tier".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
+        ManagedAntigravityAccountConfig {
+            id: ANTIGRAVITY_FREE_ID.to_string(),
+            label: "free@example.com".to_string(),
+            account_root: demo_root().join("antigravity-free"),
+            email: "free@example.com".to_string(),
+            sub: "demo-antigravity-free-sub".to_string(),
+            last_tier_id: Some("free-tier".to_string()),
+            created_at: now,
+            updated_at: now,
+            last_authenticated_at: Some(now),
+        },
+    ]
+}
+
+fn snapshot_antigravity_primary() -> UsageSnapshot {
+    let now = Utc::now();
+    let weekly = now + Duration::days(6);
+    let five_hour = now + Duration::hours(4);
+    let windows = vec![
+        UsageWindow {
+            label: "Five Hour Limit".to_string(),
+            used_percent: 44.0,
+            reset_at: Some(five_hour),
+            window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some("Gemini Models".to_string()),
+        },
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 12.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: Some("Gemini Models".to_string()),
+        },
+        UsageWindow {
+            label: "Five Hour Limit".to_string(),
+            used_percent: 0.0,
+            reset_at: Some(five_hour),
+            window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some("Claude and GPT models".to_string()),
+        },
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 3.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: Some("Claude and GPT models".to_string()),
+        },
+    ];
+    UsageSnapshot {
+        provider: ProviderId::Antigravity,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(1),
+        windows,
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("pro@example.com".to_string()),
+            account_id: None,
+            plan: Some(
+                crate::providers::antigravity::plan_label::plan_label("g1-pro-tier").to_string(),
+            ),
+            display_name: Some("Pro".to_string()),
+        },
+    }
+}
+
+fn snapshot_antigravity_free() -> UsageSnapshot {
+    let now = Utc::now();
+    let weekly = now + Duration::days(3);
+    UsageSnapshot {
+        provider: ProviderId::Antigravity,
+        source: "OAuth".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 27.0,
+            reset_at: Some(weekly),
+            window_seconds: Some(7 * 24 * 3600),
+            reset_description: None,
+            group: Some("Free Tier".to_string()),
+        }],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("free@example.com".to_string()),
+            account_id: None,
+            plan: Some("Free".to_string()),
+            display_name: Some("Free".to_string()),
+        },
+    }
+}
+
+
+fn demo_opencode_go_accounts() -> Vec<ManagedOpencodeGoAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedOpencodeGoAccountConfig {
+        id: OPENCODE_GO_PRIMARY_ID.to_string(),
+        label: "dev@opencode.ai".to_string(),
+        workspace_id: "ws-demo".to_string(),
+        auth_cookie_source: "browser".to_string(),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
+fn snapshot_opencode_go_primary() -> UsageSnapshot {
+    let now = demo_timestamp();
+    UsageSnapshot {
+        provider: ProviderId::OpencodeGo,
+        source: "Managed Account".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![
+            UsageWindow {
+                label: "5h".to_string(),
+                used_percent: 45.0,
+                reset_at: Some(now + chrono::Duration::hours(3)),
+                window_seconds: Some(5 * 3600),
+                reset_description: Some("Rolling 5 hour window".to_string()),
+                group: None,
+            },
+            UsageWindow {
+                label: "Weekly".to_string(),
+                used_percent: 62.0,
+                reset_at: Some(now + chrono::Duration::days(2)),
+                window_seconds: Some(7 * 24 * 3600),
+                reset_description: Some("Weekly window".to_string()),
+                group: None,
+            },
+        ],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("dev@opencode.ai".to_string()),
+            account_id: Some(OPENCODE_GO_PRIMARY_ID.to_string()),
+            plan: Some("Pro".to_string()),
+            display_name: None,
+        },
+    }
+}
+
+fn demo_ollama_cloud_accounts() -> Vec<ManagedOllamaCloudAccountConfig> {
+    let now = demo_timestamp();
+    vec![ManagedOllamaCloudAccountConfig {
+        id: OLLAMA_CLOUD_PRIMARY_ID.to_string(),
+        label: "research@ollama.com".to_string(),
+        session_cookie_source: "browser".to_string(),
+        created_at: now,
+        updated_at: now,
+        last_authenticated_at: Some(now),
+    }]
+}
+
+fn snapshot_ollama_cloud_primary() -> UsageSnapshot {
+    let now = demo_timestamp();
+    UsageSnapshot {
+        provider: ProviderId::OllamaCloud,
+        source: "Managed Account".to_string(),
+        updated_at: now,
+        headline: UsageHeadline(0),
+        windows: vec![
+            UsageWindow {
+                label: "5h".to_string(),
+                used_percent: 30.0,
+                reset_at: Some(now + chrono::Duration::hours(2)),
+                window_seconds: Some(5 * 3600),
+                reset_description: Some("Rolling 5 hour window".to_string()),
+                group: None,
+            },
+            UsageWindow {
+                label: "Monthly".to_string(),
+                used_percent: 55.0,
+                reset_at: Some(now + chrono::Duration::days(12)),
+                window_seconds: Some(30 * 24 * 3600),
+                reset_description: Some("Monthly window".to_string()),
+                group: None,
+            },
+        ],
+        provider_cost: None,
+        extra_usage: None,
+        identity: ProviderIdentity {
+            email: Some("research@ollama.com".to_string()),
+            account_id: Some(OLLAMA_CLOUD_PRIMARY_ID.to_string()),
+            plan: Some("Standard".to_string()),
+            display_name: None,
+        },
+    }
+}
+
 fn demo_root() -> PathBuf {
     paths().cache_dir.join("demo")
 }
@@ -766,6 +1185,7 @@ fn window_cursor(
         reset_at: Some(reset_at),
         window_seconds: Some(window_seconds),
         reset_description: Some(reset_at.to_rfc3339()),
+        group: None,
     }
 }
 
@@ -784,9 +1204,19 @@ mod tests {
             snapshot_claude_max(),
             snapshot_gemini_primary(),
             snapshot_cursor_primary(),
+            snapshot_antigravity_primary(),
+            snapshot_antigravity_free(),
         ] {
             assert!(!snapshot.windows.is_empty());
             assert!(snapshot.identity.email.is_some());
+        }
+    }
+
+    #[test]
+    fn demo_detection_snapshot_detects_nothing() {
+        let snapshot = detection_snapshot();
+        for provider in ProviderId::ALL {
+            assert!(!snapshot.detected(provider));
         }
     }
 
@@ -807,21 +1237,148 @@ mod tests {
         assert_eq!(config.cursor_managed_accounts.len(), 1);
         assert_eq!(config.gemini_managed_accounts.len(), 1);
         assert_eq!(config.copilot_managed_accounts.len(), 2);
+        assert_eq!(config.minimax_managed_accounts.len(), 1);
+        assert_eq!(config.antigravity_managed_accounts.len(), 2);
         assert_eq!(config.selected_codex_account_ids.len(), 3);
         assert_eq!(config.selected_claude_account_ids.len(), 2);
         assert_eq!(config.selected_cursor_account_ids.len(), 1);
         assert_eq!(config.selected_gemini_account_ids.len(), 1);
         assert_eq!(config.selected_copilot_account_ids.len(), 2);
-        assert!(config.copilot_enabled);
+        assert_eq!(config.selected_minimax_account_ids.len(), 1);
+        assert_eq!(config.selected_antigravity_account_ids.len(), 2);
+        for provider in ProviderId::ALL {
+            assert_eq!(
+                config.provider_enablement(provider),
+                ProviderEnablement::Enabled
+            );
+        }
         assert!(config.show_all_accounts(ProviderId::Codex));
         assert!(config.show_all_accounts(ProviderId::Claude));
         assert!(!config.show_all_accounts(ProviderId::Cursor));
         assert!(!config.show_all_accounts(ProviderId::Gemini));
         assert!(config.show_all_accounts(ProviderId::Copilot));
+        assert!(config.show_all_accounts(ProviderId::Antigravity));
         assert_eq!(
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
         );
+    }
+
+    #[test]
+    fn demo_replaces_existing_account_selections() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config {
+            selected_codex_account_ids: vec!["real-codex".to_string()],
+            selected_claude_account_ids: vec!["real-claude".to_string()],
+            selected_cursor_account_ids: vec!["real-cursor".to_string()],
+            selected_gemini_account_ids: vec!["real-gemini".to_string()],
+            selected_copilot_account_ids: vec!["real-copilot".to_string()],
+            selected_minimax_account_ids: vec!["real-minimax".to_string()],
+            selected_antigravity_account_ids: vec!["real-antigravity".to_string()],
+            ..Config::default()
+        };
+        apply_config(&mut config);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        for provider in ProviderId::ALL {
+            let selected = config.selected_account_ids(provider);
+            assert!(
+                !selected.is_empty(),
+                "{} should have demo accounts selected",
+                provider.label()
+            );
+            let managed_ids: Vec<&String> = match provider {
+                ProviderId::Codex => config
+                    .codex_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Claude => config
+                    .claude_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Cursor => config
+                    .cursor_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Gemini => config
+                    .gemini_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Copilot => config
+                    .copilot_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Minimax => config
+                    .minimax_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::Antigravity => config
+                    .antigravity_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::OpencodeGo => config
+                    .opencode_go_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+                ProviderId::OllamaCloud => config
+                    .ollama_cloud_managed_accounts
+                    .iter()
+                    .map(|a| &a.id)
+                    .collect(),
+            };
+            for id in selected {
+                assert!(
+                    managed_ids.contains(&id),
+                    "{} selection {id} should reference a demo account",
+                    provider.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn demo_enables_all_providers_with_accounts() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let detection = detection_snapshot();
+        let mut state = crate::runtime::load_initial_state(&config, &detection, None);
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        for provider in ProviderId::ALL {
+            assert!(
+                state.provider(provider).is_some_and(|entry| entry.enabled),
+                "{} should be enabled in demo mode",
+                provider.label()
+            );
+            assert!(
+                state
+                    .provider_accounts
+                    .iter()
+                    .any(|account| account.provider == provider),
+                "{} should have demo accounts",
+                provider.label()
+            );
+        }
     }
 
     #[test]
@@ -877,6 +1434,40 @@ mod tests {
                     .is_some_and(|updated| { Utc::now() - updated < Duration::minutes(10) })
             );
         }
+    }
+
+    #[test]
+    fn antigravity_demo_seeds_selected_pro_and_free_accounts() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let mut state = AppState::empty();
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        assert_eq!(
+            config.selected_antigravity_account_ids,
+            vec![
+                ANTIGRAVITY_PRIMARY_ID.to_string(),
+                ANTIGRAVITY_FREE_ID.to_string(),
+            ]
+        );
+        assert!(config.show_all_accounts(ProviderId::Antigravity));
+        let free = state
+            .provider_accounts
+            .iter()
+            .find(|account| account.account_id == ANTIGRAVITY_FREE_ID)
+            .and_then(|account| account.snapshot.as_ref())
+            .expect("free Antigravity demo snapshot");
+        assert_eq!(free.identity.email.as_deref(), Some("free@example.com"));
+        assert_eq!(free.identity.plan.as_deref(), Some("Free"));
+        assert_eq!(free.windows.len(), 1);
+        assert_eq!(free.windows[0].label, "Weekly Limit");
     }
 
     #[test]
@@ -938,12 +1529,47 @@ mod tests {
         assert_eq!(morgan.identity.plan.as_deref(), Some("Pro+"));
         assert_eq!(morgan.headline, UsageHeadline(0));
         assert_eq!(morgan.windows.len(), 1);
-        assert_eq!(morgan.windows[0].label, "premium_interactions");
-        assert!((morgan.windows[0].used_percent - 100.0).abs() < 0.001);
+        assert_eq!(morgan.windows[0].label, "credits");
+        assert!((morgan.windows[0].used_percent - 40.0).abs() < 0.001);
         assert_eq!(
             morgan.windows[0].reset_description.as_deref(),
             Some("+42 over plan")
         );
+        let cost = morgan.provider_cost.as_ref().expect("morgan cost card");
+        assert!((cost.used - 28.0).abs() < 0.001);
+        assert_eq!(cost.limit, Some(70.0));
+        assert_eq!(cost.units, "USD");
+    }
+
+    #[test]
+    fn minimax_demo_seeds_one_account_with_token_windows() {
+        let _guard = test_support::env_lock();
+        unsafe {
+            std::env::set_var(DEMO_ENV, "1");
+        }
+        let mut config = Config::default();
+        apply_config(&mut config);
+        let mut state = AppState::empty();
+        apply(&config, &mut state);
+        unsafe {
+            std::env::remove_var(DEMO_ENV);
+        }
+
+        assert_eq!(
+            config.selected_minimax_account_ids,
+            vec![MINIMAX_PRIMARY_ID.to_string()]
+        );
+        let account = state
+            .provider_accounts
+            .iter()
+            .find(|account| {
+                account.provider == ProviderId::Minimax && account.account_id == MINIMAX_PRIMARY_ID
+            })
+            .expect("minimax demo account");
+        assert_eq!(account.health, ProviderHealth::Ok);
+        let snapshot = account.snapshot.as_ref().expect("minimax demo snapshot");
+        assert_eq!(snapshot.identity.plan.as_deref(), Some("Minimax.io"));
+        assert_eq!(snapshot.windows.len(), 2);
     }
 
     #[test]
@@ -998,12 +1624,18 @@ mod tests {
     fn claude_demo_primary_is_pro_without_sonnet() {
         let snapshot = snapshot_claude_primary();
         assert_eq!(snapshot.identity.plan.as_deref(), Some("pro"));
-        assert_eq!(snapshot.windows.len(), 2);
+        assert_eq!(snapshot.windows.len(), 3);
         assert!(
             snapshot
                 .windows
                 .iter()
-                .all(|window| window.label != "Sonnet")
+                .all(|window| window.label != "Sonnet" && window.label != "Opus")
+        );
+        assert!(
+            snapshot
+                .windows
+                .iter()
+                .any(|window| window.label == "Fable")
         );
         let Some(ExtraUsageState::Active { used_percent, cost }) = snapshot.extra_usage.as_ref()
         else {

@@ -180,6 +180,7 @@ pub fn parse(
             reset_at,
             window_seconds: Some(5 * 3600),
             reset_description: Some("Rolling session window".to_string()),
+            group: None,
         });
     }
     if let Some(used_percent) = weekly_percent {
@@ -191,6 +192,7 @@ pub fn parse(
             reset_at,
             window_seconds: Some(7 * 24 * 3600),
             reset_description: Some("Weekly window".to_string()),
+            group: None,
         });
     }
 

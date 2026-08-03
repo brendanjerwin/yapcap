@@ -4,7 +4,6 @@ use super::account::{find_matching_account, normalized_email};
 use super::oauth::parse_token_response;
 use crate::account_storage::{NewProviderAccount, ProviderAccountStorage, StoredProviderAccount};
 use crate::config::{Config, ManagedClaudeAccountConfig, paths};
-use crate::model::UsageSnapshot;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::Utc;
@@ -38,7 +37,6 @@ pub struct ClaudeLoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClaudeLoginStatus {
     Running,
-    Succeeded,
     Failed,
 }
 
@@ -53,7 +51,6 @@ pub enum ClaudeLoginEvent {
 #[derive(Debug, Clone)]
 pub struct ClaudeLoginSuccess {
     pub account: ManagedClaudeAccountConfig,
-    pub snapshot: Option<UsageSnapshot>,
 }
 
 pub fn prepare() -> ClaudeLoginState {
@@ -185,7 +182,6 @@ fn commit_login(
             .map_err(|error| format!("failed to update Claude account: {error}"))?;
         return Ok(ClaudeLoginSuccess {
             account: managed_account_from_stored(Some(target), stored),
-            snapshot: None,
         });
     }
     let existing = find_matching_account(config, Some(&email)).cloned();
@@ -200,7 +196,6 @@ fn commit_login(
     };
     Ok(ClaudeLoginSuccess {
         account: managed_account_from_stored(existing.as_ref(), stored),
-        snapshot: None,
     })
 }
 

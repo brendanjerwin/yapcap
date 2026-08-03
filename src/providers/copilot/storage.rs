@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::account_storage;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const TOKENS_FILE: &str = "tokens.json";
@@ -32,52 +32,23 @@ pub fn write_account(
     metadata: &CopilotMetadata,
 ) -> Result<(), String> {
     create_private_dir(account_dir)?;
-    write_json(&account_dir.join(TOKENS_FILE), tokens)?;
-    write_json(&account_dir.join(METADATA_FILE), metadata)?;
+    account_storage::write_json(&account_dir.join(TOKENS_FILE), tokens).map_err(stringify)?;
+    account_storage::write_json(&account_dir.join(METADATA_FILE), metadata).map_err(stringify)?;
     Ok(())
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn load_metadata(account_dir: &Path) -> Result<CopilotMetadata, String> {
-    read_json(&account_dir.join(METADATA_FILE))
+    account_storage::read_json(&account_dir.join(METADATA_FILE)).map_err(stringify)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn load_tokens(account_dir: &Path) -> Result<CopilotTokens, String> {
-    read_json(&account_dir.join(TOKENS_FILE))
-}
-
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let payload = serde_json::to_vec_pretty(value)
-        .map_err(|error| format!("failed to encode {}: {error}", path.display()))?;
-    fs::write(path, payload).map_err(|error| format!("failed to write {}: {error}", path.display()))
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
-    let raw = fs::read_to_string(path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    serde_json::from_str(&raw)
-        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+    account_storage::read_json(&account_dir.join(TOKENS_FILE)).map_err(stringify)
 }
 
 pub fn create_private_dir(path: &Path) -> Result<(), String> {
-    fs::create_dir_all(path)
-        .map_err(|error| format!("failed to create {}: {error}", path.display()))?;
-    set_private_dir_permissions(path)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_private_dir_permissions(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| format!("failed to secure {}: {error}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn set_private_dir_permissions(_path: &Path) -> Result<(), String> {
-    Ok(())
+    account_storage::create_private_dir(path).map_err(stringify)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -85,9 +56,14 @@ pub fn account_dir_under(root: &Path, github_user_id: u64) -> PathBuf {
     root.join(account_id_for_github_user(github_user_id))
 }
 
+fn stringify(error: account_storage::AccountStorageError) -> String {
+    error.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]
@@ -140,5 +116,32 @@ mod tests {
         assert!(raw.contains("access_token"));
         assert!(!raw.contains("refresh_token"));
         assert!(!raw.contains("expires_at"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_account_sets_private_directory_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let dir = account_dir_under(temp.path(), 9);
+        let now = Utc::now();
+        write_account(
+            &dir,
+            &CopilotTokens {
+                access_token: "ghu_test".to_string(),
+            },
+            &CopilotMetadata {
+                github_user_id: 9,
+                login: "octocat".to_string(),
+                created_at: now,
+                updated_at: now,
+                last_authenticated_at: Some(now),
+            },
+        )
+        .unwrap();
+
+        let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
     }
 }

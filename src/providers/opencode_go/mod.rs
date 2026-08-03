@@ -393,6 +393,7 @@ pub fn parse(
             reset_at,
             window_seconds: Some(5 * 3600),
             reset_description: Some("Rolling 5 hour window".to_string()),
+            group: None,
         });
     }
 
@@ -405,6 +406,7 @@ pub fn parse(
             reset_at,
             window_seconds: Some(7 * 24 * 3600),
             reset_description: Some("Weekly window".to_string()),
+            group: None,
         });
     }
 
@@ -417,6 +419,7 @@ pub fn parse(
             reset_at,
             window_seconds: Some(30 * 24 * 3600),
             reset_description: Some("Monthly window".to_string()),
+            group: None,
         });
     }
 

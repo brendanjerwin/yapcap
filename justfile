@@ -40,6 +40,10 @@ clear-config:
 clear-accounts:
     rm -rf ~/.local/state/yapcap
 
+# Clears native logs at ~/.local/state/yapcap/logs
+clear-logs:
+    rm -rf ~/.local/state/yapcap/logs
+
 # Removes vendored dependencies
 clean-vendor:
     rm -rf .cargo vendor vendor.tar
@@ -101,17 +105,26 @@ flatpak-build:
     branch="$(git symbolic-ref --quiet --short HEAD)"
     source_dir="$(mktemp -d --tmpdir yapcap-source.XXXXXX)"
     manifest="$(mktemp --tmpdir yapcap-flatpak.XXXXXX.json)"
-    trap 'rm -rf "$source_dir" "$manifest"' EXIT
-    if ! git diff-index --quiet HEAD --; then
-      echo 'warning: uncommitted changes are not included in Flatpak local-branch builds; commit them first.' >&2
-    fi
+    changed="$(mktemp --tmpdir yapcap-changed.XXXXXX)"
+    deleted="$(mktemp --tmpdir yapcap-deleted.XXXXXX)"
+    trap 'rm -rf "$source_dir" "$manifest" "$changed" "$deleted"' EXIT
     git archive "$branch" | tar -x -C "$source_dir"
+    git diff --name-only -z --diff-filter=ACMRTUXB HEAD -- > "$changed"
+    git ls-files --others --exclude-standard -z >> "$changed"
+    if [[ -s "$changed" ]]; then
+      tar --null -T "$changed" -cf - | tar -xf - -C "$source_dir"
+    fi
+    git diff --name-only -z --diff-filter=D HEAD -- > "$deleted"
+    if [[ -s "$deleted" ]]; then
+      while IFS= read -r -d '' path; do
+        rm -rf "$source_dir/$path"
+      done < "$deleted"
+    fi
     jq --arg source "$source_dir" --arg cargo_sources "$(pwd)/packaging/cargo-sources.json" '.modules[0].sources = [{"type":"dir","path":$source}, $cargo_sources]' {{ flatpak-manifest }} > "$manifest"
     if [[ -d build-dir && ! -f build-dir/metadata ]]; then
       rm -rf build-dir
     fi
     flatpak-builder \
-        --install-deps-from=flathub \
         --keep-build-dirs \
         --force-clean \
         --default-branch="$branch" \
@@ -125,14 +138,23 @@ flatpak-build-clean:
     branch="$(git symbolic-ref --quiet --short HEAD)"
     source_dir="$(mktemp -d --tmpdir yapcap-source.XXXXXX)"
     manifest="$(mktemp --tmpdir yapcap-flatpak.XXXXXX.json)"
-    trap 'rm -rf "$source_dir" "$manifest"' EXIT
-    if ! git diff-index --quiet HEAD --; then
-      echo 'warning: uncommitted changes are not included in Flatpak local-branch builds; commit them first.' >&2
-    fi
+    changed="$(mktemp --tmpdir yapcap-changed.XXXXXX)"
+    deleted="$(mktemp --tmpdir yapcap-deleted.XXXXXX)"
+    trap 'rm -rf "$source_dir" "$manifest" "$changed" "$deleted"' EXIT
     git archive "$branch" | tar -x -C "$source_dir"
+    git diff --name-only -z --diff-filter=ACMRTUXB HEAD -- > "$changed"
+    git ls-files --others --exclude-standard -z >> "$changed"
+    if [[ -s "$changed" ]]; then
+      tar --null -T "$changed" -cf - | tar -xf - -C "$source_dir"
+    fi
+    git diff --name-only -z --diff-filter=D HEAD -- > "$deleted"
+    if [[ -s "$deleted" ]]; then
+      while IFS= read -r -d '' path; do
+        rm -rf "$source_dir/$path"
+      done < "$deleted"
+    fi
     jq --arg source "$source_dir" --arg cargo_sources "$(pwd)/packaging/cargo-sources.json" '.modules[0].sources = [{"type":"dir","path":$source}, $cargo_sources]' {{ flatpak-manifest }} > "$manifest"
     flatpak-builder \
-        --install-deps-from=flathub \
         --keep-build-dirs \
         --force-clean \
         --default-branch="$branch" \
@@ -146,7 +168,7 @@ flatpak-install: flatpak-build
     branch="$(git symbolic-ref --quiet --short HEAD)"
     mkdir -p repo
     flatpak build-export repo build-dir "$branch"
-    flatpak --user install --reinstall "$(pwd)/repo" "{{ appid }}//$branch"
+    flatpak --user install --noninteractive --reinstall "$(pwd)/repo" "{{ appid }}//$branch"
     flatpak --user list --app --columns=application,branch | while IFS=$'\t' read -r app installed_branch; do
       if [[ "$app" == "{{ appid }}" && "$installed_branch" != "$branch" ]]; then
         flatpak --user uninstall --noninteractive "{{ appid }}//$installed_branch" || echo "warning: could not uninstall old Flatpak branch $installed_branch" >&2
@@ -164,7 +186,7 @@ flatpak-install-only:
     fi
     mkdir -p repo
     flatpak build-export repo build-dir "$branch"
-    flatpak --user install --reinstall "$(pwd)/repo" "{{ appid }}//$branch"
+    flatpak --user install --noninteractive --reinstall "$(pwd)/repo" "{{ appid }}//$branch"
     flatpak --user list --app --columns=application,branch | while IFS=$'\t' read -r app installed_branch; do
       if [[ "$app" == "{{ appid }}" && "$installed_branch" != "$branch" ]]; then
         flatpak --user uninstall --noninteractive "{{ appid }}//$installed_branch" || echo "warning: could not uninstall old Flatpak branch $installed_branch" >&2

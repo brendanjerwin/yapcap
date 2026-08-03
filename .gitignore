@@ -16,7 +16,6 @@ vendor.tar
 make_screenshot.py
 scripts/update-store-preview.sh
 fixtures/**/__pycache__/
-
 debian/*
 !debian/changelog
 !debian/control

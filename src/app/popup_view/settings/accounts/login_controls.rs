@@ -1,11 +1,25 @@
 use super::super::super::{
-    Alignment, ClaudeLoginState, ClaudeLoginStatus, CodexLoginState, CodexLoginStatus,
-    CopilotLoginState, CopilotLoginStatus, CursorScanState, Element, GeminiLoginState,
-    GeminiLoginStatus, Length, Message, fl, row, widget,
+    Alignment, AntigravityLoginState, AntigravityLoginStatus, ClaudeLoginState, ClaudeLoginStatus,
+    CodexLoginState, CodexLoginStatus, CopilotLoginState, CopilotLoginStatus, CursorScanState,
+    Element, GeminiLoginState, GeminiLoginStatus, Length, Message, OllamaCloudLoginState,
+    OpencodeGoLoginState, fl, row, widget,
 };
+use crate::app::login::{LoginFlow, MinimaxLoginFlow, OllamaCloudLoginFlow, OpencodeGoLoginFlow};
 use crate::providers::minimax::{MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
-use crate::providers::opencode_go::{OpencodeGoLoginEvent, OpencodeGoLoginState, OpencodeGoLoginStatus};
-use crate::providers::ollama_cloud::{OllamaCloudLoginEvent, OllamaCloudLoginState, OllamaCloudLoginStatus};
+
+fn minimax_login_message(event: MinimaxLoginEvent) -> Message {
+    MinimaxLoginFlow::wrap_event(event)
+}
+
+fn opencode_go_login_message(event: crate::providers::opencode_go::OpencodeGoLoginEvent) -> Message {
+    OpencodeGoLoginFlow::wrap_event(event)
+}
+
+fn ollama_cloud_login_message(
+    event: crate::providers::ollama_cloud::OllamaCloudLoginEvent,
+) -> Message {
+    OllamaCloudLoginFlow::wrap_event(event)
+}
 
 pub(super) fn codex_login_controls(
     login: Option<&CodexLoginState>,
@@ -13,7 +27,7 @@ pub(super) fn codex_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartCodexLogin))
+            .on_press_maybe(enabled.then_some(Message::StartLogin(crate::model::ProviderId::Codex)))
             .into();
     };
 
@@ -32,17 +46,18 @@ pub(super) fn codex_login_controls(
     }
 
     if login.status == CodexLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelCodexLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Codex)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartCodexLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelCodexLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Codex))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Codex))
+                ),
             ]
             .spacing(8),
         );
@@ -57,7 +72,9 @@ pub(super) fn claude_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartClaudeLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Claude)),
+            )
             .into();
     };
 
@@ -88,17 +105,18 @@ pub(super) fn claude_login_controls(
     }
 
     if login.status == ClaudeLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelClaudeLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Claude)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartClaudeLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelClaudeLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Claude))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Claude))
+                ),
             ]
             .spacing(8),
         );
@@ -113,7 +131,9 @@ pub(super) fn gemini_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartGeminiLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Gemini)),
+            )
             .into();
     };
 
@@ -132,17 +152,18 @@ pub(super) fn gemini_login_controls(
     }
 
     if login.status == GeminiLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelGeminiLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Gemini)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartGeminiLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelGeminiLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Gemini))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Gemini))
+                ),
             ]
             .spacing(8),
         );
@@ -157,7 +178,9 @@ pub(super) fn copilot_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartCopilotLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Copilot)),
+            )
             .into();
     };
 
@@ -185,17 +208,18 @@ pub(super) fn copilot_login_controls(
     }
 
     if login.status == CopilotLoginStatus::Running {
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelCopilotLogin)),
-        );
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Copilot)),
+        ));
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartCopilotLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelCopilotLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Copilot))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Copilot))
+                ),
             ]
             .spacing(8),
         );
@@ -214,7 +238,14 @@ fn copilot_user_code_row<'a>(code: &'a str, copied: bool, enabled: bool) -> Elem
     let copy_icon = widget::Svg::new(copy_icon_handle)
         .symbolic(true)
         .class(cosmic::theme::Svg::custom(|theme| widget::svg::Style {
-            color: Some(theme.cosmic().background.component.on.into()),
+            color: Some(
+                theme
+                    .cosmic()
+                    .background(theme.transparent)
+                    .component
+                    .on
+                    .into(),
+            ),
         }))
         .width(Length::Fixed(16.0))
         .height(Length::Fixed(16.0));
@@ -239,7 +270,6 @@ fn copilot_user_code_row<'a>(code: &'a str, copied: bool, enabled: bool) -> Elem
 fn copilot_login_status(login: &CopilotLoginState) -> String {
     match login.status {
         CopilotLoginStatus::Running => fl!("copilot-login-running"),
-        CopilotLoginStatus::Succeeded => fl!("copilot-login-succeeded"),
         CopilotLoginStatus::Failed => login
             .error
             .clone()
@@ -250,11 +280,67 @@ fn copilot_login_status(login: &CopilotLoginState) -> String {
 fn gemini_login_status(login: &GeminiLoginState) -> String {
     match login.status {
         GeminiLoginStatus::Running => fl!("gemini-login-running"),
-        GeminiLoginStatus::Succeeded => fl!("gemini-login-succeeded"),
         GeminiLoginStatus::Failed => login
             .error
             .clone()
             .unwrap_or_else(|| fl!("gemini-login-failed")),
+    }
+}
+
+pub(super) fn antigravity_login_controls(
+    login: Option<&AntigravityLoginState>,
+    enabled: bool,
+) -> Element<'_, Message> {
+    let Some(login) = login else {
+        return widget::button::standard(fl!("account-add"))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Antigravity)),
+            )
+            .into();
+    };
+
+    let mut content =
+        cosmic::iced::widget::column![widget::text(antigravity_login_status(login)).size(13)]
+            .spacing(10)
+            .width(Length::Fill);
+
+    if login.status == AntigravityLoginStatus::Running
+        && let Some(url) = &login.login_url
+    {
+        content = content.push(
+            widget::button::standard(fl!("open-browser"))
+                .on_press_maybe(enabled.then_some(Message::OpenUrl(url.clone()))),
+        );
+    }
+
+    if login.status == AntigravityLoginStatus::Running {
+        content = content.push(widget::button::text(fl!("account-cancel")).on_press_maybe(
+            enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Antigravity)),
+        ));
+    } else {
+        content = content.push(
+            row![
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Antigravity))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Antigravity))
+                ),
+            ]
+            .spacing(8),
+        );
+    }
+
+    Element::from(content)
+}
+
+fn antigravity_login_status(login: &AntigravityLoginState) -> String {
+    match login.status {
+        AntigravityLoginStatus::Running => fl!("antigravity-login-running"),
+        AntigravityLoginStatus::Failed => login
+            .error
+            .clone()
+            .unwrap_or_else(|| fl!("antigravity-login-failed")),
     }
 }
 
@@ -335,7 +421,6 @@ pub(super) fn cursor_scan_controls(scan: &CursorScanState, enabled: bool) -> Ele
 fn codex_login_status(login: &CodexLoginState) -> String {
     match login.status {
         CodexLoginStatus::Running => fl!("codex-login-running"),
-        CodexLoginStatus::Succeeded => fl!("codex-login-succeeded"),
         CodexLoginStatus::Failed => login
             .error
             .clone()
@@ -346,7 +431,6 @@ fn codex_login_status(login: &CodexLoginState) -> String {
 fn claude_login_status(login: &ClaudeLoginState) -> String {
     match login.status {
         ClaudeLoginStatus::Running => fl!("claude-login-running"),
-        ClaudeLoginStatus::Succeeded => fl!("claude-login-succeeded"),
         ClaudeLoginStatus::Failed => match login.error.as_deref() {
             Some("invalid-code") => fl!("claude-login-code-invalid"),
             Some(msg) => msg.to_string(),
@@ -361,7 +445,9 @@ pub(super) fn minimax_login_controls(
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartMinimaxLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::Minimax)),
+            )
             .into();
     };
 
@@ -383,36 +469,37 @@ pub(super) fn minimax_login_controls(
         content = content.push(
             widget::text_input(fl!("minimax-api-key-placeholder"), &login.api_key)
                 .on_input(|api_key| {
-                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::ApiKeyChanged(api_key)))
+                    minimax_login_message(MinimaxLoginEvent::ApiKeyChanged(api_key))
                 })
-                .on_submit(|_| Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved)))
+                .on_submit(|_| minimax_login_message(MinimaxLoginEvent::Saved))
                 .width(Length::Fill),
         );
         content = content.push(widget::text(fl!("account-label")).size(12));
         content = content.push(
             widget::text_input(fl!("account-label"), &login.label)
-                .on_input(|label| {
-                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::LabelChanged(label)))
-                })
+                .on_input(|label| minimax_login_message(MinimaxLoginEvent::LabelChanged(label)))
                 .width(Length::Fill),
         );
         content = content.push(
             row![
-                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
-                    Message::MinimaxLoginEvent(Box::new(MinimaxLoginEvent::Saved))
-                )),
-                widget::button::text(fl!("account-cancel"))
-                    .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
+                widget::button::standard(fl!("account-add")).on_press_maybe(
+                    enabled.then_some(minimax_login_message(MinimaxLoginEvent::Saved))
+                ),
+                widget::button::text(fl!("account-cancel")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Minimax))
+                ),
             ]
             .spacing(8),
         );
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartMinimaxLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelMinimaxLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::Minimax))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::Minimax))
+                ),
             ]
             .spacing(8),
         );
@@ -424,7 +511,6 @@ pub(super) fn minimax_login_controls(
 fn minimax_login_status(login: &MinimaxLoginState) -> String {
     match login.status {
         MinimaxLoginStatus::Editing => fl!("minimax-login-editing"),
-        MinimaxLoginStatus::Saved => fl!("minimax-login-saved"),
         MinimaxLoginStatus::Failed => login
             .error
             .clone()
@@ -432,13 +518,16 @@ fn minimax_login_status(login: &MinimaxLoginState) -> String {
     }
 }
 
+
 pub(super) fn opencode_go_login_controls(
     login: Option<&OpencodeGoLoginState>,
     enabled: bool,
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartOpencodeGoLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::OpencodeGo)),
+            )
             .into();
     };
 
@@ -455,72 +544,51 @@ pub(super) fn opencode_go_login_controls(
 
     content = content.width(Length::Fill);
 
-    if login.status == OpencodeGoLoginStatus::Editing {
+    if login.status == crate::providers::opencode_go::OpencodeGoLoginStatus::Editing {
         content = content.push(widget::text(fl!("opencode-go-workspace-id-placeholder")).size(12));
         content = content.push(
             widget::text_input(fl!("opencode-go-workspace-id-placeholder"), &login.workspace_id)
                 .on_input(|workspace_id| {
-                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::WorkspaceIdChanged(workspace_id)))
+                    opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::WorkspaceIdChanged(workspace_id))
                 })
-                .on_submit(|_| Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::Saved)))
+                .on_submit(|_| opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::Saved))
                 .width(Length::Fill),
         );
         content = content.push(widget::text(fl!("opencode-go-auth-cookie-placeholder")).size(12));
         content = content.push(
             widget::text_input(fl!("opencode-go-auth-cookie-placeholder"), &login.auth_cookie)
                 .on_input(|auth_cookie| {
-                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::AuthCookieChanged(auth_cookie)))
+                    opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::AuthCookieChanged(auth_cookie))
                 })
-                .on_submit(|_| Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::Saved)))
+                .on_submit(|_| opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::Saved))
                 .width(Length::Fill),
         );
         content = content.push(widget::text(fl!("account-label")).size(12));
         content = content.push(
             widget::text_input(fl!("account-label"), &login.label)
-                .on_input(|label| {
-                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::LabelChanged(label)))
-                })
+                .on_input(|label| opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::LabelChanged(label)))
                 .width(Length::Fill),
-        );
-        // Open Browser button — auto-detect auth cookie from browser
-        content = content.push(
-            widget::button::text(fl!("open-browser-auth"))
-                .on_press_maybe(enabled.then_some(Message::StartOpencodeGoBrowserAuth)),
         );
         content = content.push(
             row![
-                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
-                    Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::Saved))
-                )),
-                widget::button::text(fl!("account-cancel"))
-                    .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
+                widget::button::standard(fl!("account-add")).on_press_maybe(
+                    enabled.then_some(opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::Saved))
+                ),
+                widget::button::text(fl!("account-cancel")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::OpencodeGo))
+                ),
             ]
             .spacing(8),
-        );
-    } else if login.status == OpencodeGoLoginStatus::SelectWorkspace {
-        // Show workspace picker for multiple workspaces
-        content = content.push(widget::text("Select a workspace:").size(12));
-        for ws in &login.discovered_workspaces {
-            let label = ws.name.as_deref().unwrap_or(&ws.id);
-            let ws_id = ws.id.clone();
-            content = content.push(
-                widget::button::text(label)
-                    .on_press_maybe(enabled.then_some(
-                        Message::OpencodeGoLoginEvent(Box::new(OpencodeGoLoginEvent::WorkspaceSelected(ws_id)))
-                    )),
-            );
-        }
-        content = content.push(
-            widget::button::text(fl!("account-cancel"))
-                .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
         );
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartOpencodeGoLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelOpencodeGoLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::OpencodeGo))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::OpencodeGo))
+                ),
             ]
             .spacing(8),
         );
@@ -528,25 +596,29 @@ pub(super) fn opencode_go_login_controls(
 
     Element::from(content)
 }
+
 fn opencode_go_login_status(login: &OpencodeGoLoginState) -> String {
     match login.status {
-        OpencodeGoLoginStatus::Editing => fl!("opencode-go-login-editing"),
-        OpencodeGoLoginStatus::Polling => "Waiting for browser login…".to_string(),
-        OpencodeGoLoginStatus::SelectWorkspace => "Select a workspace".to_string(),
-        OpencodeGoLoginStatus::Saved => fl!("opencode-go-login-saved"),
-        OpencodeGoLoginStatus::Failed => login
+        crate::providers::opencode_go::OpencodeGoLoginStatus::Editing
+        | crate::providers::opencode_go::OpencodeGoLoginStatus::Polling
+        | crate::providers::opencode_go::OpencodeGoLoginStatus::SelectWorkspace => fl!("opencode-go-login-editing"),
+        crate::providers::opencode_go::OpencodeGoLoginStatus::Saved => fl!("account-add"),
+        crate::providers::opencode_go::OpencodeGoLoginStatus::Failed => login
             .error
             .clone()
             .unwrap_or_else(|| fl!("opencode-go-login-failed")),
     }
 }
+
 pub(super) fn ollama_cloud_login_controls(
     login: Option<&OllamaCloudLoginState>,
     enabled: bool,
 ) -> Element<'_, Message> {
     let Some(login) = login else {
         return widget::button::standard(fl!("account-add"))
-            .on_press_maybe(enabled.then_some(Message::StartOllamaCloudLogin))
+            .on_press_maybe(
+                enabled.then_some(Message::StartLogin(crate::model::ProviderId::OllamaCloud)),
+            )
             .into();
     };
 
@@ -563,46 +635,42 @@ pub(super) fn ollama_cloud_login_controls(
 
     content = content.width(Length::Fill);
 
-    if login.status == OllamaCloudLoginStatus::Editing {
+    if login.status == crate::providers::ollama_cloud::OllamaCloudLoginStatus::Editing {
         content = content.push(widget::text(fl!("ollama-cloud-session-cookie-placeholder")).size(12));
         content = content.push(
             widget::text_input(fl!("ollama-cloud-session-cookie-placeholder"), &login.session_cookie)
                 .on_input(|session_cookie| {
-                    Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::SessionCookieChanged(session_cookie)))
+                    ollama_cloud_login_message(crate::providers::ollama_cloud::OllamaCloudLoginEvent::SessionCookieChanged(session_cookie))
                 })
-                .on_submit(|_| Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::Saved)))
+                .on_submit(|_| ollama_cloud_login_message(crate::providers::ollama_cloud::OllamaCloudLoginEvent::Saved))
                 .width(Length::Fill),
         );
         content = content.push(widget::text(fl!("account-label")).size(12));
         content = content.push(
             widget::text_input(fl!("account-label"), &login.label)
-                .on_input(|label| {
-                    Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::LabelChanged(label)))
-                })
+                .on_input(|label| ollama_cloud_login_message(crate::providers::ollama_cloud::OllamaCloudLoginEvent::LabelChanged(label)))
                 .width(Length::Fill),
-        );
-        // Open Browser button — auto-detect session cookie from browser
-        content = content.push(
-            widget::button::text(fl!("open-browser-auth"))
-                .on_press_maybe(enabled.then_some(Message::StartOllamaCloudBrowserAuth)),
         );
         content = content.push(
             row![
-                widget::button::standard(fl!("account-add")).on_press_maybe(enabled.then_some(
-                    Message::OllamaCloudLoginEvent(Box::new(OllamaCloudLoginEvent::Saved))
-                )),
-                widget::button::text(fl!("account-cancel"))
-                    .on_press_maybe(enabled.then_some(Message::CancelOllamaCloudLogin)),
+                widget::button::standard(fl!("account-add")).on_press_maybe(
+                    enabled.then_some(ollama_cloud_login_message(crate::providers::ollama_cloud::OllamaCloudLoginEvent::Saved))
+                ),
+                widget::button::text(fl!("account-cancel")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::OllamaCloud))
+                ),
             ]
             .spacing(8),
         );
     } else {
         content = content.push(
             row![
-                widget::button::text(fl!("account-add-another"))
-                    .on_press_maybe(enabled.then_some(Message::StartOllamaCloudLogin)),
-                widget::button::text(fl!("account-dismiss"))
-                    .on_press_maybe(enabled.then_some(Message::CancelOllamaCloudLogin)),
+                widget::button::text(fl!("account-add-another")).on_press_maybe(
+                    enabled.then_some(Message::StartLogin(crate::model::ProviderId::OllamaCloud))
+                ),
+                widget::button::text(fl!("account-dismiss")).on_press_maybe(
+                    enabled.then_some(Message::CancelLogin(crate::model::ProviderId::OllamaCloud))
+                ),
             ]
             .spacing(8),
         );
@@ -613,10 +681,10 @@ pub(super) fn ollama_cloud_login_controls(
 
 fn ollama_cloud_login_status(login: &OllamaCloudLoginState) -> String {
     match login.status {
-        OllamaCloudLoginStatus::Polling => "Waiting for browser login…".to_string(),
-        OllamaCloudLoginStatus::Editing => fl!("ollama-cloud-login-editing"),
-        OllamaCloudLoginStatus::Saved => fl!("ollama-cloud-login-saved"),
-        OllamaCloudLoginStatus::Failed => login
+        crate::providers::ollama_cloud::OllamaCloudLoginStatus::Editing
+        | crate::providers::ollama_cloud::OllamaCloudLoginStatus::Polling => fl!("ollama-cloud-login-editing"),
+        crate::providers::ollama_cloud::OllamaCloudLoginStatus::Saved => fl!("account-add"),
+        crate::providers::ollama_cloud::OllamaCloudLoginStatus::Failed => login
             .error
             .clone()
             .unwrap_or_else(|| fl!("ollama-cloud-login-failed")),

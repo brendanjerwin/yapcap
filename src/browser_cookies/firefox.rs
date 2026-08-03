@@ -13,6 +13,7 @@ impl CookieSource for FirefoxSource {
         find_cookie(cookie_name, domain)
     }
 
+    #[allow(dead_code)]
     async fn discover_workspaces(&self) -> Vec<WorkspaceInfo> {
         discover_workspaces()
     }
@@ -162,6 +163,7 @@ fn query_cookie(
 ///
 /// Looks for URLs matching /workspace/<wrk_...>/go and extracts the workspace IDs.
 /// Returns deduplicated workspaces sorted by most recently visited.
+#[allow(dead_code)]
 pub fn discover_workspaces() -> Vec<super::WorkspaceInfo> {
     let profiles = find_firefox_profiles();
     let mut all_workspaces = Vec::new();
@@ -234,6 +236,7 @@ pub fn discover_workspaces() -> Vec<super::WorkspaceInfo> {
 }
 
 /// Extract a workspace ID from a URL like https://opencode.ai/workspace/wrk_XXXXX/go
+#[allow(dead_code)]
 fn extract_workspace_id(url: &str) -> Option<String> {
     let marker = "/workspace/";
     let start = url.find(marker)? + marker.len();

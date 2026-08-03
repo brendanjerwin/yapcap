@@ -1,19 +1,35 @@
 // SPDX-License-Identifier: MPL-2.0
 
+mod antigravity_adapter;
 mod claude_adapter;
 mod codex_adapter;
 mod copilot_adapter;
 mod cursor_adapter;
 mod gemini_adapter;
 mod minimax_adapter;
-mod opencode_go_adapter;
 mod ollama_cloud_adapter;
+mod opencode_go_adapter;
 
 use crate::account_storage::ProviderAccountStorage;
 use crate::config::{Config, host_user_home_dir, paths};
-use crate::model::{AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderId};
+use crate::model::{
+    AccountSelectionStatus, AppState, AuthState, ProviderAccountRuntimeState, ProviderId,
+};
 use crate::providers::interface::{ProviderAccountDescriptor, ProviderAdapter};
 use crate::providers::{claude, codex, cursor, gemini};
+
+static CODEX_ADAPTER: codex_adapter::CodexAdapter = codex_adapter::CodexAdapter;
+static CLAUDE_ADAPTER: claude_adapter::ClaudeAdapter = claude_adapter::ClaudeAdapter;
+static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAdapter;
+static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
+static COPILOT_ADAPTER: copilot_adapter::CopilotAdapter = copilot_adapter::CopilotAdapter;
+static MINIMAX_ADAPTER: minimax_adapter::MinimaxAdapter = minimax_adapter::MinimaxAdapter;
+static ANTIGRAVITY_ADAPTER: antigravity_adapter::AntigravityAdapter =
+    antigravity_adapter::AntigravityAdapter;
+static OPENCODE_GO_ADAPTER: opencode_go_adapter::OpencodeGoAdapter =
+    opencode_go_adapter::OpencodeGoAdapter;
+static OLLAMA_CLOUD_ADAPTER: ollama_cloud_adapter::OllamaCloudAdapter =
+    ollama_cloud_adapter::OllamaCloudAdapter;
 
 pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
     match provider {
@@ -23,21 +39,11 @@ pub(super) fn adapter(provider: ProviderId) -> &'static dyn ProviderAdapter {
         ProviderId::Gemini => &GEMINI_ADAPTER,
         ProviderId::Copilot => &COPILOT_ADAPTER,
         ProviderId::Minimax => &MINIMAX_ADAPTER,
+        ProviderId::Antigravity => &ANTIGRAVITY_ADAPTER,
         ProviderId::OpencodeGo => &OPENCODE_GO_ADAPTER,
         ProviderId::OllamaCloud => &OLLAMA_CLOUD_ADAPTER,
     }
 }
-
-static CODEX_ADAPTER: codex_adapter::CodexAdapter = codex_adapter::CodexAdapter;
-static CLAUDE_ADAPTER: claude_adapter::ClaudeAdapter = claude_adapter::ClaudeAdapter;
-static CURSOR_ADAPTER: cursor_adapter::CursorAdapter = cursor_adapter::CursorAdapter;
-static GEMINI_ADAPTER: gemini_adapter::GeminiAdapter = gemini_adapter::GeminiAdapter;
-static COPILOT_ADAPTER: copilot_adapter::CopilotAdapter = copilot_adapter::CopilotAdapter;
-static MINIMAX_ADAPTER: minimax_adapter::MinimaxAdapter = minimax_adapter::MinimaxAdapter;
-static OLLAMA_CLOUD_ADAPTER: ollama_cloud_adapter::OllamaCloudAdapter =
-    ollama_cloud_adapter::OllamaCloudAdapter;
-static OPENCODE_GO_ADAPTER: opencode_go_adapter::OpencodeGoAdapter =
-    opencode_go_adapter::OpencodeGoAdapter;
 
 pub(super) fn reconcile_provider_account_descriptors(
     provider: ProviderId,
@@ -80,6 +86,12 @@ pub(super) fn reconcile_provider_account_descriptors(
                 )
             });
         entry.label.clone_from(&account.label);
+        if entry.snapshot.is_none()
+            && entry.auth_state == AuthState::ActionRequired
+            && entry.error.as_deref() == Some("Not refreshed yet")
+        {
+            entry.auth_state = AuthState::Ready;
+        }
 
         if entry.snapshot.is_none()
             && selected_ids.contains(&account.account_id)
@@ -95,7 +107,6 @@ pub(super) fn reconcile_provider_account_descriptors(
     }
 
     if let Some(provider_state) = state.provider_mut(provider) {
-        provider_state.enabled = config.provider_enabled(provider);
         provider_state.account_status = account_status(&selected_ids, accounts.len());
         provider_state.error = match provider_state.account_status {
             AccountSelectionStatus::LoginRequired => Some("Login required".to_string()),
@@ -162,9 +173,6 @@ pub(super) fn gemini_system_active_account_id(
     gemini::system_active_account_id(managed_accounts, &path)
 }
 
-// NOTE: This function is used via the adapter pattern (reconcile_provider_accounts in minimax_adapter.rs)
-// but clippy cannot detect this usage through the dynamic dispatch. This is not actually dead code.
-#[allow(dead_code)]
 pub(super) fn minimax_system_active_account_id(
     managed_accounts: &[crate::config::ManagedMinimaxAccountConfig],
 ) -> Option<String> {
@@ -174,8 +182,8 @@ pub(super) fn minimax_system_active_account_id(
         } else {
             managed_accounts
                 .iter()
-                .find(|acc| acc.api_key_source == "env:MINIMAX_API_KEY")
-                .map(|acc| acc.id.clone())
+                .find(|account| account.api_key_source == "env:MINIMAX_API_KEY")
+                .map(|account| account.id.clone())
         }
     })
 }

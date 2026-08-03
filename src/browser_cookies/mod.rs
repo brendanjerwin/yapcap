@@ -37,6 +37,7 @@ pub trait CookieSource: Send + Sync {
     async fn find_cookie(&self, cookie_name: &str, domain: &str) -> Option<BrowserCookie>;
 
     /// Discover OpenCode workspaces from browser history/tabs.
+    #[allow(dead_code)]
     async fn discover_workspaces(&self) -> Vec<WorkspaceInfo>;
 
 
@@ -77,6 +78,7 @@ pub fn default_cookie_source() -> Box<dyn CookieSource> {
 }
 
 /// Discover OpenCode workspaces using the detected default browser.
+#[allow(dead_code)]
 pub async fn discover_workspaces() -> Vec<WorkspaceInfo> {
     default_cookie_source().discover_workspaces().await
 }
@@ -94,6 +96,7 @@ pub fn parse_workspace_name_from_html(html: &str, workspace_id: &str) -> Option<
 
 /// Fetch the workspace name by scraping the /go page with the auth cookie.
 /// The SSR hydration data contains `{id:"wrk_...",name:"WorkspaceName"}`.
+#[allow(dead_code)]
 pub async fn fetch_workspace_name(
     client: &reqwest::Client,
     workspace_id: &str,
@@ -113,6 +116,7 @@ pub async fn fetch_workspace_name(
 
 /// Poll for a cookie using the given source, checking every `interval_ms`
 /// milliseconds for up to `timeout_secs` seconds.
+#[allow(dead_code)]
 pub async fn poll_for_cookie_with(
     source: &dyn CookieSource,
     cookie_name: &str,
@@ -136,6 +140,7 @@ pub async fn poll_for_cookie_with(
 }
 
 /// Poll for a cookie using the default browser.
+#[allow(dead_code)]
 pub async fn poll_for_cookie(
     cookie_name: &str,
     domain: &str,
@@ -170,6 +175,7 @@ pub async fn poll_for_workspaces_with(
 }
 
 /// Open a browser to a URL using xdg-open.
+#[allow(dead_code)]
 pub fn open_browser(url: &str) {
     let _ = std::process::Command::new("xdg-open")
         .arg(url)

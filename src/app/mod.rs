@@ -3,33 +3,44 @@
 mod applet;
 mod host_auth_watch;
 mod login;
+
+use self::login::LoginFlow;
 mod popup_view;
 mod provider_actions;
 mod provider_assets;
 mod refresh;
+mod session;
 mod state;
 #[cfg(test)]
 mod tests;
 mod window;
 
 pub(crate) use self::applet::applet_settings;
-use self::applet::{applet_button, applet_button_size, applet_indicator, select_provider};
+use self::applet::{
+    applet_button, applet_fallback_indicator, applet_indicator, panel_button_size,
+    panel_fallback_active, select_provider,
+};
 use self::popup_view::{PopupBodyMeasureTarget, ProviderLoginStates};
 use self::provider_assets::{provider_icon_handle, provider_icon_variant};
 use self::refresh::{
-    refresh_provider_account_statuses_task, refresh_provider_task, refresh_provider_tasks,
+    RefreshSkipDiagnostics, automatic_refresh_provider_tasks_for_process,
+    refresh_provider_account_statuses_task, refresh_provider_task_for_process,
+    selected_account_refresh_due,
 };
 use self::window::{
     format_retry_delay, open_url, popup_size_limits_with_max_width, popup_size_tuple, resize_popup,
     update_check_task, update_retry_delay, update_retry_task,
 };
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCursorAccountConfig,
-    PanelIconStyle, ResetTimeFormat, UsageAmountFormat,
+    APP_ID, Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
+    ManagedCursorAccountConfig, PanelIconStyle, ResetTimeFormat, UsageAmountFormat,
 };
 use crate::demo_env;
 use crate::model::{
     AccountSelectionStatus, AppState, ProviderAccountRuntimeState, ProviderHealth, ProviderId,
+};
+use crate::providers::antigravity::{
+    self, AntigravityLoginEvent, AntigravityLoginState, AntigravityLoginStatus,
 };
 use crate::providers::claude::{self, ClaudeLoginEvent, ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{self, CodexLoginEvent, CodexLoginState, CodexLoginStatus};
@@ -37,19 +48,27 @@ use crate::providers::copilot::{self, CopilotLoginEvent, CopilotLoginState, Copi
 use crate::providers::cursor::{self, CursorScanResult, CursorScanState};
 use crate::providers::gemini::{self, GeminiLoginEvent, GeminiLoginState, GeminiLoginStatus};
 use crate::providers::minimax::{self, MinimaxLoginEvent, MinimaxLoginState, MinimaxLoginStatus};
-use crate::providers::opencode_go::{
-    self, OpencodeGoLoginEvent, OpencodeGoLoginState, OpencodeGoLoginStatus,
-};
 use crate::providers::ollama_cloud::{
     self, OllamaCloudLoginEvent, OllamaCloudLoginState, OllamaCloudLoginStatus,
 };
+use crate::providers::opencode_go::{
+    self, OpencodeGoLoginEvent, OpencodeGoLoginState, OpencodeGoLoginStatus,
+};
 use crate::providers::registry;
+use crate::refresh_owner::{
+    self, ProcessInfo, RefreshOwner, RefreshOwnerAttempt, RefreshOwnerWaiter,
+};
 use crate::runtime;
-use crate::runtime::ProviderRefreshResult;
+use crate::runtime::{ProviderRefreshResult, RefreshProcessContext};
+use crate::shared_state::{
+    self, ProviderRefreshRequest, RefreshRequestReason, SharedControlState, SharedRuntimeState,
+    SharedStateWriter,
+};
 use crate::updates::UpdateStatus;
 use crate::usage_display;
+use chrono::Utc;
 use cosmic::app::Task;
-use cosmic::cosmic_config::{self, CosmicConfigEntry};
+use cosmic::cosmic_config::CosmicConfigEntry;
 use cosmic::iced::task::Handle;
 use cosmic::iced::time;
 use cosmic::iced::widget::{progress_bar, row};
@@ -61,7 +80,7 @@ use cosmic::theme::Button as CosmicButton;
 use cosmic::widget;
 use std::time::Duration;
 
-const REFRESH_INTERVAL_MIN_SECS: u64 = 10;
+const AUTOMATIC_REFRESH_POLL_INTERVAL_SECS: u64 = 10;
 const POPUP_MAX_HEIGHT: u16 = 1080;
 const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 const APPLET_ICON_GAP: f32 = 6.0;
@@ -72,17 +91,27 @@ const APPLET_PERCENT_CELL_HORIZONTAL_PAD: f32 = 8.0;
 const UPDATE_RETRY_INITIAL_SECS: u64 = 15;
 const UPDATE_RETRY_MAX_SECS: u64 = 15 * 60;
 
+fn automatic_refresh_poll_interval() -> Duration {
+    Duration::from_secs(AUTOMATIC_REFRESH_POLL_INTERVAL_SECS)
+}
+
 pub struct AppModel {
     core: cosmic::Core,
     popup: Option<Id>,
     config: Config,
     state: AppState,
+    #[cfg_attr(not(test), allow(dead_code))]
+    detection: crate::detection::DetectionSnapshot,
     selected_provider: ProviderId,
     popup_route: PopupRoute,
+    provider_picker_open: bool,
     update_status: UpdateStatus,
     launch_mode: LaunchMode,
     popup_size: Option<Size>,
     popup_body_measurements: PopupBodyMeasurements,
+    shared_control: SharedControlState,
+    process_info: ProcessInfo,
+    refresh_owner: Option<RefreshOwner>,
     codex_login: Option<CodexLoginState>,
     codex_login_handle: Option<Handle>,
     claude_login: Option<ClaudeLoginState>,
@@ -95,10 +124,24 @@ pub struct AppModel {
     copilot_login_handle: Option<Handle>,
     minimax_login: Option<MinimaxLoginState>,
     minimax_login_handle: Option<Handle>,
+    antigravity_login: Option<AntigravityLoginState>,
+    antigravity_login_handle: Option<Handle>,
     opencode_go_login: Option<OpencodeGoLoginState>,
     opencode_go_login_handle: Option<Handle>,
     ollama_cloud_login: Option<OllamaCloudLoginState>,
     ollama_cloud_login_handle: Option<Handle>,
+}
+
+impl Drop for AppModel {
+    fn drop(&mut self) {
+        tracing::info!(
+            pid = self.process_info.pid,
+            process_id = %self.process_info.id,
+            panel_output = ?self.process_info.panel_output,
+            owner_status = self.owner_status(),
+            "YapCap stopped"
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,57 +166,32 @@ pub enum SettingsRoute {
 pub enum Message {
     TogglePopup,
     PopupClosed(Id),
-    UpdateConfig(Box<Config>),
+    UpdateConfig(Box<Config>, Vec<&'static str>),
+    UpdateSharedRuntime(Box<SharedRuntimeState>, Vec<&'static str>),
+    UpdateSharedControl(Box<SharedControlState>, Vec<&'static str>),
+    RefreshOwnershipAcquired(Result<RefreshOwner, String>),
     Tick,
     RefreshNow,
+    ToggleProviderPicker,
+    OpenProviderPickerProvider(ProviderId),
     ProviderRefreshed(Box<ProviderRefreshResult>),
     SelectProvider(ProviderId),
     NavigateTo(PopupRoute),
     SetProviderEnabled(ProviderId, bool),
     ToggleAccountSelection(ProviderId, String),
-    DeleteCodexAccount(String),
-    ReauthenticateCodexAccount(String),
-    StartCodexLogin,
-    CancelCodexLogin,
-    CodexLoginEvent(Box<CodexLoginEvent>),
-    DeleteClaudeAccount(String),
-    ReauthenticateClaudeAccount(String),
-    StartClaudeLogin,
+    DeleteAccount(ProviderId, String),
+    DeleteOpencodeGoAccount(String),
+    DeleteOllamaCloudAccount(String),
     UpdateClaudeLoginCode(String),
     SubmitClaudeLoginCode,
-    CancelClaudeLogin,
-    ClaudeLoginEvent(Box<ClaudeLoginEvent>),
-    DeleteGeminiAccount(String),
-    ReauthenticateGeminiAccount(String),
-    StartGeminiLogin,
-    CancelGeminiLogin,
-    GeminiLoginEvent(Box<GeminiLoginEvent>),
-    DeleteCopilotAccount(String),
-    ReauthenticateCopilotAccount(String),
-    StartCopilotLogin,
-    CancelCopilotLogin,
-    CopilotLoginEvent(Box<CopilotLoginEvent>),
     CopyCopilotLoginCode(String),
     ClearCopilotLoginCodeCopied(String),
-    DeleteMinimaxAccount(String),
-    ReauthenticateMinimaxAccount(String),
-    StartMinimaxLogin,
-    CancelMinimaxLogin,
-    MinimaxLoginEvent(Box<MinimaxLoginEvent>),
-    DeleteOpencodeGoAccount(String),
+    ReauthenticateAccount(ProviderId, String),
     ReauthenticateOpencodeGoAccount(String),
-    StartOpencodeGoLogin,
-    CancelOpencodeGoLogin,
-    OpencodeGoLoginEvent(Box<OpencodeGoLoginEvent>),
-    StartOpencodeGoBrowserAuth,
-    StartOllamaCloudBrowserAuth,
-    DeleteOllamaCloudAccount(String),
     ReauthenticateOllamaCloudAccount(String),
-    StartOllamaCloudLogin,
-    CancelOllamaCloudLogin,
-    OllamaCloudLoginEvent(Box<OllamaCloudLoginEvent>),
-    DeleteCursorAccount(String),
-    ReauthenticateCursorAccount(String),
+    StartLogin(ProviderId),
+    CancelLogin(ProviderId),
+    LoginEvent(ProviderId, Box<login::LoginEventKind>),
     StartCursorScan,
     ConfirmCursorScan,
     DismissCursorScan,
@@ -201,8 +219,10 @@ pub(super) struct PopupBodyMeasurements {
     gemini: Option<f32>,
     copilot: Option<f32>,
     minimax: Option<f32>,
+    antigravity: Option<f32>,
     opencode_go: Option<f32>,
     ollama_cloud: Option<f32>,
+    empty_state: Option<f32>,
     general_settings: Option<f32>,
     codex_settings: Option<f32>,
     claude_settings: Option<f32>,
@@ -210,6 +230,7 @@ pub(super) struct PopupBodyMeasurements {
     gemini_settings: Option<f32>,
     copilot_settings: Option<f32>,
     minimax_settings: Option<f32>,
+    antigravity_settings: Option<f32>,
     opencode_go_settings: Option<f32>,
     ollama_cloud_settings: Option<f32>,
 }
@@ -223,6 +244,7 @@ impl PopupBodyMeasurements {
             ProviderId::Gemini => self.gemini,
             ProviderId::Copilot => self.copilot,
             ProviderId::Minimax => self.minimax,
+            ProviderId::Antigravity => self.antigravity,
             ProviderId::OpencodeGo => self.opencode_go,
             ProviderId::OllamaCloud => self.ollama_cloud,
         }
@@ -236,6 +258,7 @@ impl PopupBodyMeasurements {
             ProviderId::Gemini => self.gemini = Some(height),
             ProviderId::Copilot => self.copilot = Some(height),
             ProviderId::Minimax => self.minimax = Some(height),
+            ProviderId::Antigravity => self.antigravity = Some(height),
             ProviderId::OpencodeGo => self.opencode_go = Some(height),
             ProviderId::OllamaCloud => self.ollama_cloud = Some(height),
         }
@@ -250,11 +273,12 @@ impl PopupBodyMeasurements {
             SettingsRoute::Provider(ProviderId::Gemini) => self.gemini_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Copilot) => self.copilot_settings = Some(height),
             SettingsRoute::Provider(ProviderId::Minimax) => self.minimax_settings = Some(height),
-            SettingsRoute::Provider(ProviderId::OpencodeGo) => {
-                self.opencode_go_settings = Some(height)
+            SettingsRoute::Provider(ProviderId::Antigravity) => {
+                self.antigravity_settings = Some(height);
             }
+            SettingsRoute::Provider(ProviderId::OpencodeGo) => self.opencode_go_settings = Some(height),
             SettingsRoute::Provider(ProviderId::OllamaCloud) => {
-                self.ollama_cloud_settings = Some(height)
+                self.ollama_cloud_settings = Some(height);
             }
         }
     }
@@ -266,7 +290,11 @@ impl PopupBodyMeasurements {
                 .max(self.claude_settings?)
                 .max(self.cursor_settings?)
                 .max(self.gemini_settings?)
-                .max(self.copilot_settings?),
+                .max(self.copilot_settings?)
+                .max(self.minimax_settings?)
+                .max(self.antigravity_settings?)
+                .max(self.opencode_go_settings?)
+                .max(self.ollama_cloud_settings?),
         )
     }
 
@@ -283,6 +311,10 @@ impl PopupBodyMeasurements {
             .try_fold(0.0_f32, |height, next| next.map(|next| height.max(next)))?;
         any_enabled.then_some(height)
     }
+
+    fn empty_state_height(&self) -> Option<f32> {
+        self.empty_state
+    }
 }
 
 impl cosmic::Application for AppModel {
@@ -290,7 +322,7 @@ impl cosmic::Application for AppModel {
     type Flags = LaunchMode;
     type Message = Message;
 
-    const APP_ID: &'static str = "io.github.TopiCsarno.YapCap";
+    const APP_ID: &'static str = APP_ID;
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -307,15 +339,15 @@ impl cosmic::Application for AppModel {
         core.window.show_minimize = false;
         core.window.use_template = false;
 
-        let config = cosmic_config::Config::new(Self::APP_ID, Config::VERSION)
+        let config = crate::config::cosmic_config_context(Self::APP_ID, Config::VERSION)
             .map(|ctx| {
                 let mut config = match Config::get_entry(&ctx) {
                     Ok(cfg) => cfg,
                     Err((_errors, cfg)) => cfg,
                 };
-                let mut changed = registry::startup_sync(&mut config);
-                changed |= registry::initialize_provider_visibility(&mut config, &ProviderId::ALL);
-                changed |= registry::finalize_provider_visibility_initialization(&mut config);
+                let mut changed = crate::config::migrate_provider_enablement(&ctx, &mut config);
+                changed |= registry::startup_sync(&mut config);
+                changed |= demo_env::strip_leaked_state(&mut config);
                 if changed {
                     let _ = config.write_entry(&ctx);
                 }
@@ -324,30 +356,54 @@ impl cosmic::Application for AppModel {
             })
             .unwrap_or_default();
 
+        let detection = if demo_env::is_active() {
+            demo_env::detection_snapshot()
+        } else {
+            crate::detection::startup_snapshot(crate::config::host_user_home_dir())
+        };
+        tracing::info!(
+            detected_providers = ?detection.detected_providers(),
+            "startup provider detection"
+        );
         let initial_config = config.clone();
-        let mut state = runtime::load_initial_state(&initial_config);
+        let shared_runtime = shared_state::load_runtime(Self::APP_ID);
+        let mut shared_control = shared_state::load_control(Self::APP_ID);
+        let shared_runtime_generation = shared_runtime.as_ref().map(|state| state.generation);
+        let shared_control_generation = shared_control.generation;
+        let lock_path = refresh_owner::lock_path(&crate::config::paths());
+        let process_info = ProcessInfo::current(lock_path.clone());
+        let startup_diagnostics =
+            StartupDiagnostics::new(shared_runtime_generation, shared_control_generation);
+        let (refresh_owner, ownership_task) =
+            initialize_refresh_ownership(&process_info, &startup_diagnostics, &mut shared_control);
+        let mut state = runtime::load_initial_state(&initial_config, &detection, shared_runtime);
         #[cfg(debug_assertions)]
         crate::debug_env::apply(&mut state);
         demo_env::apply(&initial_config, &mut state);
-        let selected_provider = select_provider(ProviderId::Codex, &state);
-        let refresh_task = refresh_provider_tasks(&initial_config, &mut state);
-        let cursor_status_task =
-            refresh_provider_account_statuses_task(&initial_config, &state, ProviderId::Cursor);
-        let n_accounts_init = state.display_selected_account_count(selected_provider);
-        let (applet_width, applet_height) =
-            applet_button_size(&core, initial_config.panel_icon_style, n_accounts_init);
+        let selected_provider = select_provider(initial_config.selected_provider, &state);
+        let (applet_width, applet_height) = panel_button_size(
+            &core,
+            &state,
+            initial_config.panel_icon_style,
+            selected_provider,
+        );
         core.applet.suggested_bounds = Some(Size::new(applet_width, applet_height));
-        let app = AppModel {
+        let mut app = AppModel {
             core,
             popup: None,
             config,
             state,
+            detection,
             selected_provider,
             popup_route: PopupRoute::ProviderDetail,
+            provider_picker_open: false,
             update_status: UpdateStatus::Unchecked,
             launch_mode,
             popup_size: None,
             popup_body_measurements: PopupBodyMeasurements::default(),
+            shared_control,
+            process_info,
+            refresh_owner,
             codex_login: None,
             codex_login_handle: None,
             claude_login: None,
@@ -360,17 +416,50 @@ impl cosmic::Application for AppModel {
             copilot_login_handle: None,
             minimax_login: None,
             minimax_login_handle: None,
+            antigravity_login: None,
+            antigravity_login_handle: None,
             opencode_go_login: None,
             opencode_go_login_handle: None,
             ollama_cloud_login: None,
             ollama_cloud_login_handle: None,
         };
+        tracing::info!(
+            pid = app.process_info.pid,
+            process_id = %app.process_info.id,
+            panel_output = ?app.process_info.panel_output,
+            owner_status = app.owner_status(),
+            flatpak_status = app.process_info.flatpak_status(),
+            lock_path = %app.process_info.lock_path.display(),
+            launch_mode = ?app.launch_mode,
+            config_version = Config::VERSION,
+            shared_runtime_generation = ?shared_runtime_generation,
+            shared_control_generation,
+            selected_provider = app.selected_provider.label(),
+            enabled_provider_count = ProviderId::ALL
+                .into_iter()
+                .filter(|provider| app.state.provider(*provider).is_some_and(|state| state.enabled))
+                .count(),
+            account_count = app.state.provider_accounts.len(),
+            refresh_interval_seconds = app.config.refresh_interval_seconds,
+            "YapCap started"
+        );
 
+        let refresh_task = app.automatic_refresh_task();
+        let cursor_status_task = if app.refresh_owner.is_some() {
+            refresh_provider_account_statuses_task(&app.config, &app.state, ProviderId::Cursor)
+        } else {
+            Task::none()
+        };
         let update_task = update_check_task(0);
         let startup = if demo_env::is_active() {
             Task::none()
         } else {
-            Task::batch([refresh_task, update_task, cursor_status_task])
+            Task::batch([
+                refresh_task,
+                update_task,
+                cursor_status_task,
+                ownership_task,
+            ])
         };
 
         (app, startup)
@@ -381,25 +470,30 @@ impl cosmic::Application for AppModel {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        let n_accounts = self
-            .state
-            .display_selected_account_count(self.selected_provider);
-        let indicator = applet_indicator(
+        let indicator = if panel_fallback_active(&self.state) {
+            applet_fallback_indicator(&self.core)
+        } else {
+            let n_accounts = self
+                .state
+                .display_selected_account_count(self.selected_provider);
+            applet_indicator(
+                &self.state,
+                self.selected_provider,
+                self.config.panel_icon_style,
+                self.config.usage_amount_format,
+                &self.core,
+                n_accounts,
+            )
+        };
+        let size = panel_button_size(
+            &self.core,
             &self.state,
+            self.config.panel_icon_style,
             self.selected_provider,
-            self.config.panel_icon_style,
-            self.config.usage_amount_format,
-            &self.core,
-            n_accounts,
         );
-        let button: Element<'_, Message> = applet_button(
-            &self.core,
-            self.config.panel_icon_style,
-            n_accounts,
-            indicator,
-        )
-        .on_press(Message::TogglePopup)
-        .into();
+        let button: Element<'_, Message> = applet_button(&self.core, size, indicator)
+            .on_press(Message::TogglePopup)
+            .into();
 
         match self.launch_mode {
             LaunchMode::Panel => self.core.applet.autosize_window(button).into(),
@@ -414,13 +508,16 @@ impl cosmic::Application for AppModel {
         let content = popup_view::popup_content(
             &self.state,
             &self.config,
+            &self.detection,
             ProviderLoginStates {
+                provider_picker_open: self.provider_picker_open,
                 codex: self.codex_login.as_ref(),
                 claude: self.claude_login.as_ref(),
                 cursor_scan: &self.cursor_scan,
                 gemini: self.gemini_login.as_ref(),
                 copilot: self.copilot_login.as_ref(),
                 minimax: self.minimax_login.as_ref(),
+                antigravity: self.antigravity_login.as_ref(),
                 opencode_go: self.opencode_go_login.as_ref(),
                 ollama_cloud: self.ollama_cloud_login.as_ref(),
             },
@@ -435,15 +532,17 @@ impl cosmic::Application for AppModel {
                 let cosmic = theme.cosmic();
                 let corners = cosmic.corner_radii;
                 widget::container::Style {
-                    text_color: Some(cosmic.background.on.into()),
-                    background: Some(Background::Color(cosmic.background.base.into())),
+                    text_color: Some(cosmic.background(theme.transparent).on.into()),
+                    background: Some(Background::Color(
+                        cosmic.background(theme.transparent).base.into(),
+                    )),
                     border: cosmic::iced::Border {
                         radius: corners.radius_m.into(),
                         width: 1.0,
-                        color: cosmic.background.divider.into(),
+                        color: cosmic.background(theme.transparent).divider.into(),
                     },
                     shadow: Shadow::default(),
-                    icon_color: Some(cosmic.background.on.into()),
+                    icon_color: Some(cosmic.background(theme.transparent).on.into()),
                     snap: true,
                 }
             })
@@ -451,16 +550,17 @@ impl cosmic::Application for AppModel {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        let interval_secs = self
-            .config
-            .refresh_interval_seconds
-            .max(REFRESH_INTERVAL_MIN_SECS);
-
         Subscription::batch(vec![
             self.core()
                 .watch_config::<Config>(Self::APP_ID)
-                .map(|update| Message::UpdateConfig(Box::new(update.config))),
-            time::every(Duration::from_secs(interval_secs)).map(|_| Message::Tick),
+                .map(|update| Message::UpdateConfig(Box::new(update.config), update.keys)),
+            self.core()
+                .watch_config::<SharedRuntimeState>(Self::APP_ID)
+                .map(|update| Message::UpdateSharedRuntime(Box::new(update.config), update.keys)),
+            self.core()
+                .watch_config::<SharedControlState>(Self::APP_ID)
+                .map(|update| Message::UpdateSharedControl(Box::new(update.config), update.keys)),
+            time::every(automatic_refresh_poll_interval()).map(|_| Message::Tick),
             host_auth_watch::subscription(),
         ])
     }
@@ -483,12 +583,22 @@ impl AppModel {
     }
 
     fn handle_message_task(&mut self, message: Message) -> Option<Task<Message>> {
-        if let CursorMessageResult::Handled(task) = self.handle_cursor_message(&message) {
-            return task;
-        }
         match message {
-            Message::UpdateConfig(config) => {
-                self.on_config_update(*config);
+            Message::UpdateConfig(config, keys) => {
+                self.on_config_update(*config, &keys);
+            }
+            Message::UpdateSharedRuntime(shared_runtime, keys) => {
+                if keys.is_empty() || keys.contains(&"app_state") {
+                    self.on_shared_runtime_update(*shared_runtime);
+                }
+            }
+            Message::UpdateSharedControl(shared_control, keys) => {
+                if keys.is_empty() || keys.contains(&"requests") {
+                    return Some(self.handle_shared_control_update(*shared_control));
+                }
+            }
+            Message::RefreshOwnershipAcquired(result) => {
+                return Some(self.handle_refresh_ownership_acquired(result));
             }
             Message::TogglePopup => {
                 return Some(self.toggle_popup());
@@ -497,10 +607,31 @@ impl AppModel {
                 if self.popup.as_ref() == Some(&id) {
                     self.popup = None;
                     self.popup_size = None;
+                    tracing::info!(
+                        process_id = %self.process_info.id,
+                        route = provider_actions::popup_route_label(self.popup_route),
+                        provider = provider_actions::popup_route_provider_label(
+                            self.popup_route,
+                            self.selected_provider,
+                        ),
+                        "popup closed by window manager"
+                    );
                 }
             }
-            Message::Tick | Message::RefreshNow => {
-                return Some(refresh_provider_tasks(&self.config, &mut self.state));
+            Message::Tick => {
+                return Some(self.automatic_refresh_task());
+            }
+            Message::RefreshNow => {
+                return Some(self.handle_refresh_now());
+            }
+            Message::ToggleProviderPicker => {
+                self.provider_picker_open = !self.provider_picker_open;
+                let route = self.popup_route;
+                return self.resize_popup_to_route(&route);
+            }
+            Message::OpenProviderPickerProvider(provider) => {
+                self.provider_picker_open = false;
+                return self.navigate_to(PopupRoute::Settings(SettingsRoute::Provider(provider)));
             }
             Message::ProviderRefreshed(refresh_result) => {
                 return Some(self.handle_provider_refreshed(*refresh_result));
@@ -512,25 +643,32 @@ impl AppModel {
                 return self.handle_popup_body_measured(target, size);
             }
             Message::SelectProvider(provider) => {
-                return self.select_provider_tab(provider);
+                return Some(self.select_provider_tab(provider));
             }
             Message::NavigateTo(route) => {
+                self.provider_picker_open = false;
                 return self.navigate_to(route);
             }
             Message::UpdateChecked { status, attempt } => {
                 return Some(self.handle_update_checked(status, attempt));
             }
             Message::CheckUpdates => {
+                tracing::info!(process_id = %self.process_info.id, "manual update check requested");
                 self.update_status = UpdateStatus::Unchecked;
                 return Some(update_check_task(0));
             }
             Message::RetryUpdateCheck(attempt) => {
                 if matches!(self.update_status, UpdateStatus::Error(_)) {
+                    tracing::info!(
+                        process_id = %self.process_info.id,
+                        attempt,
+                        "update check retry scheduled"
+                    );
                     return Some(update_check_task(attempt));
                 }
             }
             Message::OpenUrl(url) => open_url(&url),
-            Message::Quit => std::process::exit(0),
+            Message::Quit => return Some(self.handle_quit()),
             Message::HostCliAuthChanged => self.on_host_cli_auth_changed(),
             Message::SetProviderEnabled(provider, enabled) => {
                 return Some(self.set_provider_enabled(provider, enabled));
@@ -553,42 +691,64 @@ impl AppModel {
             Message::ToggleAccountSelection(provider, account_id) => {
                 return Some(self.toggle_account_selection(provider, &account_id));
             }
-            Message::DeleteCodexAccount(account_id) => {
-                return Some(self.delete_codex_account(&account_id));
+            Message::DeleteAccount(provider, account_id) => {
+                return Some(self.delete_account(provider, &account_id));
             }
-            Message::DeleteClaudeAccount(account_id) => {
-                return Some(self.delete_claude_account(&account_id));
+            Message::DeleteOpencodeGoAccount(account_id) => {
+                return Some(self.delete_account(ProviderId::OpencodeGo, &account_id));
             }
-            Message::ReauthenticateClaudeAccount(account_id) => {
-                return Some(self.reauthenticate_claude_account(&account_id));
+            Message::DeleteOllamaCloudAccount(account_id) => {
+                return Some(self.delete_account(ProviderId::OllamaCloud, &account_id));
             }
-            Message::ReauthenticateCodexAccount(account_id) => {
-                return Some(self.reauthenticate_codex_account(&account_id));
+            Message::ReauthenticateAccount(provider, account_id) => {
+                return Some(session::reauthenticate(self, provider, &account_id));
             }
-            Message::StartCodexLogin => return Some(self.start_codex_login()),
-            Message::CancelCodexLogin => self.cancel_codex_login(),
-            Message::CodexLoginEvent(event) => return Some(self.handle_codex_login_event(*event)),
-            Message::DeleteGeminiAccount(account_id) => {
-                return Some(self.delete_gemini_account(&account_id));
+            Message::ReauthenticateOpencodeGoAccount(account_id) => {
+                return Some(session::reauthenticate(
+                    self,
+                    ProviderId::OpencodeGo,
+                    &account_id,
+                ));
             }
-            Message::ReauthenticateGeminiAccount(account_id) => {
-                return Some(self.reauthenticate_gemini_account(&account_id));
+            Message::ReauthenticateOllamaCloudAccount(account_id) => {
+                return Some(session::reauthenticate(
+                    self,
+                    ProviderId::OllamaCloud,
+                    &account_id,
+                ));
             }
-            Message::StartGeminiLogin => return Some(self.start_gemini_login()),
-            Message::CancelGeminiLogin => self.cancel_gemini_login(),
-            Message::GeminiLoginEvent(event) => {
-                return Some(self.handle_gemini_login_event(*event));
+            Message::StartLogin(provider) => {
+                return Some(session::start_login(self, provider));
             }
-            Message::DeleteCopilotAccount(account_id) => {
-                return Some(self.delete_copilot_account(&account_id));
-            }
-            Message::ReauthenticateCopilotAccount(account_id) => {
-                return Some(self.reauthenticate_copilot_account(&account_id));
-            }
-            Message::StartCopilotLogin => return Some(self.start_copilot_login()),
-            Message::CancelCopilotLogin => self.cancel_copilot_login(),
-            Message::CopilotLoginEvent(event) => {
-                return Some(self.handle_copilot_login_event(*event));
+            Message::CancelLogin(provider) => session::cancel_login(self, provider),
+            Message::LoginEvent(provider, kind) => {
+                return Some(match (provider, *kind) {
+                    (ProviderId::Codex, login::LoginEventKind::Codex(event)) => {
+                        login::CodexLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Claude, login::LoginEventKind::Claude(event)) => {
+                        login::ClaudeLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Gemini, login::LoginEventKind::Gemini(event)) => {
+                        login::GeminiLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Copilot, login::LoginEventKind::Copilot(event)) => {
+                        login::CopilotLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Minimax, login::LoginEventKind::Minimax(event)) => {
+                        login::MinimaxLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::Antigravity, login::LoginEventKind::Antigravity(event)) => {
+                        login::AntigravityLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::OpencodeGo, login::LoginEventKind::OpencodeGo(event)) => {
+                        login::OpencodeGoLoginFlow::on_event(self, event)
+                    }
+                    (ProviderId::OllamaCloud, login::LoginEventKind::OllamaCloud(event)) => {
+                        login::OllamaCloudLoginFlow::on_event(self, event)
+                    }
+                    _ => Task::none(),
+                });
             }
             Message::CopyCopilotLoginCode(code) => {
                 return Some(self.copy_copilot_login_code(code));
@@ -596,86 +756,167 @@ impl AppModel {
             Message::ClearCopilotLoginCodeCopied(flow_id) => {
                 self.clear_copilot_login_code_copied(&flow_id);
             }
-            Message::DeleteMinimaxAccount(account_id) => {
-                return Some(self.delete_minimax_account(&account_id));
-            }
-            Message::ReauthenticateMinimaxAccount(account_id) => {
-                return Some(self.reauthenticate_minimax_account(&account_id));
-            }
-            Message::StartMinimaxLogin => return Some(self.start_minimax_login()),
-            Message::CancelMinimaxLogin => self.cancel_minimax_login(),
-            Message::MinimaxLoginEvent(event) => {
-                return Some(self.handle_minimax_login_event(*event));
-            }
-            Message::DeleteOpencodeGoAccount(account_id) => {
-                return Some(self.delete_opencode_go_account(&account_id));
-            }
-            Message::ReauthenticateOpencodeGoAccount(account_id) => {
-                return Some(self.reauthenticate_opencode_go_account(&account_id));
-            }
-            Message::StartOpencodeGoLogin => return Some(self.start_opencode_go_login()),
-            Message::CancelOpencodeGoLogin => self.cancel_opencode_go_login(),
-            Message::OpencodeGoLoginEvent(event) => {
-                return Some(self.handle_opencode_go_login_event(*event));
-            }
-            Message::StartOpencodeGoBrowserAuth => {
-                return Some(self.start_opencode_go_browser_auth());
-            }
-            Message::StartOllamaCloudBrowserAuth => {
-                return Some(self.start_ollama_cloud_browser_auth());
-            }
-            Message::DeleteOllamaCloudAccount(account_id) => {
-                return Some(self.delete_ollama_cloud_account(&account_id));
-            }
-            Message::ReauthenticateOllamaCloudAccount(account_id) => {
-                return Some(self.reauthenticate_ollama_cloud_account(&account_id));
-            }
-            Message::StartOllamaCloudLogin => return Some(self.start_ollama_cloud_login()),
-            Message::CancelOllamaCloudLogin => self.cancel_ollama_cloud_login(),
-            Message::OllamaCloudLoginEvent(event) => {
-                return Some(self.handle_ollama_cloud_login_event(*event));
-            }
-            Message::StartClaudeLogin => return Some(self.start_claude_login()),
             Message::UpdateClaudeLoginCode(code) => self.update_claude_login_code(code),
             Message::SubmitClaudeLoginCode => return Some(self.submit_claude_login_code()),
-            Message::CancelClaudeLogin => self.cancel_claude_login(),
-            Message::ClaudeLoginEvent(event) => {
-                return Some(self.handle_claude_login_event(*event));
+            Message::StartCursorScan => return Some(self.start_cursor_scan()),
+            Message::ConfirmCursorScan => return Some(self.confirm_cursor_scan()),
+            Message::DismissCursorScan => self.dismiss_cursor_scan(),
+            Message::CursorScanComplete(state, result) => {
+                self.handle_cursor_scan_complete(state, result);
             }
-            Message::DeleteCursorAccount(_)
-            | Message::ReauthenticateCursorAccount(_)
-            | Message::StartCursorScan
-            | Message::ConfirmCursorScan
-            | Message::DismissCursorScan
-            | Message::CursorScanComplete(_, _) => unreachable!(),
         }
         None
     }
 
-    fn handle_cursor_message(&mut self, message: &Message) -> CursorMessageResult {
-        match message {
-            Message::DeleteCursorAccount(account_id) => {
-                CursorMessageResult::handled(Some(self.delete_cursor_account(account_id)))
-            }
-            Message::ReauthenticateCursorAccount(account_id) => {
-                CursorMessageResult::handled(Some(self.reauthenticate_cursor_account(account_id)))
-            }
-            Message::StartCursorScan => {
-                CursorMessageResult::handled(Some(self.start_cursor_scan()))
-            }
-            Message::ConfirmCursorScan => {
-                CursorMessageResult::handled(Some(self.confirm_cursor_scan()))
-            }
-            Message::DismissCursorScan => {
-                self.dismiss_cursor_scan();
-                CursorMessageResult::handled(None)
-            }
-            Message::CursorScanComplete(state, result) => {
-                self.handle_cursor_scan_complete(state.clone(), result.clone());
-                CursorMessageResult::handled(None)
-            }
-            _ => CursorMessageResult::Unhandled,
+    fn handle_quit(&mut self) -> Task<Message> {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            panel_output = ?self.process_info.panel_output,
+            owner_status = self.owner_status(),
+            "quit requested by user"
+        );
+        cosmic::iced::exit()
+    }
+
+    fn owner_status(&self) -> &'static str {
+        if self.refresh_owner.is_some() {
+            "owner"
+        } else {
+            "non_owner"
         }
+    }
+
+    pub(super) fn shared_state_writer(&self) -> SharedStateWriter<'_> {
+        SharedStateWriter {
+            process_id: &self.process_info.id,
+            owner_status: self.owner_status(),
+        }
+    }
+
+    fn refresh_task_process(&self) -> RefreshProcessContext {
+        refresh_task_process(&self.process_info, self.owner_status())
+    }
+
+    fn handle_refresh_ownership_acquired(
+        &mut self,
+        result: Result<RefreshOwner, String>,
+    ) -> Task<Message> {
+        match result {
+            Ok(owner) => {
+                tracing::info!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    panel_output = ?self.process_info.panel_output,
+                    owner_status = "owner",
+                    flatpak_status = self.process_info.flatpak_status(),
+                    lock_path = %owner.lock_path().display(),
+                    config_version = Config::VERSION,
+                    shared_control_generation = self.shared_control.generation,
+                    "refresh ownership acquired after waiting"
+                );
+                self.refresh_owner = Some(owner);
+                clear_shared_refresh_requests(
+                    &self.process_info,
+                    "owner",
+                    &mut self.shared_control,
+                );
+                self.automatic_refresh_task()
+            }
+            Err(error) => {
+                tracing::error!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    panel_output = ?self.process_info.panel_output,
+                    owner_status = "read_only",
+                    flatpak_status = self.process_info.flatpak_status(),
+                    lock_path = %self.process_info.lock_path.display(),
+                    config_version = Config::VERSION,
+                    shared_control_generation = self.shared_control.generation,
+                    error = %error,
+                    "failed while waiting for refresh ownership"
+                );
+                Task::none()
+            }
+        }
+    }
+
+    fn automatic_refresh_task(&mut self) -> Task<Message> {
+        let refresh_process = self.refresh_task_process();
+        owner_automatic_refresh_task(
+            self.refresh_owner.as_ref(),
+            &self.process_info,
+            self.owner_status(),
+            &self.config,
+            &mut self.state,
+            refresh_process,
+        )
+    }
+
+    fn handle_refresh_now(&mut self) -> Task<Message> {
+        let requested_provider_count = ProviderId::ALL
+            .into_iter()
+            .filter(|provider| {
+                self.state
+                    .provider(*provider)
+                    .is_some_and(|state| state.enabled)
+            })
+            .count();
+        let shared_control = shared_control_with_user_refresh_requests(
+            &self.state,
+            &self.shared_control,
+            &self.process_info.id,
+        );
+        match shared_state::save_control(APP_ID, &shared_control) {
+            Ok(()) => {
+                tracing::info!(
+                    process_id = %self.process_info.id,
+                    generation = shared_control.generation,
+                    requested_provider_count,
+                    "manual refresh requested"
+                );
+            }
+            Err(error) => {
+                tracing::error!(
+                    pid = self.process_info.pid,
+                    process_id = %self.process_info.id,
+                    owner_status = self.owner_status(),
+                    error = ?error,
+                    "failed to save shared refresh requests"
+                );
+            }
+        }
+        self.handle_shared_control_update(shared_control)
+    }
+
+    fn handle_shared_control_update(
+        &mut self,
+        shared_control: SharedControlState,
+    ) -> Task<Message> {
+        if shared_control.generation <= self.shared_control.generation {
+            return Task::none();
+        }
+        tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = if self.refresh_owner.is_some() { "owner" } else { "non_owner" },
+            generation = shared_control.generation,
+            request_count = shared_control.requests.len(),
+            "shared control observed"
+        );
+        self.shared_control = shared_control;
+        let refresh_process = self.refresh_task_process();
+        let (task, consumed_providers) = owner_shared_control_refresh_task(
+            self.refresh_owner.as_ref(),
+            &self.process_info,
+            self.owner_status(),
+            &self.config,
+            &mut self.state,
+            &self.shared_control,
+            refresh_process,
+        );
+        if !consumed_providers.is_empty() {
+            self.consume_shared_refresh_requests(&consumed_providers);
+        }
+        task
     }
 
     fn handle_provider_account_statuses_refreshed(
@@ -683,15 +924,19 @@ impl AppModel {
         provider: ProviderId,
         accounts: Vec<ProviderAccountRuntimeState>,
     ) {
+        tracing::info!(
+            process_id = %self.process_info.id,
+            owner_status = self.owner_status(),
+            provider = provider.label(),
+            account_count = accounts.len(),
+            "provider account statuses refreshed"
+        );
         for account in accounts {
             self.state.upsert_account(account);
         }
-        if provider == ProviderId::Cursor {
-            self.update_cursor_metadata_from_state();
-            self.update_cursor_active_account();
-        }
+        session::sync_metadata_after_status_refresh(self, provider);
         self.sync_panel_suggested_bounds();
-        runtime::persist_state(&self.state);
+        self.persist_runtime_if_owner("account_status_refresh");
     }
 
     fn handle_popup_body_measured(
@@ -704,6 +949,11 @@ impl AppModel {
             PopupBodyMeasureTarget::Provider(provider) => {
                 let previous = self.popup_body_measurements.provider(provider);
                 self.popup_body_measurements.set_provider(provider, height);
+                previous
+            }
+            PopupBodyMeasureTarget::EmptyState => {
+                let previous = self.popup_body_measurements.empty_state;
+                self.popup_body_measurements.empty_state = Some(height);
                 previous
             }
             PopupBodyMeasureTarget::Settings(route) => {
@@ -727,6 +977,9 @@ impl AppModel {
                     SettingsRoute::Provider(ProviderId::Minimax) => {
                         self.popup_body_measurements.minimax_settings
                     }
+                    SettingsRoute::Provider(ProviderId::Antigravity) => {
+                        self.popup_body_measurements.antigravity_settings
+                    }
                     SettingsRoute::Provider(ProviderId::OpencodeGo) => {
                         self.popup_body_measurements.opencode_go_settings
                     }
@@ -748,13 +1001,321 @@ impl AppModel {
     }
 }
 
-enum CursorMessageResult {
-    Handled(Option<Task<Message>>),
-    Unhandled,
+fn owner_automatic_refresh_task(
+    refresh_owner: Option<&RefreshOwner>,
+    process_info: &ProcessInfo,
+    owner_status: &'static str,
+    config: &Config,
+    state: &mut AppState,
+    process: RefreshProcessContext,
+) -> Task<Message> {
+    if refresh_owner.is_none() {
+        return Task::none();
+    }
+    if runtime::resolve_stale_refreshes(state) {
+        runtime::persist_state_as(
+            state,
+            "stale_refresh_resolved",
+            Some(SharedStateWriter {
+                process_id: &process_info.id,
+                owner_status,
+            }),
+        );
+    }
+    let task = automatic_refresh_provider_tasks_for_process(config, state, Some(process));
+    if task.units() > 0 {
+        runtime::persist_state_as(
+            state,
+            "automatic_refresh_started",
+            Some(SharedStateWriter {
+                process_id: &process_info.id,
+                owner_status,
+            }),
+        );
+    }
+    task
 }
 
-impl CursorMessageResult {
-    fn handled(task: Option<Task<Message>>) -> Self {
-        Self::Handled(task)
+fn owner_shared_control_refresh_task(
+    refresh_owner: Option<&RefreshOwner>,
+    process_info: &ProcessInfo,
+    owner_status: &'static str,
+    config: &Config,
+    state: &mut AppState,
+    shared_control: &SharedControlState,
+    process: RefreshProcessContext,
+) -> (Task<Message>, Vec<ProviderId>) {
+    if refresh_owner.is_none() {
+        return (Task::none(), Vec::new());
+    }
+
+    let mut consumed_providers = Vec::new();
+    let request_count = shared_control.requests.len();
+    let mut evaluation = SharedRefreshEvaluationLog::from_requests(shared_control);
+    let providers = shared_control
+        .requests
+        .iter()
+        .filter_map(|request| {
+            let force = matches!(
+                request.reason,
+                RefreshRequestReason::User | RefreshRequestReason::AccountAction
+            );
+            if !state
+                .provider(request.provider)
+                .is_some_and(|entry| entry.enabled)
+            {
+                evaluation.record_outcome(request.provider, "disabled");
+                consumed_providers.push(request.provider);
+                return None;
+            }
+            let Some(provider_state) = state.provider(request.provider) else {
+                evaluation.record_outcome(request.provider, "missing_provider_state");
+                return Some((request.provider, force));
+            };
+            if provider_state.is_refreshing {
+                evaluation.record_outcome(request.provider, "already_refreshing");
+                consumed_providers.push(request.provider);
+                return None;
+            }
+            if provider_state.account_status != AccountSelectionStatus::Ready {
+                let diagnostics = RefreshSkipDiagnostics::for_provider(state, request.provider);
+                let skip_reason = diagnostics.not_ready_reason();
+                evaluation.record_outcome(request.provider, skip_reason);
+                consumed_providers.push(request.provider);
+                return None;
+            }
+            Some((request.provider, force))
+        })
+        .collect::<Vec<_>>();
+
+    let tasks = providers
+        .into_iter()
+        .map(|(provider, force)| {
+            refresh_provider_task_for_process(config, state, provider, Some(process.clone()), force)
+        })
+        .filter(|task| task.units() > 0)
+        .collect::<Vec<_>>();
+
+    tracing::info!(
+        process_id = %process_info.id,
+        owner_status,
+        generation = shared_control.generation,
+        request_count,
+        scheduled_provider_count = tasks.len(),
+        skipped_provider_count = consumed_providers.len(),
+        unresolved_provider_count = request_count
+            .saturating_sub(tasks.len())
+            .saturating_sub(consumed_providers.len()),
+        request_reasons = %evaluation.request_reasons(),
+        requesters = %evaluation.requesters(),
+        outcomes = %evaluation.outcomes(),
+        "owner evaluated shared refresh requests"
+    );
+
+    if tasks.is_empty() {
+        (Task::none(), consumed_providers)
+    } else {
+        runtime::persist_state_as(
+            state,
+            "shared_refresh_started",
+            Some(SharedStateWriter {
+                process_id: &process_info.id,
+                owner_status,
+            }),
+        );
+        (Task::batch(tasks), consumed_providers)
+    }
+}
+
+#[derive(Default)]
+struct SharedRefreshEvaluationLog {
+    user_request_count: usize,
+    account_action_request_count: usize,
+    provider_selected_request_count: usize,
+    requesters: Vec<String>,
+    outcomes: Vec<String>,
+}
+
+impl SharedRefreshEvaluationLog {
+    fn from_requests(shared_control: &SharedControlState) -> Self {
+        let mut summary = Self::default();
+        for request in &shared_control.requests {
+            if !summary.requesters.contains(&request.requesting_process_id) {
+                summary
+                    .requesters
+                    .push(request.requesting_process_id.clone());
+            }
+            match request.reason {
+                RefreshRequestReason::User => summary.user_request_count += 1,
+                RefreshRequestReason::AccountAction => summary.account_action_request_count += 1,
+                RefreshRequestReason::ProviderSelected => {
+                    summary.provider_selected_request_count += 1;
+                }
+            }
+        }
+        summary
+    }
+
+    fn record_outcome(&mut self, provider: ProviderId, outcome: &str) {
+        self.outcomes
+            .push(format!("{}:{outcome}", provider.label()));
+    }
+
+    fn request_reasons(&self) -> String {
+        let mut reasons = Vec::new();
+        if self.user_request_count > 0 {
+            reasons.push(format!("user:{}", self.user_request_count));
+        }
+        if self.account_action_request_count > 0 {
+            reasons.push(format!(
+                "account_action:{}",
+                self.account_action_request_count
+            ));
+        }
+        if self.provider_selected_request_count > 0 {
+            reasons.push(format!(
+                "provider_selected:{}",
+                self.provider_selected_request_count
+            ));
+        }
+        if reasons.is_empty() {
+            "none".to_string()
+        } else {
+            reasons.join(",")
+        }
+    }
+
+    fn requesters(&self) -> String {
+        if self.requesters.is_empty() {
+            "none".to_string()
+        } else {
+            self.requesters.join(",")
+        }
+    }
+
+    fn outcomes(&self) -> String {
+        if self.outcomes.is_empty() {
+            "none".to_string()
+        } else {
+            self.outcomes.join(",")
+        }
+    }
+}
+
+fn shared_control_with_user_refresh_requests(
+    state: &AppState,
+    shared_control: &SharedControlState,
+    process_id: &str,
+) -> SharedControlState {
+    let mut next = shared_control.clone();
+    for provider in ProviderId::ALL {
+        if !state.provider(provider).is_some_and(|entry| entry.enabled) {
+            continue;
+        }
+        next.upsert_request(ProviderRefreshRequest {
+            provider,
+            reason: RefreshRequestReason::User,
+            requested_at: Utc::now(),
+            requesting_process_id: process_id.to_string(),
+        });
+    }
+    next
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StartupDiagnostics {
+    shared_runtime_generation: Option<u64>,
+    shared_control_generation: u64,
+}
+
+impl StartupDiagnostics {
+    fn new(shared_runtime_generation: Option<u64>, shared_control_generation: u64) -> Self {
+        Self {
+            shared_runtime_generation,
+            shared_control_generation,
+        }
+    }
+}
+
+fn initialize_refresh_ownership(
+    process_info: &ProcessInfo,
+    diagnostics: &StartupDiagnostics,
+    shared_control: &mut SharedControlState,
+) -> (Option<RefreshOwner>, Task<Message>) {
+    match refresh_owner::try_acquire(process_info.lock_path.clone()) {
+        Ok(RefreshOwnerAttempt::Owner(owner)) => {
+            clear_shared_refresh_requests(process_info, "owner", shared_control);
+            (Some(owner), Task::none())
+        }
+        Ok(RefreshOwnerAttempt::NonOwner(waiter)) => (None, refresh_owner_wait_task(waiter)),
+        Err(error) => {
+            tracing::error!(
+                pid = process_info.pid,
+                process_id = %process_info.id,
+                panel_output = ?process_info.panel_output,
+                owner_status = "read_only",
+                flatpak_status = process_info.flatpak_status(),
+                lock_path = %process_info.lock_path.display(),
+                config_version = Config::VERSION,
+                shared_runtime_generation = ?diagnostics.shared_runtime_generation,
+                shared_control_generation = diagnostics.shared_control_generation,
+                error = ?error,
+                "failed to acquire refresh ownership lock"
+            );
+            (None, Task::none())
+        }
+    }
+}
+
+fn refresh_owner_wait_task(waiter: RefreshOwnerWaiter) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || waiter.wait())
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result.map_err(|error| error.to_string()))
+        },
+        |result| cosmic::Action::App(Message::RefreshOwnershipAcquired(result)),
+    )
+}
+
+fn clear_shared_refresh_requests(
+    process_info: &ProcessInfo,
+    owner_status: &'static str,
+    shared_control: &mut SharedControlState,
+) {
+    let had_requests = !shared_control.requests.is_empty();
+    match shared_state::clear_control_requests(APP_ID, shared_control) {
+        Ok(cleared) => {
+            *shared_control = cleared;
+            if had_requests {
+                tracing::info!(
+                    pid = process_info.pid,
+                    process_id = %process_info.id,
+                    owner_status,
+                    generation = shared_control.generation,
+                    "shared refresh requests cleared by refresh owner"
+                );
+            }
+        }
+        Err(error) => {
+            tracing::error!(
+                pid = process_info.pid,
+                process_id = %process_info.id,
+                owner_status,
+                error = ?error,
+                "failed to clear shared refresh requests"
+            );
+        }
+    }
+}
+
+fn refresh_task_process(
+    process_info: &ProcessInfo,
+    owner_status: &'static str,
+) -> RefreshProcessContext {
+    RefreshProcessContext {
+        process_id: process_info.id.clone(),
+        owner_status,
     }
 }

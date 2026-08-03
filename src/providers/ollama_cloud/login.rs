@@ -16,7 +16,9 @@ pub struct OllamaCloudLoginState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OllamaCloudLoginStatus {
     Editing,
+    #[allow(dead_code)]
     Polling,
+    #[allow(dead_code)]
     Saved,
     Failed,
 }
@@ -73,6 +75,7 @@ impl OllamaCloudLoginState {
 pub enum OllamaCloudLoginEvent {
     #[allow(dead_code)]
     BrowserAuthStarted,
+    #[allow(dead_code)]
     BrowserAuthComplete { session_cookie: String },
     #[allow(dead_code)]
     Started,

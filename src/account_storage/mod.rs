@@ -34,6 +34,8 @@ pub struct ProviderAccountMetadata {
     pub gemini_last_tier_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gemini_last_cloudaicompanion_project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_last_tier_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -123,6 +125,7 @@ impl ProviderAccountStorage {
             updated_at: now,
             gemini_last_tier_id: None,
             gemini_last_cloudaicompanion_project: None,
+            antigravity_last_tier_id: None,
         };
 
         write_json(&account_dir.join(METADATA_FILE), &metadata)?;
@@ -252,6 +255,7 @@ impl ProviderAccountStorage {
             ProviderId::Gemini => "gemini",
             ProviderId::Copilot => "copilot",
             ProviderId::Minimax => "minimax",
+            ProviderId::Antigravity => "antigravity",
             ProviderId::OpencodeGo => "opencode-go",
             ProviderId::OllamaCloud => "ollama-cloud",
         };
@@ -300,9 +304,67 @@ pub enum AccountStorageError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to set permissions on {path}")]
+    SetPermissions {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), AccountStorageError> {
+/// # Errors
+///
+/// Returns an error when the directory cannot be created or its permissions cannot be set to
+/// `0o700`.
+pub fn create_private_dir(path: &Path) -> Result<(), AccountStorageError> {
+    fs::create_dir_all(path).map_err(|source| AccountStorageError::CreateDir {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    set_private_dir_permissions(path)
+}
+
+/// # Errors
+///
+/// Returns an error when the file's permissions cannot be set to `0o600`.
+pub fn set_private_file_permissions(path: &Path) -> Result<(), AccountStorageError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|source| {
+            AccountStorageError::SetPermissions {
+                path: path.to_path_buf(),
+                source,
+            }
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn set_private_dir_permissions(path: &Path) -> Result<(), AccountStorageError> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|source| {
+        AccountStorageError::SetPermissions {
+            path: path.to_path_buf(),
+            source,
+        }
+    })
+}
+
+#[cfg(not(unix))]
+fn set_private_dir_permissions(_path: &Path) -> Result<(), AccountStorageError> {
+    Ok(())
+}
+
+/// # Errors
+///
+/// Returns an error when `value` cannot be encoded or `path` cannot be written.
+pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), AccountStorageError> {
     let payload =
         serde_json::to_vec_pretty(value).map_err(|source| AccountStorageError::EncodeFile {
             path: path.to_path_buf(),
@@ -314,7 +376,10 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), AccountStorage
     })
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, AccountStorageError> {
+/// # Errors
+///
+/// Returns an error when `path` cannot be read or its contents cannot be parsed.
+pub fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, AccountStorageError> {
     let raw = fs::read_to_string(path).map_err(|source| AccountStorageError::ReadFile {
         path: path.to_path_buf(),
         source,

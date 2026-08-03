@@ -2,11 +2,17 @@
 
 use crate::model::ProviderId;
 use chrono::{DateTime, Utc};
-use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
+use cosmic::cosmic_config::{
+    self, ConfigGet, ConfigSet, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry,
+};
 use dirs::{cache_dir, state_dir};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
+
+mod watch_update;
+
+pub const APP_ID: &str = "io.github.TopiCsarno.YapCap";
 
 #[derive(Debug, Clone, CosmicConfigEntry, Serialize, Deserialize, Eq, PartialEq)]
 #[version = 600]
@@ -15,21 +21,28 @@ pub struct Config {
     pub reset_time_format: ResetTimeFormat,
     pub usage_amount_format: UsageAmountFormat,
     pub panel_icon_style: PanelIconStyle,
+    #[serde(default = "default_selected_provider")]
+    pub selected_provider: ProviderId,
     #[serde(default = "default_provider_visibility_mode")]
     pub provider_visibility_mode: ProviderVisibilityMode,
-    pub codex_enabled: bool,
-    pub claude_enabled: bool,
-    pub cursor_enabled: bool,
-    #[serde(default = "default_gemini_enabled")]
-    pub gemini_enabled: bool,
-    #[serde(default = "default_copilot_enabled")]
-    pub copilot_enabled: bool,
-    #[serde(default = "default_minimax_enabled")]
-    pub minimax_enabled: bool,
-    #[serde(default = "default_opencode_go_enabled")]
-    pub opencode_go_enabled: bool,
-    #[serde(default = "default_ollama_cloud_enabled")]
-    pub ollama_cloud_enabled: bool,
+    #[serde(default)]
+    pub codex_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub claude_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub cursor_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub gemini_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub copilot_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub minimax_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub antigravity_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub opencode_go_enablement: ProviderEnablement,
+    #[serde(default)]
+    pub ollama_cloud_enablement: ProviderEnablement,
     #[serde(default)]
     pub show_all_accounts: HashSet<ProviderId>,
     pub selected_codex_account_ids: Vec<String>,
@@ -51,6 +64,10 @@ pub struct Config {
     #[serde(default)]
     pub minimax_managed_accounts: Vec<ManagedMinimaxAccountConfig>,
     #[serde(default)]
+    pub selected_antigravity_account_ids: Vec<String>,
+    #[serde(default)]
+    pub antigravity_managed_accounts: Vec<ManagedAntigravityAccountConfig>,
+    #[serde(default)]
     pub selected_opencode_go_account_ids: Vec<String>,
     #[serde(default)]
     pub opencode_go_managed_accounts: Vec<ManagedOpencodeGoAccountConfig>,
@@ -61,26 +78,6 @@ pub struct Config {
     pub log_level: String,
 }
 
-fn default_gemini_enabled() -> bool {
-    true
-}
-
-fn default_copilot_enabled() -> bool {
-    true
-}
-
-fn default_minimax_enabled() -> bool {
-    true
-}
-
-fn default_opencode_go_enabled() -> bool {
-    true
-}
-
-fn default_ollama_cloud_enabled() -> bool {
-    true
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -88,15 +85,17 @@ impl Default for Config {
             reset_time_format: ResetTimeFormat::Relative,
             usage_amount_format: UsageAmountFormat::Used,
             panel_icon_style: PanelIconStyle::LogoAndBars,
-            provider_visibility_mode: ProviderVisibilityMode::AutoInitPending,
-            codex_enabled: true,
-            claude_enabled: true,
-            cursor_enabled: true,
-            gemini_enabled: true,
-            copilot_enabled: true,
-            minimax_enabled: true,
-            opencode_go_enabled: true,
-            ollama_cloud_enabled: true,
+            selected_provider: ProviderId::Codex,
+            provider_visibility_mode: ProviderVisibilityMode::UserManaged,
+            codex_enablement: ProviderEnablement::Auto,
+            claude_enablement: ProviderEnablement::Auto,
+            cursor_enablement: ProviderEnablement::Auto,
+            gemini_enablement: ProviderEnablement::Auto,
+            copilot_enablement: ProviderEnablement::Auto,
+            minimax_enablement: ProviderEnablement::Auto,
+            antigravity_enablement: ProviderEnablement::Auto,
+            opencode_go_enablement: ProviderEnablement::Auto,
+            ollama_cloud_enablement: ProviderEnablement::Auto,
             show_all_accounts: HashSet::new(),
             selected_codex_account_ids: Vec::new(),
             codex_managed_accounts: Vec::new(),
@@ -110,6 +109,8 @@ impl Default for Config {
             copilot_managed_accounts: Vec::new(),
             selected_minimax_account_ids: Vec::new(),
             minimax_managed_accounts: Vec::new(),
+            selected_antigravity_account_ids: Vec::new(),
+            antigravity_managed_accounts: Vec::new(),
             selected_opencode_go_account_ids: Vec::new(),
             opencode_go_managed_accounts: Vec::new(),
             selected_ollama_cloud_account_ids: Vec::new(),
@@ -123,18 +124,23 @@ fn default_provider_visibility_mode() -> ProviderVisibilityMode {
     ProviderVisibilityMode::UserManaged
 }
 
+fn default_selected_provider() -> ProviderId {
+    ProviderId::Codex
+}
+
 impl Config {
     #[must_use]
-    pub fn provider_enabled(&self, provider: ProviderId) -> bool {
+    pub fn provider_enablement(&self, provider: ProviderId) -> ProviderEnablement {
         match provider {
-            ProviderId::Codex => self.codex_enabled,
-            ProviderId::Claude => self.claude_enabled,
-            ProviderId::Cursor => self.cursor_enabled,
-            ProviderId::Gemini => self.gemini_enabled,
-            ProviderId::Copilot => self.copilot_enabled,
-            ProviderId::Minimax => self.minimax_enabled,
-            ProviderId::OpencodeGo => self.opencode_go_enabled,
-            ProviderId::OllamaCloud => self.ollama_cloud_enabled,
+            ProviderId::Codex => self.codex_enablement,
+            ProviderId::Claude => self.claude_enablement,
+            ProviderId::Cursor => self.cursor_enablement,
+            ProviderId::Gemini => self.gemini_enablement,
+            ProviderId::Copilot => self.copilot_enablement,
+            ProviderId::Minimax => self.minimax_enablement,
+            ProviderId::Antigravity => self.antigravity_enablement,
+            ProviderId::OpencodeGo => self.opencode_go_enablement,
+            ProviderId::OllamaCloud => self.ollama_cloud_enablement,
         }
     }
 
@@ -147,6 +153,7 @@ impl Config {
             ProviderId::Gemini => &self.selected_gemini_account_ids,
             ProviderId::Copilot => &self.selected_copilot_account_ids,
             ProviderId::Minimax => &self.selected_minimax_account_ids,
+            ProviderId::Antigravity => &self.selected_antigravity_account_ids,
             ProviderId::OpencodeGo => &self.selected_opencode_go_account_ids,
             ProviderId::OllamaCloud => &self.selected_ollama_cloud_account_ids,
         }
@@ -160,6 +167,7 @@ impl Config {
             ProviderId::Gemini => &mut self.selected_gemini_account_ids,
             ProviderId::Copilot => &mut self.selected_copilot_account_ids,
             ProviderId::Minimax => &mut self.selected_minimax_account_ids,
+            ProviderId::Antigravity => &mut self.selected_antigravity_account_ids,
             ProviderId::OpencodeGo => &mut self.selected_opencode_go_account_ids,
             ProviderId::OllamaCloud => &mut self.selected_ollama_cloud_account_ids,
         }
@@ -179,19 +187,83 @@ impl Config {
     }
 
     pub fn set_provider_enabled(&mut self, provider: ProviderId, enabled: bool) -> bool {
-        let target = match provider {
-            ProviderId::Codex => &mut self.codex_enabled,
-            ProviderId::Claude => &mut self.claude_enabled,
-            ProviderId::Cursor => &mut self.cursor_enabled,
-            ProviderId::Gemini => &mut self.gemini_enabled,
-            ProviderId::Copilot => &mut self.copilot_enabled,
-            ProviderId::Minimax => &mut self.minimax_enabled,
-            ProviderId::OpencodeGo => &mut self.opencode_go_enabled,
-            ProviderId::OllamaCloud => &mut self.ollama_cloud_enabled,
+        let enablement = provider_enablement_mut(self, provider);
+        let explicit = if enabled {
+            ProviderEnablement::Enabled
+        } else {
+            ProviderEnablement::Disabled
         };
-        let changed = *target != enabled;
-        *target = enabled;
+        let changed = *enablement != explicit;
+        *enablement = explicit;
         changed
+    }
+}
+
+pub fn migrate_provider_enablement(context: &cosmic_config::Config, config: &mut Config) -> bool {
+    let mut migrated = false;
+    for provider in ProviderId::ALL {
+        let enablement_key = provider_enablement_key(provider);
+        if !matches!(
+            context.get::<ProviderEnablement>(enablement_key),
+            Err(cosmic_config::Error::NotFound | cosmic_config::Error::NoConfigDirectory)
+        ) {
+            continue;
+        }
+        let Ok(enabled) = context.get::<bool>(provider_enabled_key(provider)) else {
+            continue;
+        };
+        let enablement = if enabled {
+            ProviderEnablement::Enabled
+        } else {
+            ProviderEnablement::Disabled
+        };
+        if context.set(enablement_key, enablement).is_ok() {
+            *provider_enablement_mut(config, provider) = enablement;
+            migrated = true;
+        }
+    }
+    migrated
+}
+
+fn provider_enabled_key(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::Codex => "codex_enabled",
+        ProviderId::Claude => "claude_enabled",
+        ProviderId::Cursor => "cursor_enabled",
+        ProviderId::Gemini => "gemini_enabled",
+        ProviderId::Copilot => "copilot_enabled",
+        ProviderId::Minimax => "minimax_enabled",
+        ProviderId::Antigravity => "antigravity_enabled",
+        ProviderId::OpencodeGo => "opencode_go_enabled",
+        ProviderId::OllamaCloud => "ollama_cloud_enabled",
+    }
+}
+
+fn provider_enablement_key(provider: ProviderId) -> &'static str {
+    match provider {
+        ProviderId::Codex => "codex_enablement",
+        ProviderId::Claude => "claude_enablement",
+        ProviderId::Cursor => "cursor_enablement",
+        ProviderId::Gemini => "gemini_enablement",
+        ProviderId::Copilot => "copilot_enablement",
+        ProviderId::Minimax => "minimax_enablement",
+        ProviderId::Antigravity => "antigravity_enablement",
+        ProviderId::OpencodeGo => "opencode_go_enablement",
+        ProviderId::OllamaCloud => "ollama_cloud_enablement",
+    }
+}
+
+fn provider_enablement_mut(config: &mut Config, provider: ProviderId) -> &mut ProviderEnablement {
+    match provider {
+        ProviderId::Codex => &mut config.codex_enablement,
+        ProviderId::Claude => &mut config.claude_enablement,
+        ProviderId::Cursor => &mut config.cursor_enablement,
+        ProviderId::Gemini => &mut config.gemini_enablement,
+        ProviderId::Copilot => &mut config.copilot_enablement,
+        ProviderId::Minimax => &mut config.minimax_enablement,
+        ProviderId::Antigravity => &mut config.antigravity_enablement,
+        ProviderId::OpencodeGo => &mut config.opencode_go_enablement,
+        ProviderId::OllamaCloud => &mut config.ollama_cloud_enablement,
     }
 }
 
@@ -203,6 +275,15 @@ pub enum PanelIconStyle {
     BarsOnly,
     LogoAndPercent,
     PercentOnly,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderEnablement {
+    #[default]
+    Auto,
+    Enabled,
+    Disabled,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -267,6 +348,20 @@ pub struct ManagedGeminiAccountConfig {
     pub last_tier_id: Option<String>,
     #[serde(default)]
     pub last_cloudaicompanion_project: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_authenticated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ManagedAntigravityAccountConfig {
+    pub id: String,
+    pub label: String,
+    pub account_root: PathBuf,
+    pub email: String,
+    pub sub: String,
+    #[serde(default)]
+    pub last_tier_id: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub last_authenticated_at: Option<DateTime<Utc>>,
@@ -349,16 +444,133 @@ where
 
 pub struct AppPaths {
     pub cache_dir: PathBuf,
-    pub snapshot_file: PathBuf,
+    pub state_dir: PathBuf,
     pub codex_accounts_dir: PathBuf,
     pub claude_accounts_dir: PathBuf,
     pub cursor_accounts_dir: PathBuf,
     pub gemini_accounts_dir: PathBuf,
     pub copilot_accounts_dir: PathBuf,
     pub minimax_accounts_dir: PathBuf,
+    pub antigravity_accounts_dir: PathBuf,
     pub opencode_go_accounts_dir: PathBuf,
     pub ollama_cloud_accounts_dir: PathBuf,
     pub log_dir: PathBuf,
+}
+
+#[cfg(not(test))]
+pub fn cosmic_config_context(
+    app_id: &str,
+    version: u64,
+) -> Result<cosmic_config::Config, cosmic_config::Error> {
+    cosmic_config::Config::new(app_id, version)
+}
+
+#[cfg(test)]
+pub fn cosmic_config_context(
+    app_id: &str,
+    version: u64,
+) -> Result<cosmic_config::Config, cosmic_config::Error> {
+    cosmic_config::Config::with_custom_path(app_id, version, test_config_root())
+}
+
+pub fn write_changed_config_entries(
+    context: &cosmic_config::Config,
+    old: &Config,
+    new: &Config,
+) -> Result<(), cosmic_config::Error> {
+    let tx = context.transaction();
+    let Config {
+        refresh_interval_seconds,
+        reset_time_format,
+        usage_amount_format,
+        panel_icon_style,
+        selected_provider,
+        provider_visibility_mode,
+        codex_enablement,
+        claude_enablement,
+        cursor_enablement,
+        gemini_enablement,
+        copilot_enablement,
+        minimax_enablement,
+        antigravity_enablement,
+        opencode_go_enablement,
+        ollama_cloud_enablement,
+        show_all_accounts,
+        selected_codex_account_ids,
+        codex_managed_accounts,
+        selected_claude_account_ids,
+        claude_managed_accounts,
+        selected_cursor_account_ids,
+        cursor_managed_accounts,
+        selected_gemini_account_ids,
+        gemini_managed_accounts,
+        selected_copilot_account_ids,
+        copilot_managed_accounts,
+        selected_minimax_account_ids,
+        minimax_managed_accounts,
+        selected_antigravity_account_ids,
+        antigravity_managed_accounts,
+        selected_opencode_go_account_ids,
+        opencode_go_managed_accounts,
+        selected_ollama_cloud_account_ids,
+        ollama_cloud_managed_accounts,
+        log_level,
+    } = new;
+
+    macro_rules! set_changed {
+        ($field:ident) => {
+            if old.$field != *$field {
+                ConfigSet::set(&tx, stringify!($field), $field)?;
+            }
+        };
+    }
+
+    set_changed!(refresh_interval_seconds);
+    set_changed!(reset_time_format);
+    set_changed!(usage_amount_format);
+    set_changed!(panel_icon_style);
+    set_changed!(selected_provider);
+    set_changed!(provider_visibility_mode);
+    set_changed!(codex_enablement);
+    set_changed!(claude_enablement);
+    set_changed!(cursor_enablement);
+    set_changed!(gemini_enablement);
+    set_changed!(copilot_enablement);
+    set_changed!(minimax_enablement);
+    set_changed!(antigravity_enablement);
+    set_changed!(opencode_go_enablement);
+    set_changed!(ollama_cloud_enablement);
+    set_changed!(show_all_accounts);
+    set_changed!(selected_codex_account_ids);
+    set_changed!(codex_managed_accounts);
+    set_changed!(selected_claude_account_ids);
+    set_changed!(claude_managed_accounts);
+    set_changed!(selected_cursor_account_ids);
+    set_changed!(cursor_managed_accounts);
+    set_changed!(selected_gemini_account_ids);
+    set_changed!(gemini_managed_accounts);
+    set_changed!(selected_copilot_account_ids);
+    set_changed!(copilot_managed_accounts);
+    set_changed!(selected_minimax_account_ids);
+    set_changed!(minimax_managed_accounts);
+    set_changed!(selected_antigravity_account_ids);
+    set_changed!(antigravity_managed_accounts);
+    set_changed!(selected_opencode_go_account_ids);
+    set_changed!(opencode_go_managed_accounts);
+    set_changed!(selected_ollama_cloud_account_ids);
+    set_changed!(ollama_cloud_managed_accounts);
+    set_changed!(log_level);
+
+    tx.commit()
+}
+
+#[cfg(test)]
+fn test_config_root() -> PathBuf {
+    thread_local! {
+        static ROOT: tempfile::TempDir =
+            tempfile::tempdir().expect("create per-test cosmic config root");
+    }
+    ROOT.with(|root| root.path().to_path_buf())
 }
 
 fn flatpak_var_app_subdir(segments: &[&str]) -> Option<PathBuf> {
@@ -467,6 +679,11 @@ pub fn managed_minimax_account_dir(account_id: &str) -> PathBuf {
 }
 
 #[must_use]
+pub fn managed_antigravity_account_dir(account_id: &str) -> PathBuf {
+    paths().antigravity_accounts_dir.join(account_id)
+}
+
+#[must_use]
 pub fn managed_opencode_go_account_dir(account_id: &str) -> PathBuf {
     paths().opencode_go_accounts_dir.join(account_id)
 }
@@ -488,20 +705,22 @@ pub fn paths() -> AppPaths {
     let gemini_accounts_dir = state_dir.join("gemini-accounts");
     let copilot_accounts_dir = state_dir.join("copilot-accounts");
     let minimax_accounts_dir = state_dir.join("minimax-accounts");
+    let antigravity_accounts_dir = state_dir.join("antigravity-accounts");
     let opencode_go_accounts_dir = state_dir.join("opencode-go-accounts");
     let ollama_cloud_accounts_dir = state_dir.join("ollama-cloud-accounts");
     let log_dir = state_dir.join("logs");
     AppPaths {
-        snapshot_file: cache_dir.join("snapshots.json"),
         cache_dir,
+        state_dir,
         codex_accounts_dir,
         claude_accounts_dir,
         cursor_accounts_dir,
         gemini_accounts_dir,
         copilot_accounts_dir,
         minimax_accounts_dir,
-        ollama_cloud_accounts_dir,
+        antigravity_accounts_dir,
         opencode_go_accounts_dir,
+        ollama_cloud_accounts_dir,
         log_dir,
     }
 }
@@ -509,24 +728,118 @@ pub fn paths() -> AppPaths {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmic::cosmic_config::{ConfigGet, ConfigSet};
 
     #[test]
-    fn default_config_enables_all_providers() {
+    fn provider_enablement_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&ProviderEnablement::Auto).unwrap(),
+            "\"auto\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderEnablement::Enabled).unwrap(),
+            "\"enabled\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderEnablement>("\"disabled\"").unwrap(),
+            ProviderEnablement::Disabled
+        );
+    }
+
+    #[test]
+    fn provider_enablement_migrates_legacy_bools() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        ctx.set("codex_enabled", true).unwrap();
+        ctx.set("claude_enabled", false).unwrap();
+        let mut config = Config::default();
+
+        assert!(migrate_provider_enablement(&ctx, &mut config));
+        assert_eq!(config.codex_enablement, ProviderEnablement::Enabled);
+        assert_eq!(config.claude_enablement, ProviderEnablement::Disabled);
+        assert_eq!(
+            ctx.get::<ProviderEnablement>("codex_enablement").unwrap(),
+            ProviderEnablement::Enabled
+        );
+        assert!(ctx.get::<bool>("codex_enabled").unwrap());
+    }
+
+    #[test]
+    fn provider_enablement_migration_leaves_fresh_config_on_auto() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let mut config = Config::default();
+
+        assert!(!migrate_provider_enablement(&ctx, &mut config));
+        assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
+        assert!(ctx.get::<ProviderEnablement>("codex_enablement").is_err());
+    }
+
+    #[test]
+    fn provider_enablement_migration_is_idempotent() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        ctx.set("cursor_enabled", false).unwrap();
+        let mut config = Config::default();
+
+        assert!(migrate_provider_enablement(&ctx, &mut config));
+        config.cursor_enablement = ProviderEnablement::Auto;
+
+        assert!(!migrate_provider_enablement(&ctx, &mut config));
+        assert_eq!(config.cursor_enablement, ProviderEnablement::Auto);
+    }
+
+    #[test]
+    fn write_changed_config_entries_persists_only_changed_fields() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
+        let old = Config::default();
+        old.write_entry(&ctx).unwrap();
+
+        let mut new = old.clone();
+        new.panel_icon_style = match old.panel_icon_style {
+            PanelIconStyle::PercentOnly => PanelIconStyle::LogoAndBars,
+            _ => PanelIconStyle::PercentOnly,
+        };
+        new.refresh_interval_seconds = old.refresh_interval_seconds + 60;
+
+        write_changed_config_entries(&ctx, &old, &new).unwrap();
+
+        let reloaded = Config::get_entry(&ctx).expect("reload config");
+        assert_eq!(reloaded, new);
+    }
+
+    #[test]
+    fn write_changed_config_entries_noop_when_equal() {
+        let ctx = cosmic_config_context(APP_ID, Config::VERSION).unwrap();
         let config = Config::default();
-        assert!(config.provider_enabled(ProviderId::Codex));
-        assert!(config.provider_enabled(ProviderId::Claude));
-        assert!(config.provider_enabled(ProviderId::Cursor));
-        assert!(config.provider_enabled(ProviderId::Gemini));
-        assert!(config.provider_enabled(ProviderId::Copilot));
-        assert!(config.provider_enabled(ProviderId::Minimax));
+        config.write_entry(&ctx).unwrap();
+
+        write_changed_config_entries(&ctx, &config, &config).unwrap();
+
+        let reloaded = Config::get_entry(&ctx).expect("reload config");
+        assert_eq!(reloaded, config);
+    }
+
+    #[test]
+    fn set_provider_enabled_writes_explicit_enablement() {
+        let mut config = Config::default();
+
+        assert!(config.set_provider_enabled(ProviderId::Gemini, false));
+        assert_eq!(config.gemini_enablement, ProviderEnablement::Disabled);
+        assert!(config.set_provider_enabled(ProviderId::Gemini, true));
+        assert_eq!(config.gemini_enablement, ProviderEnablement::Enabled);
+    }
+
+    #[test]
+    fn default_config_uses_auto_enablement() {
+        let config = Config::default();
         assert_eq!(
             config.provider_visibility_mode,
-            ProviderVisibilityMode::AutoInitPending
+            ProviderVisibilityMode::UserManaged
         );
         assert_eq!(config.refresh_interval_seconds, 300);
         assert_eq!(config.reset_time_format, ResetTimeFormat::Relative);
         assert_eq!(config.usage_amount_format, UsageAmountFormat::Used);
         assert_eq!(config.panel_icon_style, PanelIconStyle::LogoAndBars);
+        assert_eq!(config.selected_provider, ProviderId::Codex);
+        assert_eq!(config.codex_enablement, ProviderEnablement::Auto);
     }
 
     #[test]
@@ -539,6 +852,7 @@ mod tests {
         assert!(config.gemini_managed_accounts.is_empty());
         assert!(config.copilot_managed_accounts.is_empty());
         assert!(config.minimax_managed_accounts.is_empty());
+        assert!(config.antigravity_managed_accounts.is_empty());
         assert!(config.opencode_go_managed_accounts.is_empty());
         assert!(config.ollama_cloud_managed_accounts.is_empty());
     }
@@ -588,6 +902,46 @@ mod tests {
             config.provider_visibility_mode,
             ProviderVisibilityMode::UserManaged
         );
+    }
+
+    #[test]
+    fn missing_selected_provider_defaults_to_codex() {
+        let config: Config = serde_json::from_str(
+            r#"{
+                "refresh_interval_seconds": 60,
+                "reset_time_format": "relative",
+                "usage_amount_format": "used",
+                "panel_icon_style": "logo_and_bars",
+                "provider_visibility_mode": "user_managed",
+                "codex_enabled": true,
+                "claude_enabled": true,
+                "cursor_enabled": true,
+                "selected_codex_account_ids": [],
+                "codex_managed_accounts": [],
+                "selected_claude_account_ids": [],
+                "claude_managed_accounts": [],
+                "selected_cursor_account_ids": [],
+                "cursor_managed_accounts": [],
+                "log_level": "info"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.selected_provider, ProviderId::Codex);
+    }
+
+    #[test]
+    fn selected_provider_serializes_as_snake_case() {
+        let config = Config {
+            selected_provider: ProviderId::Claude,
+            ..Config::default()
+        };
+
+        let value = serde_json::to_value(&config).unwrap();
+        assert_eq!(value.get("selected_provider").unwrap(), "claude");
+
+        let parsed: Config = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.selected_provider, ProviderId::Claude);
     }
 
     #[test]

@@ -1,0 +1,67 @@
+{
+  "body_json": {
+    "allowedTiers": [
+      {
+        "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+        "id": "free-tier",
+        "isDefault": true,
+        "name": "Antigravity",
+        "privacyNotice": {
+          "noticeText": "redacted privacy notice",
+          "showNotice": true
+        }
+      },
+      {
+        "description": "Unlimited coding assistant with the most powerful Gemini models",
+        "id": "standard-tier",
+        "name": "Antigravity",
+        "privacyNotice": {},
+        "userDefinedCloudaicompanionProject": true,
+        "usesGcpTos": true
+      }
+    ],
+    "cloudaicompanionProject": "redacted-project-id",
+    "currentTier": {
+      "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+      "id": "free-tier",
+      "name": "Antigravity",
+      "privacyNotice": {
+        "noticeText": "redacted privacy notice",
+        "showNotice": true
+      },
+      "upgradeSubscriptionText": "Upgrade to get 1,500 model requests per day with Gemini CLI and Gemini Code Assist's agent mode with Google AI Pro.",
+      "upgradeSubscriptionType": "GOOGLE_ONE",
+      "upgradeSubscriptionUri": "https://accounts.google.com/AccountChooser?Email=user%40example.com&continue=https%3A%2F%2Fone.google.com%2Fai"
+    },
+    "gcpManaged": false,
+    "paidTier": {
+      "description": "Google AI Pro",
+      "id": "g1-pro-tier",
+      "name": "Google AI Pro",
+      "upgradeSubscriptionText": "You can upgrade to a Google AI Ultra plan to receive higher rate limits.",
+      "upgradeSubscriptionUri": "https://antigravity.google/g1-upgrade"
+    },
+    "upgradeSubscriptionUri": "https://codeassist.google.com/upgrade"
+  },
+  "body_text": "{\"allowedTiers\": [{\"description\": \"Gemini-powered code suggestions and chat in multiple IDEs\", \"id\": \"free-tier\", \"isDefault\": true, \"name\": \"Antigravity\", \"privacyNotice\": {\"noticeText\": \"redacted privacy notice\", \"showNotice\": true}}, {\"description\": \"Unlimited coding assistant with the most powerful Gemini models\", \"id\": \"standard-tier\", \"name\": \"Antigravity\", \"privacyNotice\": {}, \"userDefinedCloudaicompanionProject\": true, \"usesGcpTos\": true}], \"cloudaicompanionProject\": \"redacted-project-id\", \"currentTier\": {\"description\": \"Gemini-powered code suggestions and chat in multiple IDEs\", \"id\": \"free-tier\", \"name\": \"Antigravity\", \"privacyNotice\": {\"noticeText\": \"redacted privacy notice\", \"showNotice\": true}, \"upgradeSubscriptionText\": \"Upgrade to get 1,500 model requests per day with Gemini CLI and Gemini Code Assist's agent mode with Google AI Pro.\", \"upgradeSubscriptionType\": \"GOOGLE_ONE\", \"upgradeSubscriptionUri\": \"https://accounts.google.com/AccountChooser?Email=user%40example.com&continue=https%3A%2F%2Fone.google.com%2Fai\"}, \"gcpManaged\": false, \"paidTier\": {\"description\": \"Google AI Pro\", \"id\": \"g1-pro-tier\", \"name\": \"Google AI Pro\", \"upgradeSubscriptionText\": \"You can upgrade to a Google AI Ultra plan to receive higher rate limits.\", \"upgradeSubscriptionUri\": \"https://antigravity.google/g1-upgrade\"}, \"upgradeSubscriptionUri\": \"https://codeassist.google.com/upgrade\"}",
+  "endpoint": "load_code_assist",
+  "method": "POST",
+  "requested_at": "2026-07-14T10:22:09.367589+00:00",
+  "response_headers": {
+    "Accept-Ranges": "none",
+    "Alt-Svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+    "Connection": "close",
+    "Content-Type": "application/json; charset=UTF-8",
+    "Date": "Tue, 14 Jul 2026 10:22:09 GMT",
+    "Server": "ESF",
+    "Server-Timing": "gfet5t7;dur=868, gfet4t7; dur=1140",
+    "Transfer-Encoding": "chunked",
+    "Vary": "Origin,Accept-Encoding",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-XSS-Protection": "0",
+    "x-cloudaicompanion-trace-id": "fead2fe300b4be8b"
+  },
+  "status_code": 200,
+  "url": "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+}

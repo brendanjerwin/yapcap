@@ -11,8 +11,6 @@ pub const OFFLINE_MESSAGE: &str = "No internet connection. Information is not up
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error(transparent)]
-    Cache(#[from] CacheError),
-    #[error(transparent)]
     Logging(#[from] LoggingError),
     #[error(transparent)]
     Provider(#[from] ProviderError),
@@ -54,6 +52,12 @@ impl From<MinimaxError> for AppError {
     }
 }
 
+impl From<AntigravityError> for AppError {
+    fn from(value: AntigravityError) -> Self {
+        Self::Provider(ProviderError::Antigravity(value))
+    }
+}
+
 impl From<OpencodeGoError> for AppError {
     fn from(value: OpencodeGoError) -> Self {
         Self::Provider(ProviderError::OpencodeGo(value))
@@ -80,7 +84,7 @@ impl AppError {
     pub fn is_network_unavailable(&self) -> bool {
         match self {
             Self::Provider(error) => error.is_network_unavailable(),
-            Self::Cache(_) | Self::Logging(_) => false,
+            Self::Logging(_) => false,
         }
     }
 
@@ -88,7 +92,7 @@ impl AppError {
     pub fn requires_user_action(&self) -> bool {
         match self {
             Self::Provider(error) => error.requires_user_action(),
-            Self::Cache(_) | Self::Logging(_) => false,
+            Self::Logging(_) => false,
         }
     }
 
@@ -101,52 +105,18 @@ impl AppError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        match self {
-            Self::Provider(ProviderError::Claude(e)) => e.is_rate_limited(),
-            Self::Provider(ProviderError::Gemini(e)) => e.is_rate_limited(),
-            Self::Provider(ProviderError::Copilot(e)) => e.is_rate_limited(),
-            Self::Provider(ProviderError::Minimax(e)) => e.is_rate_limited(),
-            _ => false,
-        }
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::Provider(ProviderError::Claude(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Gemini(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Copilot(e)) => e.rate_limit_retry_after_secs(),
             Self::Provider(ProviderError::Minimax(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::Antigravity(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::OpencodeGo(e)) => e.rate_limit_retry_after_secs(),
+            Self::Provider(ProviderError::OllamaCloud(e)) => e.rate_limit_retry_after_secs(),
             _ => None,
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum CacheError {
-    #[error("failed to read cache {path}")]
-    ReadCache {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to parse cached snapshots")]
-    ParseCache(#[source] serde_json::Error),
-    #[error("failed to create {path}")]
-    CreateCacheDir {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to encode cache")]
-    EncodeCache(#[source] serde_json::Error),
-    #[error("failed to write cache {path}")]
-    WriteCache {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 }
 
 #[derive(Debug, Error)]
@@ -176,6 +146,8 @@ pub enum ProviderError {
     #[error(transparent)]
     Minimax(#[from] MinimaxError),
     #[error(transparent)]
+    Antigravity(#[from] AntigravityError),
+    #[error(transparent)]
     OpencodeGo(#[from] OpencodeGoError),
     #[error(transparent)]
     OllamaCloud(#[from] OllamaCloudError),
@@ -191,8 +163,9 @@ impl ProviderError {
             Self::Gemini(error) => error.is_network_unavailable(),
             Self::Copilot(error) => error.is_network_unavailable(),
             Self::Minimax(error) => error.is_network_unavailable(),
-            Self::OllamaCloud(error) => error.is_network_unavailable(),
+            Self::Antigravity(error) => error.is_network_unavailable(),
             Self::OpencodeGo(error) => error.is_network_unavailable(),
+            Self::OllamaCloud(error) => error.is_network_unavailable(),
         }
     }
 
@@ -205,8 +178,9 @@ impl ProviderError {
             Self::Gemini(error) => error.requires_user_action(),
             Self::Copilot(error) => error.requires_user_action(),
             Self::Minimax(error) => error.requires_user_action(),
-            Self::OllamaCloud(error) => error.requires_user_action(),
+            Self::Antigravity(error) => error.requires_user_action(),
             Self::OpencodeGo(error) => error.requires_user_action(),
+            Self::OllamaCloud(error) => error.requires_user_action(),
         }
     }
 
@@ -218,9 +192,10 @@ impl ProviderError {
             Self::Cursor(_) => false,
             Self::Gemini(error) => error.is_transient(),
             Self::Copilot(error) => error.is_transient(),
-            Self::OllamaCloud(error) => error.is_transient(),
             Self::Minimax(error) => error.is_transient(),
+            Self::Antigravity(error) => error.is_transient(),
             Self::OpencodeGo(error) => error.is_transient(),
+            Self::OllamaCloud(error) => error.is_transient(),
         }
     }
 }
@@ -368,11 +343,6 @@ impl ClaudeError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -517,11 +487,6 @@ impl GeminiError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -588,11 +553,6 @@ impl CopilotError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -649,11 +609,6 @@ impl MinimaxError {
     }
 
     #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
             Self::RateLimited { retry_after_secs } => *retry_after_secs,
@@ -671,6 +626,82 @@ impl MinimaxError {
         }
     }
 }
+
+#[derive(Debug, Error)]
+pub enum AntigravityError {
+    #[error("antigravity token refresh request failed")]
+    TokenRefreshRequest(#[source] reqwest::Error),
+    #[error("antigravity token refresh returned HTTP {status}")]
+    TokenRefreshHttp { status: u16 },
+    #[error("failed to decode antigravity token refresh response")]
+    TokenRefreshDecode(#[source] reqwest::Error),
+    #[error("failed to parse antigravity token refresh response: {0}")]
+    TokenRefreshParse(String),
+    #[error("Rate limited by Antigravity{} — will retry automatically",
+        .retry_after_secs.map_or(String::new(), |s| format!(" (retry in {})", format_retry_secs(s))))]
+    RateLimited { retry_after_secs: Option<u64> },
+    #[error("Antigravity login required")]
+    Unauthorized,
+    #[error("antigravity code-assist request failed")]
+    LoadCodeAssistRequest(#[source] reqwest::Error),
+    #[error("antigravity loadCodeAssist returned HTTP {status}")]
+    LoadCodeAssistHttp { status: u16 },
+    #[error("failed to parse antigravity loadCodeAssist response: {0}")]
+    LoadCodeAssistParse(String),
+    #[error("antigravity retrieveUserQuotaSummary request failed")]
+    QuotaRequest(#[source] reqwest::Error),
+    #[error("antigravity retrieveUserQuotaSummary returned HTTP {status}")]
+    QuotaHttp { status: u16 },
+    #[error("failed to parse antigravity retrieveUserQuotaSummary response: {0}")]
+    QuotaParse(String),
+    #[error("Antigravity response had no usage windows")]
+    NoUsageData,
+    #[error("failed to read Antigravity account storage: {0}")]
+    AccountStorage(String),
+}
+
+impl AntigravityError {
+    #[must_use]
+    pub fn is_network_unavailable(&self) -> bool {
+        match self {
+            Self::TokenRefreshRequest(source)
+            | Self::LoadCodeAssistRequest(source)
+            | Self::QuotaRequest(source) => request_could_not_reach_network(source),
+            _ => false,
+        }
+    }
+
+    #[must_use]
+    pub fn requires_user_action(&self) -> bool {
+        if let Self::TokenRefreshHttp { status } = self {
+            return (400..500).contains(status) && *status != 429;
+        }
+        matches!(self, Self::Unauthorized)
+    }
+
+    #[must_use]
+    pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
+        match self {
+            Self::RateLimited { retry_after_secs } => *retry_after_secs,
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::RateLimited { .. } => true,
+            Self::TokenRefreshRequest(source)
+            | Self::LoadCodeAssistRequest(source)
+            | Self::QuotaRequest(source) => request_could_not_reach_network(source),
+            Self::TokenRefreshHttp { status }
+            | Self::LoadCodeAssistHttp { status }
+            | Self::QuotaHttp { status } => *status == 429 || *status >= 500,
+            _ => false,
+        }
+    }
+}
+
 
 #[derive(Debug, Error)]
 pub enum OpencodeGoError {
@@ -694,7 +725,8 @@ impl OpencodeGoError {
     #[must_use]
     pub fn is_network_unavailable(&self) -> bool {
         match self {
-            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            Self::DashboardRequest(source) | Self::DashboardEndpoint(source)
+            | Self::ReadDashboard(source) => request_could_not_reach_network(source),
             _ => false,
         }
     }
@@ -704,13 +736,6 @@ impl OpencodeGoError {
         matches!(self, Self::LoginRequired)
     }
 
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[allow(dead_code)]
     #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
@@ -723,7 +748,8 @@ impl OpencodeGoError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::RateLimited { .. } => true,
-            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            Self::DashboardRequest(source) | Self::DashboardEndpoint(source)
+            | Self::ReadDashboard(source) => request_could_not_reach_network(source),
             Self::DashboardHttp { status } => *status >= 500,
             _ => false,
         }
@@ -752,7 +778,8 @@ impl OllamaCloudError {
     #[must_use]
     pub fn is_network_unavailable(&self) -> bool {
         match self {
-            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            Self::DashboardRequest(source) | Self::DashboardEndpoint(source)
+            | Self::ReadDashboard(source) => request_could_not_reach_network(source),
             _ => false,
         }
     }
@@ -762,13 +789,6 @@ impl OllamaCloudError {
         matches!(self, Self::LoginRequired)
     }
 
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn is_rate_limited(&self) -> bool {
-        matches!(self, Self::RateLimited { .. })
-    }
-
-    #[allow(dead_code)]
     #[must_use]
     pub fn rate_limit_retry_after_secs(&self) -> Option<u64> {
         match self {
@@ -781,7 +801,8 @@ impl OllamaCloudError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::RateLimited { .. } => true,
-            Self::DashboardRequest(source) => request_could_not_reach_network(source),
+            Self::DashboardRequest(source) | Self::DashboardEndpoint(source)
+            | Self::ReadDashboard(source) => request_could_not_reach_network(source),
             Self::DashboardHttp { status } => *status >= 500,
             _ => false,
         }
@@ -791,15 +812,6 @@ impl OllamaCloudError {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cache_error_does_not_require_user_action() {
-        let err = AppError::Cache(CacheError::EncodeCache(
-            serde_json::from_str::<i32>("!").unwrap_err(),
-        ));
-        assert!(!err.requires_user_action());
-        assert!(!err.is_transient());
-    }
 
     #[test]
     fn claude_rate_limit_is_transient() {
@@ -902,7 +914,6 @@ mod tests {
         let err = AppError::Provider(ProviderError::Gemini(GeminiError::RateLimited {
             retry_after_secs: Some(42),
         }));
-        assert!(err.is_rate_limited());
         assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
         assert!(err.is_transient());
         assert!(!err.requires_user_action());
@@ -920,7 +931,6 @@ mod tests {
         let err = AppError::Provider(ProviderError::Copilot(CopilotError::RateLimited {
             retry_after_secs: Some(42),
         }));
-        assert!(err.is_rate_limited());
         assert_eq!(err.rate_limit_retry_after_secs(), Some(42));
         assert!(err.is_transient());
         assert!(!err.requires_user_action());

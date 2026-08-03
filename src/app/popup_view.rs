@@ -6,29 +6,33 @@ mod measure;
 mod settings;
 
 use self::badges::{
-    account_label_text, apply_alpha, badge_destructive, badge_destructive_soft, badge_neutral,
-    badge_neutral_soft, badge_success, badge_success_soft, badge_warning, badge_warning_soft,
-    badge_with_tooltip, plan_badge,
+    account_label_text, apply_alpha, badge_accent, badge_destructive, badge_destructive_soft,
+    badge_neutral, badge_neutral_soft, badge_success, badge_success_soft, badge_warning,
+    badge_warning_soft, badge_with_tooltip, disabled_account_label_text, plan_badge,
 };
-use self::detail::{active_snapshot, provider_body_height_multi, selected_provider_view};
+use self::detail::{
+    active_snapshot, empty_state_view, provider_body_height_multi, selected_provider_view,
+};
 use self::measure::Measure;
 use self::settings::{general_settings_view, provider_settings_view, settings_body_height};
 use super::provider_assets::{provider_icon_handle, provider_icon_variant};
 use crate::app::{Message, PopupRoute, SettingsRoute};
 use crate::config::{Config, PanelIconStyle, ResetTimeFormat, UsageAmountFormat};
+use crate::detection::DetectionSnapshot;
 use crate::fl;
 use crate::model::{
-    AppState, AuthState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState, UsageWindow,
+    AppState, ProviderAccountRuntimeState, ProviderId, ProviderRuntimeState, UsageWindow,
 };
+use crate::providers::antigravity::{AntigravityLoginState, AntigravityLoginStatus};
 use crate::providers::claude::{ClaudeLoginState, ClaudeLoginStatus};
 use crate::providers::codex::{CodexLoginState, CodexLoginStatus};
 use crate::providers::copilot::{CopilotLoginState, CopilotLoginStatus};
-use crate::providers::cursor::CursorScanState;
+use crate::providers::cursor::{CursorScanState};
 use crate::providers::gemini::{GeminiLoginState, GeminiLoginStatus};
 use crate::providers::interface::ProviderAccountActionSupport;
 use crate::providers::minimax::MinimaxLoginState;
-use crate::providers::opencode_go::OpencodeGoLoginState;
 use crate::providers::ollama_cloud::OllamaCloudLoginState;
+use crate::providers::opencode_go::OpencodeGoLoginState;
 use crate::providers::registry;
 use crate::updates::UpdateStatus;
 use crate::usage_display;
@@ -42,32 +46,45 @@ const POPUP_WIDTH: f32 = POPUP_COLUMN_WIDTH;
 const POPUP_MAX_HEIGHT: f32 = 1080.0;
 const POPUP_PADDING: f32 = 32.0;
 const POPUP_CHROME_SPACING: f32 = 42.0;
+const POPUP_EMPTY_CHROME_SPACING: f32 = 28.0;
 const POPUP_HEADER_HEIGHT: f32 = 36.0;
 const POPUP_TAB_HEIGHT: f32 = 68.0;
+const PROVIDER_TABS_PER_ROW: usize = 4;
+const PROVIDER_TAB_ROW_SPACING: f32 = 8.0;
 const POPUP_FOOTER_HEIGHT: f32 = 28.0;
 const POPUP_BODY_PANEL_PADDING: f32 = 24.0;
 const POPUP_BODY_BOTTOM_SLACK: f32 = 8.0;
+const EMPTY_STATE_BODY_HEIGHT: f32 = 240.0;
 const PROVIDER_CARD_SPACING: f32 = 8.0;
 const PROVIDER_SUMMARY_HEIGHT: f32 = 58.0;
 const PROVIDER_ACCOUNT_HEADER_HEIGHT: f32 = 96.0;
 const PROVIDER_SECTION_HEIGHT: f32 = 84.0;
 const PROVIDER_SECTION_WITH_ACTION_HEIGHT: f32 = 120.0;
+const PROVIDER_GROUP_HEADER_HEIGHT: f32 = 28.0;
+const PROVIDER_GROUP_PADDING: f32 = 24.0;
+const PROVIDER_GROUP_SPACING: f32 = 12.0;
+const PROVIDER_CARD_PADDING: f32 = 16.0;
 const SETTINGS_SECTION_HEIGHT: f32 = 104.0;
 const SETTINGS_PROVIDER_ROW_HEIGHT: f32 = 44.0;
 const PROVIDER_TAB_ICON_SIZE: u16 = 16;
 const PROVIDER_TAB_ICON_LENGTH: f32 = 16.0;
 const PROVIDER_TAB_LABEL_SIZE: u16 = 11;
-const PROVIDER_TAB_MIN_WIDTH: f32 = 64.0;
+const PROVIDER_PICKER_TILE_HEIGHT: f32 = 104.0;
+const PROVIDER_PICKER_COMPACT_TILE_HEIGHT: f32 = 48.0;
+const PROVIDER_PICKER_HEIGHT: f32 = 680.0;
 const UPDATE_NOTIFICATION_DOT_COLOR: Color = Color::from_rgb(0.93, 0.11, 0.15);
 const ACCENT_SOFT_FILL_ALPHA: f32 = 0.14;
+
 #[derive(Clone, Copy)]
 pub struct ProviderLoginStates<'a> {
+    pub provider_picker_open: bool,
     pub codex: Option<&'a CodexLoginState>,
     pub claude: Option<&'a ClaudeLoginState>,
     pub cursor_scan: &'a CursorScanState,
     pub gemini: Option<&'a GeminiLoginState>,
     pub copilot: Option<&'a CopilotLoginState>,
     pub minimax: Option<&'a MinimaxLoginState>,
+    pub antigravity: Option<&'a AntigravityLoginState>,
     pub opencode_go: Option<&'a OpencodeGoLoginState>,
     pub ollama_cloud: Option<&'a OllamaCloudLoginState>,
 }
@@ -75,44 +92,50 @@ pub struct ProviderLoginStates<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PopupBodyMeasureTarget {
     Provider(ProviderId),
+    EmptyState,
     Settings(SettingsRoute),
 }
 
 pub fn popup_content<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     selected_provider: ProviderId,
     route: &'a PopupRoute,
     update_status: &'a UpdateStatus,
 ) -> Element<'a, Message> {
     let selected = selected_state(state, selected_provider);
+    let empty_state = popup_empty_state_active(state);
 
-    let header = popup_header(route);
+    let picker_open =
+        logins.provider_picker_open && matches!(route, PopupRoute::ProviderDetail) && !empty_state;
+    let header = popup_header(route, empty_state);
 
-    let nav_row: Element<'_, Message> = match route {
-        PopupRoute::ProviderDetail => state
-            .providers
-            .iter()
-            .filter(|provider| provider.enabled)
-            .fold(row![].spacing(8), |row, provider| {
-                row.push(provider_tab(
-                    state,
-                    provider,
-                    provider.provider == selected_provider,
-                ))
-            })
-            .into(),
+    let nav_row: Option<Element<'_, Message>> = match route {
+        PopupRoute::ProviderDetail if empty_state => None,
+        PopupRoute::ProviderDetail if !picker_open => {
+            (enabled_provider_count(state) > 1).then(|| provider_tab_rows(state, selected_provider))
+        }
+        PopupRoute::ProviderDetail => None,
         PopupRoute::Settings(settings_route) => {
-            container(settings_category_row(settings_route, update_status))
-                .height(Length::Fixed(POPUP_TAB_HEIGHT))
-                .align_y(Alignment::Center)
-                .width(Length::Fill)
-                .into()
+            Some(settings_category_row(settings_route, update_status))
         }
     };
 
-    let body = popup_body_view(state, config, logins, selected, route, update_status);
+    let body = if picker_open {
+        provider_picker_view(state, detection)
+    } else {
+        popup_body_view(
+            state,
+            config,
+            detection,
+            logins,
+            selected,
+            route,
+            update_status,
+        )
+    };
 
     let footer_action: Element<'_, Message> = match route {
         PopupRoute::ProviderDetail => settings_footer_action(update_status),
@@ -133,18 +156,19 @@ pub fn popup_content<'a>(
         .height(Length::Fill)
         .into();
 
-    let body_stack = popup_body_stack(state, config, logins, update_status, body_panel);
+    let body_stack = popup_body_stack(state, config, detection, logins, update_status, body_panel);
 
-    let content = column![
-        narrow_chrome(header),
-        narrow_chrome(nav_row),
-        body_stack,
-        narrow_chrome(footer),
-    ]
-    .spacing(14)
-    .padding(16)
-    .width(Length::Fill)
-    .height(Length::Fill);
+    let mut content = column![narrow_chrome(header)];
+    if let Some(nav_row) = nav_row {
+        content = content.push(narrow_chrome(nav_row));
+    }
+    let content = content
+        .push(body_stack)
+        .push(narrow_chrome(footer))
+        .spacing(14)
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill);
 
     Element::from(content)
 }
@@ -152,18 +176,20 @@ pub fn popup_content<'a>(
 fn popup_body_view<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     selected: Option<&'a ProviderRuntimeState>,
     route: &'a PopupRoute,
     update_status: &'a UpdateStatus,
 ) -> Element<'a, Message> {
     match route {
-        PopupRoute::ProviderDetail => selected_provider_view(selected, state, config),
+        PopupRoute::ProviderDetail if popup_empty_state_active(state) => empty_state_view(),
+        PopupRoute::ProviderDetail => selected_provider_view(selected, state, config, detection),
         PopupRoute::Settings(SettingsRoute::General) => {
             general_settings_view(config, update_status)
         }
         PopupRoute::Settings(SettingsRoute::Provider(id)) => {
-            provider_settings_view(state, config, logins, *id)
+            provider_settings_view(state, config, detection, logins, *id)
         }
     }
 }
@@ -171,6 +197,7 @@ fn popup_body_view<'a>(
 fn popup_body_stack<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     update_status: &'a UpdateStatus,
     body_panel: Element<'a, Message>,
@@ -180,17 +207,25 @@ fn popup_body_stack<'a>(
         .width(Length::Fill)
         .height(Length::Fill);
 
+    if popup_empty_state_active(state) {
+        stack = stack.push(Measure::new(
+            empty_state_view(),
+            body_measure_width(1.0),
+            |size| Message::PopupBodyMeasured(PopupBodyMeasureTarget::EmptyState, size),
+        ));
+    }
+
     for provider in state.providers.iter().filter(|provider| provider.enabled) {
         let provider_id = provider.provider;
-        let width = selected_account_count(state, provider_id) * POPUP_WIDTH;
-        let body = selected_provider_view(Some(provider), state, config);
+        let width = body_measure_width(selected_account_count(state, provider_id));
+        let body = selected_provider_view(Some(provider), state, config, detection);
         stack = stack.push(Measure::new(body, width, move |size| {
             Message::PopupBodyMeasured(PopupBodyMeasureTarget::Provider(provider_id), size)
         }));
     }
 
     let general = general_settings_view(config, update_status);
-    stack = stack.push(Measure::new(general, POPUP_WIDTH, |size| {
+    stack = stack.push(Measure::new(general, body_measure_width(1.0), |size| {
         Message::PopupBodyMeasured(
             PopupBodyMeasureTarget::Settings(SettingsRoute::General),
             size,
@@ -198,8 +233,8 @@ fn popup_body_stack<'a>(
     }));
 
     for provider in ProviderId::ALL {
-        let body = provider_settings_view(state, config, logins, provider);
-        stack = stack.push(Measure::new(body, POPUP_WIDTH, move |size| {
+        let body = provider_settings_view(state, config, detection, logins, provider);
+        stack = stack.push(Measure::new(body, body_measure_width(1.0), move |size| {
             Message::PopupBodyMeasured(
                 PopupBodyMeasureTarget::Settings(SettingsRoute::Provider(provider)),
                 size,
@@ -219,6 +254,9 @@ pub fn popup_max_width(state: &AppState) -> f32 {
 }
 
 pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Size {
+    if popup_empty_state_active(state) {
+        return popup_empty_state_size(EMPTY_STATE_BODY_HEIGHT);
+    }
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
     let provider_height = state
@@ -227,16 +265,14 @@ pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Si
         .filter(|provider| provider.enabled)
         .map(|provider| provider_body_height_multi(state, Some(provider)))
         .fold(PROVIDER_SUMMARY_HEIGHT, f32::max);
-    let height = POPUP_PADDING
-        + POPUP_CHROME_SPACING
-        + POPUP_HEADER_HEIGHT
-        + POPUP_TAB_HEIGHT
-        + POPUP_FOOTER_HEIGHT
-        + POPUP_BODY_PANEL_PADDING
-        + POPUP_BODY_BOTTOM_SLACK
-        + provider_height;
+    Size::new(
+        width,
+        popup_total_height(provider_nav_height(state), provider_height),
+    )
+}
 
-    Size::new(width, height.clamp(1.0, POPUP_MAX_HEIGHT))
+pub const fn popup_provider_picker_size() -> Size {
+    Size::new(POPUP_WIDTH, PROVIDER_PICKER_HEIGHT)
 }
 
 pub fn popup_session_size_with_body_height(
@@ -244,37 +280,73 @@ pub fn popup_session_size_with_body_height(
     selected_provider: ProviderId,
     body_height: f32,
 ) -> Size {
+    if popup_empty_state_active(state) {
+        return popup_empty_state_size(body_height);
+    }
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
-    Size::new(width, popup_total_height(body_height))
+    Size::new(
+        width,
+        popup_total_height(provider_nav_height(state), body_height),
+    )
 }
 
 pub fn popup_settings_size(state: &AppState) -> Size {
-    let height = POPUP_PADDING
-        + POPUP_CHROME_SPACING
-        + POPUP_HEADER_HEIGHT
-        + POPUP_TAB_HEIGHT
-        + POPUP_FOOTER_HEIGHT
-        + POPUP_BODY_PANEL_PADDING
-        + POPUP_BODY_BOTTOM_SLACK
-        + settings_body_height(state);
-    Size::new(POPUP_WIDTH, height.clamp(1.0, POPUP_MAX_HEIGHT))
+    Size::new(
+        POPUP_WIDTH,
+        popup_total_height(Some(settings_nav_height()), settings_body_height(state)),
+    )
 }
 
 pub fn popup_settings_size_with_body_height(body_height: f32) -> Size {
-    Size::new(POPUP_WIDTH, popup_total_height(body_height))
+    Size::new(
+        POPUP_WIDTH,
+        popup_total_height(Some(settings_nav_height()), body_height),
+    )
 }
 
-fn popup_total_height(body_height: f32) -> f32 {
+fn popup_total_height(nav_height: Option<f32>, body_height: f32) -> f32 {
+    let chrome_spacing = if nav_height.is_some() {
+        POPUP_CHROME_SPACING
+    } else {
+        POPUP_EMPTY_CHROME_SPACING
+    };
     let height = POPUP_PADDING
-        + POPUP_CHROME_SPACING
+        + chrome_spacing
         + POPUP_HEADER_HEIGHT
-        + POPUP_TAB_HEIGHT
+        + nav_height.unwrap_or(0.0)
         + POPUP_FOOTER_HEIGHT
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
         + body_height;
     height.clamp(1.0, POPUP_MAX_HEIGHT)
+}
+
+fn popup_empty_state_size(body_height: f32) -> Size {
+    let height = POPUP_PADDING
+        + POPUP_EMPTY_CHROME_SPACING
+        + POPUP_HEADER_HEIGHT
+        + POPUP_FOOTER_HEIGHT
+        + POPUP_BODY_PANEL_PADDING
+        + POPUP_BODY_BOTTOM_SLACK
+        + body_height;
+    Size::new(POPUP_WIDTH, height.clamp(1.0, POPUP_MAX_HEIGHT))
+}
+
+pub(super) fn popup_empty_state_active(state: &AppState) -> bool {
+    state.providers.iter().all(|provider| !provider.enabled)
+}
+
+pub(super) fn detected_without_accounts(
+    state: &AppState,
+    detection: &DetectionSnapshot,
+    provider: ProviderId,
+) -> bool {
+    detection.detected(provider) && state.accounts_for(provider).is_empty()
+}
+
+fn body_measure_width(columns: f32) -> f32 {
+    columns * POPUP_WIDTH - POPUP_PADDING - POPUP_BODY_PANEL_PADDING
 }
 
 fn selected_account_count(state: &AppState, provider: ProviderId) -> f32 {
@@ -293,7 +365,7 @@ fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     Element::from(container(content).width(Length::Fill).padding(12))
 }
 
-fn popup_header(route: &PopupRoute) -> Element<'static, Message> {
+fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Message> {
     let mut header = row![
         widget::text(fl!("app-title")).size(22),
         cosmic::iced::widget::Space::new().width(Length::Fill),
@@ -301,12 +373,116 @@ fn popup_header(route: &PopupRoute) -> Element<'static, Message> {
     .align_y(Alignment::Center)
     .spacing(12);
 
-    if matches!(route, PopupRoute::ProviderDetail) {
-        header =
-            header.push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
+    if matches!(route, PopupRoute::ProviderDetail) && !empty_state {
+        let add_provider = widget::tooltip::tooltip(
+            widget::button::standard("+").on_press(Message::ToggleProviderPicker),
+            widget::text(fl!("add-account")).size(12),
+            widget::tooltip::Position::Top,
+        );
+        header = header
+            .push(add_provider)
+            .push(widget::button::standard(fl!("refresh-now")).on_press(Message::RefreshNow));
     }
 
     header.into()
+}
+
+fn provider_picker_providers(state: &AppState, detection: &DetectionSnapshot) -> Vec<ProviderId> {
+    let mut providers = ProviderId::ALL.to_vec();
+    providers.sort_by_key(|provider| !detected_without_accounts(state, detection, *provider));
+    providers
+}
+
+fn provider_picker_view(
+    state: &AppState,
+    detection: &DetectionSnapshot,
+) -> Element<'static, Message> {
+    let providers = provider_picker_providers(state, detection);
+    let detected_count = providers
+        .iter()
+        .take_while(|provider| detected_without_accounts(state, detection, **provider))
+        .count();
+    let (detected, remaining) = providers.split_at(detected_count);
+    let mut content = column![].spacing(5).width(Length::Fill);
+
+    if !detected.is_empty() {
+        content = content
+            .push(widget::text(fl!("provider-picker-detected-section")).size(12))
+            .push(provider_picker_tile_rows(detected, true));
+    }
+
+    if !remaining.is_empty() {
+        content = content
+            .push(widget::text(fl!("provider-picker-all-section")).size(12))
+            .push(provider_picker_tile_rows(remaining, false));
+    }
+
+    container(content).padding(4).into()
+}
+
+fn provider_picker_tile_rows(
+    providers: &[ProviderId],
+    detected: bool,
+) -> Element<'static, Message> {
+    let mut rows = column![].spacing(8);
+    for pair in providers.chunks(2) {
+        let mut row = row![].spacing(8);
+        for provider in pair {
+            row = row.push(provider_picker_tile(*provider, detected));
+        }
+        if pair.len() == 1 {
+            row = row.push(cosmic::iced::widget::Space::new().width(Length::FillPortion(1)));
+        }
+        rows = rows.push(row);
+    }
+    rows.into()
+}
+
+fn provider_picker_tile(provider: ProviderId, detected: bool) -> Element<'static, Message> {
+    let content: Element<'static, Message> = if detected {
+        column![
+            provider_picker_icon(provider),
+            widget::text(provider.label()).size(14),
+            widget::text(fl!("provider-picker-connect-account")).size(12),
+        ]
+        .spacing(8)
+        .width(Length::Fill)
+        .into()
+    } else {
+        row![
+            provider_picker_icon(provider),
+            widget::text(provider.label()).size(14),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    };
+    let height = if detected {
+        PROVIDER_PICKER_TILE_HEIGHT
+    } else {
+        PROVIDER_PICKER_COMPACT_TILE_HEIGHT
+    };
+    let padding = if detected { [12, 12] } else { [4, 12] };
+    let content = container(content).padding(padding);
+    let content = if detected {
+        content
+    } else {
+        content.height(Length::Fill).align_y(Alignment::Center)
+    };
+    widget::button::custom(content)
+        .class(provider_tab_class(false))
+        .width(Length::FillPortion(1))
+        .height(Length::Fixed(height))
+        .on_press(Message::OpenProviderPickerProvider(provider))
+        .into()
+}
+
+fn provider_picker_icon(provider: ProviderId) -> Element<'static, Message> {
+    widget::icon::icon(provider_icon_handle(provider, provider_icon_variant()))
+        .size(22)
+        .width(Length::Fixed(22.0))
+        .height(Length::Fixed(22.0))
+        .into()
 }
 
 fn card<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -340,18 +516,24 @@ fn settings_block_enabled<'a>(
     Element::from(outer.style(|theme| {
         let cosmic = theme.cosmic();
         widget::container::Style {
-            text_color: Some(apply_alpha(cosmic.background.on.into(), 0.45)),
+            text_color: Some(apply_alpha(
+                cosmic.background(theme.transparent).on.into(),
+                0.45,
+            )),
             background: Some(Background::Color(apply_alpha(
-                cosmic.background.component.base.into(),
+                cosmic.background(theme.transparent).component.base.into(),
                 0.45,
             ))),
             border: cosmic::iced::Border {
                 radius: cosmic.corner_radii.radius_s.into(),
                 width: 1.0,
-                color: apply_alpha(cosmic.background.divider.into(), 0.45),
+                color: apply_alpha(cosmic.background(theme.transparent).divider.into(), 0.45),
             },
             shadow: cosmic::iced::Shadow::default(),
-            icon_color: Some(apply_alpha(cosmic.background.on.into(), 0.45)),
+            icon_color: Some(apply_alpha(
+                cosmic.background(theme.transparent).on.into(),
+                0.45,
+            )),
             snap: true,
         }
     }))
@@ -361,32 +543,25 @@ fn settings_category_row(
     route: &SettingsRoute,
     update_status: &UpdateStatus,
 ) -> Element<'static, Message> {
-    let row = row![settings_category_tab(
+    let mut tabs = vec![settings_category_tab(
         fl!("settings-general-title"),
         settings_category_icon(&SettingsRoute::General),
         matches!(route, SettingsRoute::General),
         SettingsRoute::General,
         update_available(update_status),
-    )]
-    .spacing(8)
-    .width(Length::Shrink);
-    let providers = ProviderId::ALL;
-    let tabs = providers
-        .into_iter()
-        .fold(row, |row, provider| {
-            let target_route = SettingsRoute::Provider(provider);
-            row.push(settings_category_tab(
-                provider.label().to_string(),
-                settings_category_icon(&target_route),
-                matches!(route, SettingsRoute::Provider(id) if *id == provider),
-                target_route,
-                false,
-            ))
-        });
-    scrollable(tabs)
-        .horizontal()
-        .width(Length::Fill)
-        .into()
+    )];
+    for provider in ProviderId::ALL {
+        let target_route = SettingsRoute::Provider(provider);
+        tabs.push(settings_category_tab(
+            provider.label().to_string(),
+            settings_category_icon(&target_route),
+            matches!(route, SettingsRoute::Provider(id) if *id == provider),
+            target_route,
+            false,
+        ));
+    }
+
+    wrap_tab_rows(tabs)
 }
 
 fn settings_category_tab(
@@ -412,13 +587,13 @@ fn settings_category_tab(
             .spacing(5)
             .align_y(Alignment::Center),
         )
-        .width(Length::Shrink)
+        .width(Length::Fill)
         .align_x(Alignment::Center)
         .into()
     } else {
         widget::text(label)
             .size(PROVIDER_TAB_LABEL_SIZE)
-            .width(Length::Shrink)
+            .width(Length::Fill)
             .align_x(Alignment::Center)
             .into()
     };
@@ -428,14 +603,14 @@ fn settings_category_tab(
             .align_x(Alignment::Center)
             .width(Length::Fill),
     )
-    .width(Length::Shrink)
+    .width(Length::Fill)
     .padding([5, 9])
     .align_x(Alignment::Center);
 
     Element::from(
         widget::button::custom(content)
             .class(settings_category_tab_class(selected))
-            .width(Length::Fixed(PROVIDER_TAB_MIN_WIDTH))
+            .width(Length::FillPortion(1))
             .on_press(Message::NavigateTo(PopupRoute::Settings(route))),
     )
 }
@@ -564,6 +739,66 @@ impl ButtonInteraction {
     }
 }
 
+fn provider_tab_rows(state: &AppState, selected_provider: ProviderId) -> Element<'static, Message> {
+    let tabs: Vec<Element<'static, Message>> = state
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled)
+        .map(|provider| provider_tab(state, provider, provider.provider == selected_provider))
+        .collect();
+
+    if tabs.len() < PROVIDER_TABS_PER_ROW {
+        let mut tab_row = row![].spacing(8);
+        for tab in tabs {
+            tab_row = tab_row.push(tab);
+        }
+        return tab_row.into();
+    }
+
+    wrap_tab_rows(tabs)
+}
+
+fn wrap_tab_rows(tabs: Vec<Element<'static, Message>>) -> Element<'static, Message> {
+    let mut rows = column![].spacing(PROVIDER_TAB_ROW_SPACING);
+    let mut tabs = tabs.into_iter().peekable();
+    while tabs.peek().is_some() {
+        let mut tab_row = row![].spacing(8);
+        for _ in 0..PROVIDER_TABS_PER_ROW {
+            tab_row = match tabs.next() {
+                Some(tab) => tab_row.push(tab),
+                None => {
+                    tab_row.push(cosmic::iced::widget::Space::new().width(Length::FillPortion(1)))
+                }
+            };
+        }
+        rows = rows.push(tab_row);
+    }
+    rows.into()
+}
+
+fn nav_rows_height(tab_count: usize) -> f32 {
+    let rows = tab_count.div_ceil(PROVIDER_TABS_PER_ROW).max(1);
+    let rows = f32::from(u8::try_from(rows).unwrap_or(u8::MAX));
+    rows * POPUP_TAB_HEIGHT + (rows - 1.0) * PROVIDER_TAB_ROW_SPACING
+}
+
+fn enabled_provider_count(state: &AppState) -> usize {
+    state
+        .providers
+        .iter()
+        .filter(|provider| provider.enabled)
+        .count()
+}
+
+fn provider_nav_height(state: &AppState) -> Option<f32> {
+    let count = enabled_provider_count(state);
+    (count > 1).then(|| nav_rows_height(count))
+}
+
+fn settings_nav_height() -> f32 {
+    nav_rows_height(ProviderId::ALL.len() + 1)
+}
+
 fn provider_tab(
     state: &AppState,
     provider: &ProviderRuntimeState,
@@ -629,7 +864,7 @@ fn tab_button_style(
 ) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    let surface = &cosmic.background.component;
+    let surface = &cosmic.background(theme.transparent).component;
 
     let background = if selected {
         if interaction.pressed {
@@ -640,7 +875,7 @@ fn tab_button_style(
     } else if interaction.pressed {
         surface.divider.into()
     } else if interaction.hovered {
-        cosmic.background.component.hover.into()
+        cosmic.background(theme.transparent).component.hover.into()
     } else {
         surface.base.into()
     };
@@ -665,8 +900,11 @@ fn tab_button_style(
     style
 }
 
-fn provider_summary(provider: &ProviderRuntimeState) -> Element<'static, Message> {
-    let title = row![
+fn provider_summary(
+    provider: &ProviderRuntimeState,
+    detected_without_accounts: bool,
+) -> Element<'static, Message> {
+    let mut title = row![
         widget::icon::icon(provider_icon_handle(
             provider.provider,
             provider_icon_variant(),
@@ -679,6 +917,10 @@ fn provider_summary(provider: &ProviderRuntimeState) -> Element<'static, Message
     .spacing(10)
     .align_y(Alignment::Center);
 
+    if detected_without_accounts {
+        title = title.push(badge_accent(fl!("provider-detected-chip")));
+    }
+
     card(title)
 }
 
@@ -688,7 +930,7 @@ fn info_block(
     secondary: Option<String>,
     action: Option<Element<'static, Message>>,
 ) -> Element<'static, Message> {
-    let mut col = column![widget::text(title).size(18), widget::text(primary).size(14)].spacing(6);
+    let mut col = column![widget::text(title).size(15), widget::text(primary).size(14)].spacing(6);
 
     if let Some(secondary) = secondary {
         col = col.push(widget::text(secondary).size(13));
@@ -733,6 +975,81 @@ fn tab_percents(state: &AppState, provider: &ProviderRuntimeState) -> Vec<f32> {
         .collect()
 }
 
-pub(super) fn cursor_account_requires_action(account: &ProviderAccountRuntimeState) -> bool {
-    account.provider == ProviderId::Cursor && account.auth_state == AuthState::ActionRequired
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_state_is_active_without_enabled_provider_tabs() {
+        let mut state = AppState::empty();
+        for provider in ProviderId::ALL {
+            state.provider_mut(provider).unwrap().enabled = false;
+        }
+
+        assert!(popup_empty_state_active(&state));
+        assert_eq!(
+            popup_session_size(&state, ProviderId::Codex).width,
+            POPUP_WIDTH
+        );
+
+        state.provider_mut(ProviderId::Codex).unwrap().enabled = true;
+
+        assert!(!popup_empty_state_active(&state));
+    }
+
+    #[test]
+    fn detected_settings_hint_ignores_explicit_disablement_but_hides_after_account_added() {
+        let home = tempfile::tempdir().expect("create temporary home");
+        std::fs::create_dir(home.path().join(".codex")).expect("create Codex marker");
+        let detection = crate::detection::detect(home.path());
+        let mut state = AppState::empty();
+        state.provider_mut(ProviderId::Codex).unwrap().enabled = false;
+
+        assert!(detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Codex
+        ));
+
+        state
+            .provider_accounts
+            .push(ProviderAccountRuntimeState::empty(
+                ProviderId::Codex,
+                "codex-test",
+                "test@example.com",
+            ));
+        assert!(!detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Codex
+        ));
+    }
+
+    #[test]
+    fn provider_picker_lists_detected_unconfigured_providers_first() {
+        let home = tempfile::tempdir().expect("create temporary home");
+        std::fs::create_dir(home.path().join(".codex")).expect("create Codex marker");
+        let detection = crate::detection::detect(home.path());
+        let state = AppState::empty();
+
+        assert_eq!(
+            provider_picker_providers(&state, &detection),
+            vec![
+                ProviderId::Codex,
+                ProviderId::Claude,
+                ProviderId::Cursor,
+                ProviderId::Antigravity,
+                ProviderId::Gemini,
+                ProviderId::Copilot,
+                ProviderId::Minimax,
+                ProviderId::OpencodeGo,
+                ProviderId::OllamaCloud,
+            ]
+        );
+    }
+
+    #[test]
+    fn provider_picker_has_room_for_the_complete_chooser() {
+        assert_eq!(popup_provider_picker_size(), Size::new(POPUP_WIDTH, 680.0));
+    }
 }

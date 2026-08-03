@@ -1,0 +1,67 @@
+{
+  "body_json": {
+    "allowedTiers": [
+      {
+        "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+        "id": "free-tier",
+        "isDefault": true,
+        "name": "Antigravity",
+        "privacyNotice": {
+          "noticeText": "redacted privacy notice",
+          "showNotice": true
+        }
+      },
+      {
+        "description": "Unlimited coding assistant with the most powerful Gemini models",
+        "id": "standard-tier",
+        "name": "Antigravity",
+        "privacyNotice": {},
+        "userDefinedCloudaicompanionProject": true,
+        "usesGcpTos": true
+      }
+    ],
+    "cloudaicompanionProject": "redacted-project-id",
+    "currentTier": {
+      "description": "Gemini-powered code suggestions and chat in multiple IDEs",
+      "id": "free-tier",
+      "name": "Antigravity",
+      "privacyNotice": {
+        "noticeText": "redacted privacy notice",
+        "showNotice": true
+      },
+      "upgradeSubscriptionText": "Upgrade to get 1,500 model requests per day with Gemini CLI and Gemini Code Assist's agent mode with Google AI Pro.",
+      "upgradeSubscriptionType": "GOOGLE_ONE",
+      "upgradeSubscriptionUri": "https://accounts.google.com/AccountChooser?Email=user%40example.com&continue=https%3A%2F%2Fone.google.com%2Fai"
+    },
+    "gcpManaged": false,
+    "paidTier": {
+      "description": "Antigravity Starter Quota",
+      "id": "free-tier",
+      "name": "Antigravity Starter Quota",
+      "upgradeSubscriptionText": "Free users and Google AI Plus users receive the minimum base limits on Antigravity. You can upgrade to Google AI Pro or above to receive higher rate limits.",
+      "upgradeSubscriptionUri": "https://antigravity.google/g1-upgrade"
+    },
+    "upgradeSubscriptionUri": "https://codeassist.google.com/upgrade"
+  },
+  "body_text": "{\n  \"allowedTiers\": [\n    {\n      \"description\": \"Gemini-powered code suggestions and chat in multiple IDEs\",\n      \"id\": \"free-tier\",\n      \"isDefault\": true,\n      \"name\": \"Antigravity\",\n      \"privacyNotice\": {\n        \"noticeText\": \"redacted privacy notice\",\n        \"showNotice\": true\n      }\n    },\n    {\n      \"description\": \"Unlimited coding assistant with the most powerful Gemini models\",\n      \"id\": \"standard-tier\",\n      \"name\": \"Antigravity\",\n      \"privacyNotice\": {},\n      \"userDefinedCloudaicompanionProject\": true,\n      \"usesGcpTos\": true\n    }\n  ],\n  \"cloudaicompanionProject\": \"redacted-project-id\",\n  \"currentTier\": {\n    \"description\": \"Gemini-powered code suggestions and chat in multiple IDEs\",\n    \"id\": \"free-tier\",\n    \"name\": \"Antigravity\",\n    \"privacyNotice\": {\n      \"noticeText\": \"redacted privacy notice\",\n      \"showNotice\": true\n    },\n    \"upgradeSubscriptionText\": \"Upgrade to get 1,500 model requests per day with Gemini CLI and Gemini Code Assist's agent mode with Google AI Pro.\",\n    \"upgradeSubscriptionType\": \"GOOGLE_ONE\",\n    \"upgradeSubscriptionUri\": \"https://accounts.google.com/AccountChooser?Email=user%40example.com&continue=https%3A%2F%2Fone.google.com%2Fai\"\n  },\n  \"gcpManaged\": false,\n  \"paidTier\": {\n    \"description\": \"Antigravity Starter Quota\",\n    \"id\": \"free-tier\",\n    \"name\": \"Antigravity Starter Quota\",\n    \"upgradeSubscriptionText\": \"Free users and Google AI Plus users receive the minimum base limits on Antigravity. You can upgrade to Google AI Pro or above to receive higher rate limits.\",\n    \"upgradeSubscriptionUri\": \"https://antigravity.google/g1-upgrade\"\n  },\n  \"upgradeSubscriptionUri\": \"https://codeassist.google.com/upgrade\"\n}\n",
+  "endpoint": "load_code_assist",
+  "method": "POST",
+  "requested_at": "2026-07-15T07:09:14.621111+00:00",
+  "response_headers": {
+    "Accept-Ranges": "none",
+    "Alt-Svc": "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000",
+    "Connection": "close",
+    "Content-Type": "application/json; charset=UTF-8",
+    "Date": "Wed, 15 Jul 2026 07:09:14 GMT",
+    "Server": "ESF",
+    "Server-Timing": "gfet5t7;dur=972, gfet4t7; dur=1443",
+    "Transfer-Encoding": "chunked",
+    "Vary": "Origin,Accept-Encoding",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "X-XSS-Protection": "0",
+    "x-cloudaicompanion-trace-id": "redacted-trace-id"
+  },
+  "status_code": 200,
+  "url": "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+}

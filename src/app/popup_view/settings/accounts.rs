@@ -2,32 +2,29 @@ mod login_controls;
 mod rows;
 
 use self::login_controls::{
-    claude_login_controls, codex_login_controls, copilot_login_controls, cursor_scan_controls,
-    gemini_login_controls, minimax_login_controls, ollama_cloud_login_controls,
-    opencode_go_login_controls,
+    antigravity_login_controls, claude_login_controls, codex_login_controls,
+    copilot_login_controls, cursor_scan_controls, gemini_login_controls, minimax_login_controls,
+    ollama_cloud_login_controls, opencode_go_login_controls,
 };
-use self::rows::{
-    account_selector_list, claude_account_settings_row, codex_account_settings_row,
-    copilot_account_settings_row, cursor_account_settings_row, gemini_account_settings_row,
-    minimax_account_settings_row, ollama_cloud_account_settings_row, opencode_go_account_settings_row,
-    show_all_accounts_row,
-};
+use self::rows::{account_selector_list, account_settings_row, show_all_accounts_row};
 use super::super::{
-    AppState, Config, Element, Length, Message, ProviderId, ProviderLoginStates, fl,
-    settings_block, settings_block_enabled, widget,
+    AppState, Config, DetectionSnapshot, Element, Length, Message, ProviderId, ProviderLoginStates,
+    detected_without_accounts, fl, settings_block, settings_block_enabled, widget,
 };
+use crate::providers::antigravity::AntigravityLoginState;
 use crate::providers::claude::ClaudeLoginState;
 use crate::providers::codex::CodexLoginState;
 use crate::providers::copilot::CopilotLoginState;
 use crate::providers::cursor::CursorScanState;
 use crate::providers::gemini::GeminiLoginState;
 use crate::providers::minimax::MinimaxLoginState;
-use crate::providers::opencode_go::OpencodeGoLoginState;
 use crate::providers::ollama_cloud::OllamaCloudLoginState;
+use crate::providers::opencode_go::OpencodeGoLoginState;
 
 pub(super) fn provider_settings_view<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     provider_id: ProviderId,
 ) -> Element<'a, Message> {
@@ -49,6 +46,9 @@ pub(super) fn provider_settings_view<'a>(
         ProviderId::Gemini => gemini_accounts_section(state, config, logins.gemini, enabled),
         ProviderId::Copilot => copilot_accounts_section(state, config, logins.copilot, enabled),
         ProviderId::Minimax => minimax_accounts_section(state, config, logins.minimax, enabled),
+        ProviderId::Antigravity => {
+            antigravity_accounts_section(state, config, logins.antigravity, enabled)
+        }
         ProviderId::OpencodeGo => {
             opencode_go_accounts_section(state, config, logins.opencode_go, enabled)
         }
@@ -57,11 +57,11 @@ pub(super) fn provider_settings_view<'a>(
         }
     };
 
-    Element::from(
-        cosmic::iced::widget::column![enable_section, accounts_section]
-            .spacing(14)
-            .width(Length::Fill),
-    )
+    let mut sections = cosmic::iced::widget::column![enable_section].spacing(14);
+    if detected_without_accounts(state, detection, provider_id) {
+        sections = sections.push(widget::text(fl!("provider-detected-caption")).size(13));
+    }
+    Element::from(sections.push(accounts_section).width(Length::Fill))
 }
 
 fn codex_accounts_section<'a>(
@@ -93,7 +93,8 @@ fn codex_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(codex_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Codex,
                 account,
                 &selected_ids,
                 active_id,
@@ -158,7 +159,8 @@ fn claude_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(claude_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Claude,
                 account,
                 &selected_ids,
                 active_id,
@@ -222,7 +224,8 @@ fn gemini_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(gemini_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Gemini,
                 account,
                 &selected_ids,
                 active_id,
@@ -245,6 +248,68 @@ fn gemini_accounts_section<'a>(
 
     settings_block_enabled(
         widget::text(fl!("gemini-accounts-title")).size(16).into(),
+        rows,
+        enabled,
+    )
+}
+
+fn antigravity_accounts_section<'a>(
+    state: &'a AppState,
+    config: &'a Config,
+    antigravity_login: Option<&'a AntigravityLoginState>,
+    enabled: bool,
+) -> Element<'a, Message> {
+    let selected_ids: Vec<&str> = state
+        .provider(ProviderId::Antigravity)
+        .map(|provider| {
+            provider
+                .selected_account_ids
+                .iter()
+                .map(String::as_str)
+                .collect()
+        })
+        .unwrap_or_default();
+    let accounts = state.accounts_for(ProviderId::Antigravity);
+    let active_id = state
+        .provider(ProviderId::Antigravity)
+        .and_then(|provider| provider.system_active_account_id.as_deref());
+    let mut rows = cosmic::iced::widget::column![]
+        .spacing(8)
+        .width(Length::Fill);
+
+    if accounts.is_empty() {
+        rows = rows.push(widget::text(fl!("antigravity-accounts-empty")).size(13));
+    } else {
+        let mut account_rows = cosmic::iced::widget::column![]
+            .spacing(6)
+            .width(Length::Fill);
+        for account in &accounts {
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Antigravity,
+                account,
+                &selected_ids,
+                active_id,
+                config,
+                enabled,
+            ));
+        }
+        rows = rows.push(account_selector_list(account_rows));
+    }
+
+    if accounts.len() > 1 {
+        rows = rows.push(show_all_accounts_row(
+            ProviderId::Antigravity,
+            config.show_all_accounts(ProviderId::Antigravity),
+            enabled,
+        ));
+    }
+
+    rows = rows.push(antigravity_login_controls(antigravity_login, enabled));
+
+    settings_block_enabled(
+        widget::text(fl!("antigravity-accounts-title"))
+            .size(16)
+            .into(),
         rows,
         enabled,
     )
@@ -281,7 +346,8 @@ fn cursor_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(cursor_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Cursor,
                 account,
                 &selected_ids,
                 active_id,
@@ -326,6 +392,9 @@ fn copilot_accounts_section<'a>(
         })
         .unwrap_or_default();
     let accounts = state.accounts_for(ProviderId::Copilot);
+    let active_id = state
+        .provider(ProviderId::Copilot)
+        .and_then(|provider| provider.system_active_account_id.as_deref());
     let mut rows = cosmic::iced::widget::column![]
         .spacing(8)
         .width(Length::Fill);
@@ -337,9 +406,11 @@ fn copilot_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(copilot_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Copilot,
                 account,
                 &selected_ids,
+                active_id,
                 config,
                 enabled,
             ));
@@ -393,7 +464,8 @@ fn minimax_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(minimax_account_settings_row(
+            account_rows = account_rows.push(account_settings_row(
+                ProviderId::Minimax,
                 account,
                 &selected_ids,
                 active_id,
@@ -456,7 +528,7 @@ fn opencode_go_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(opencode_go_account_settings_row(
+            account_rows = account_rows.push(rows::opencode_go_account_settings_row(
                 account,
                 &selected_ids,
                 active_id,
@@ -465,12 +537,6 @@ fn opencode_go_accounts_section<'a>(
             ));
         }
         rows = rows.push(account_selector_list(account_rows));
-    }
-
-    if let Some(provider) = opencode_go
-        && provider.account_status == crate::model::AccountSelectionStatus::SelectionRequired
-    {
-        rows = rows.push(widget::text(fl!("opencode-go-account-select-required")).size(13));
     }
 
     if accounts.len() > 1 {
@@ -484,7 +550,7 @@ fn opencode_go_accounts_section<'a>(
     rows = rows.push(opencode_go_login_controls(opencode_go_login, enabled));
 
     settings_block_enabled(
-        widget::text("OpenCode Go Accounts").size(16).into(),
+        widget::text(fl!("opencode-go-accounts-title")).size(16).into(),
         rows,
         enabled,
     )
@@ -519,7 +585,7 @@ fn ollama_cloud_accounts_section<'a>(
             .spacing(6)
             .width(Length::Fill);
         for account in &accounts {
-            account_rows = account_rows.push(ollama_cloud_account_settings_row(
+            account_rows = account_rows.push(rows::ollama_cloud_account_settings_row(
                 account,
                 &selected_ids,
                 active_id,
@@ -528,12 +594,6 @@ fn ollama_cloud_accounts_section<'a>(
             ));
         }
         rows = rows.push(account_selector_list(account_rows));
-    }
-
-    if let Some(provider) = ollama_cloud
-        && provider.account_status == crate::model::AccountSelectionStatus::SelectionRequired
-    {
-        rows = rows.push(widget::text(fl!("ollama-cloud-account-select-required")).size(13));
     }
 
     if accounts.len() > 1 {
@@ -547,7 +607,7 @@ fn ollama_cloud_accounts_section<'a>(
     rows = rows.push(ollama_cloud_login_controls(ollama_cloud_login, enabled));
 
     settings_block_enabled(
-        widget::text("Ollama Cloud Accounts").size(16).into(),
+        widget::text(fl!("ollama-cloud-accounts-title")).size(16).into(),
         rows,
         enabled,
     )

@@ -7,7 +7,7 @@ use cosmic::iced::Subscription;
 use cosmic::iced::futures::channel::mpsc;
 use cosmic::iced::futures::sink::SinkExt;
 use cosmic::iced::stream;
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::ffi::OsStr;
 use std::path::Path;
 use std::time::Duration;
@@ -61,11 +61,13 @@ pub(super) fn subscription() -> Subscription<Message> {
 #[derive(Clone)]
 struct WatchTargets {
     home: std::path::PathBuf,
+    config_dir: std::path::PathBuf,
     codex_auth: std::path::PathBuf,
     codex_dir: std::path::PathBuf,
     claude_json: std::path::PathBuf,
     gemini_accounts: std::path::PathBuf,
     gemini_dir: std::path::PathBuf,
+    gemini_settings: std::path::PathBuf,
 }
 
 impl WatchTargets {
@@ -73,15 +75,19 @@ impl WatchTargets {
         let codex_dir = home.join(".codex");
         let codex_auth = codex_dir.join("auth.json");
         let claude_json = home.join(".claude.json");
+        let config_dir = home.join(".config");
         let gemini_dir = home.join(".gemini");
         let gemini_accounts = gemini_dir.join("google_accounts.json");
+        let gemini_settings = gemini_dir.join("settings.json");
         Self {
             home: home.to_path_buf(),
+            config_dir,
             codex_auth,
             codex_dir,
             claude_json,
             gemini_accounts,
             gemini_dir,
+            gemini_settings,
         }
     }
 }
@@ -100,11 +106,13 @@ fn install_watches(watcher: &mut RecommendedWatcher, targets: &WatchTargets) -> 
 
     if targets.gemini_accounts.exists() {
         installed |= install_watch(watcher, &targets.gemini_accounts);
-    } else if targets.gemini_dir.is_dir() {
+    }
+    if targets.gemini_dir.is_dir() {
         installed |= install_watch(watcher, &targets.gemini_dir);
     }
 
     installed |= install_watch(watcher, &targets.home);
+    installed |= install_watch(watcher, &targets.config_dir);
     installed
 }
 
@@ -119,14 +127,28 @@ fn install_watch(watcher: &mut RecommendedWatcher, path: &Path) -> bool {
 }
 
 fn event_targets_cli_auth(event: &Event, targets: &WatchTargets) -> bool {
+    if !event_changes_cli_auth(&event.kind) {
+        return false;
+    }
     event.paths.iter().any(|p| {
         p == &targets.codex_auth
             || p == &targets.claude_json
             || p == &targets.gemini_accounts
+            || p == &targets.gemini_settings
             || codex_auth_in_dir_event(p, &targets.codex_auth)
             || claude_json_in_home_event(p, &targets.home, &targets.claude_json)
             || gemini_accounts_in_dir_event(p, &targets.gemini_accounts)
+            || detection_marker_in_home_event(p, &targets.home)
+            || detection_marker_in_config_event(p, &targets.config_dir)
+            || gemini_settings_in_dir_event(p, &targets.gemini_settings)
     })
+}
+
+fn event_changes_cli_auth(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    )
 }
 
 fn codex_auth_in_dir_event(path: &Path, codex_auth: &Path) -> bool {
@@ -145,11 +167,57 @@ fn gemini_accounts_in_dir_event(path: &Path, gemini_accounts: &Path) -> bool {
         && path.parent().map(Path::to_path_buf) == gemini_accounts.parent().map(Path::to_path_buf)
 }
 
+fn detection_marker_in_home_event(path: &Path, home: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(OsStr::to_str),
+        Some(".codex" | ".claude" | ".claude.json" | ".copilot" | ".mmx")
+    ) && path.parent() == Some(home)
+}
+
+fn detection_marker_in_config_event(path: &Path, config_dir: &Path) -> bool {
+    matches!(
+        path.file_name().and_then(OsStr::to_str),
+        Some("Cursor" | "Antigravity" | "github-copilot")
+    ) && path.parent() == Some(config_dir)
+}
+
+fn gemini_settings_in_dir_event(path: &Path, gemini_settings: &Path) -> bool {
+    path.file_name() == Some(OsStr::new("settings.json"))
+        && path.parent() == gemini_settings.parent()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use notify::EventKind;
+    use notify::event::{AccessKind, AccessMode, DataChange, ModifyKind};
     use std::path::PathBuf;
+
+    #[test]
+    fn auth_watch_ignores_file_access_events() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+        let event = Event {
+            kind: EventKind::Access(AccessKind::Close(AccessMode::Read)),
+            paths: vec![targets.codex_auth.clone()],
+            attrs: Default::default(),
+        };
+
+        assert!(!event_targets_cli_auth(&event, &targets));
+    }
+
+    #[test]
+    fn auth_watch_accepts_auth_file_modify_events() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+        let event = Event {
+            kind: EventKind::Modify(ModifyKind::Data(DataChange::Content)),
+            paths: vec![targets.codex_auth.clone()],
+            attrs: Default::default(),
+        };
+
+        assert!(event_targets_cli_auth(&event, &targets));
+    }
 
     #[test]
     fn codex_auth_in_dir_event_matches_only_auth_json_in_dot_codex() {
@@ -215,5 +283,51 @@ mod tests {
             .add_path(home.join(".gemini").join("google_accounts.json"));
 
         assert!(event_targets_cli_auth(&event, &targets));
+    }
+
+    #[test]
+    fn detection_event_matches_home_marker_paths() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+
+        for marker in [".codex", ".claude", ".claude.json", ".copilot", ".mmx"] {
+            let event = Event::new(EventKind::Create(notify::event::CreateKind::Any))
+                .add_path(home.join(marker));
+            assert!(event_targets_cli_auth(&event, &targets), "{marker}");
+        }
+    }
+
+    #[test]
+    fn detection_event_matches_config_and_gemini_marker_paths() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+
+        for marker in [
+            home.join(".config/Cursor"),
+            home.join(".config/Antigravity"),
+            home.join(".config/github-copilot"),
+            home.join(".gemini/settings.json"),
+        ] {
+            let event = Event::new(EventKind::Remove(notify::event::RemoveKind::Any))
+                .add_path(marker.clone());
+            assert!(
+                event_targets_cli_auth(&event, &targets),
+                "{}",
+                marker.display()
+            );
+        }
+    }
+
+    #[test]
+    fn detection_event_ignores_unrelated_marker_lookalikes() {
+        let home = PathBuf::from("/home/u");
+        let targets = WatchTargets::for_home(&home);
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(
+            notify::event::RenameMode::Any,
+        )))
+        .add_path(home.join(".cache/.codex"))
+        .add_path(home.join(".config/Other"));
+
+        assert!(!event_targets_cli_auth(&event, &targets));
     }
 }

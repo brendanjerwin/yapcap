@@ -14,6 +14,8 @@ use chrono::Utc;
 use std::path::Path;
 
 pub use account::apply_login_account;
+#[cfg(test)]
+pub use login::CopilotLoginSuccess;
 pub use login::{
     CopilotLoginEvent, CopilotLoginState, CopilotLoginStatus, prepare, prepare_for_reauth,
 };
@@ -141,9 +143,21 @@ mod tests {
         r#"{
             "access_type_sku": "free_limited_copilot",
             "login": "octocat",
-            "monthly_quotas": { "chat": 500, "completions": 300 },
-            "limited_user_quotas": { "chat": 350, "completions": 60 },
-            "limited_user_reset_date": "2026-06-03"
+            "quota_reset_date_utc": "2026-08-01T00:00:00.000Z",
+            "quota_snapshots": {
+                "chat": {
+                    "entitlement": 500,
+                    "remaining": 350,
+                    "has_quota": true,
+                    "unlimited": false
+                },
+                "completions": {
+                    "entitlement": 300,
+                    "remaining": 60,
+                    "has_quota": true,
+                    "unlimited": false
+                }
+            }
         }"#
         .to_string()
     }

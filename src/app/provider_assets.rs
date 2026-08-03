@@ -53,9 +53,16 @@ pub fn provider_icon_handle(provider: ProviderId, variant: ProviderIconVariant) 
         (ProviderId::OllamaCloud, ProviderIconVariant::Reversed) => {
             include_bytes!("../../resources/providers/ollama-cloud-reversed.svg")
         }
+        (ProviderId::Antigravity, _) => {
+            include_bytes!("../../resources/providers/antigravity-color.svg")
+        }
     };
 
     icon::from_svg_bytes(bytes)
+}
+
+pub fn app_icon_handle() -> Handle {
+    icon::from_svg_bytes(include_bytes!("../../resources/icon.svg"))
 }
 
 pub fn provider_icon_variant() -> ProviderIconVariant {

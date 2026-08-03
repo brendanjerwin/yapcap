@@ -87,7 +87,7 @@ pub(super) fn badge_neutral(label: impl Into<String>) -> Element<'static, Messag
     let label = label.into();
     badge_container(label, move |theme| {
         let cosmic = theme.cosmic();
-        let surface = &cosmic.background.component;
+        let surface = &cosmic.background(theme.transparent).component;
         badge_style(
             apply_alpha(surface.base.into(), 0.42),
             surface.on.into(),
@@ -101,13 +101,22 @@ pub(super) fn badge_neutral_soft(label: impl Into<String>) -> Element<'static, M
     let label = label.into();
     badge_container(label, move |theme| {
         let cosmic = theme.cosmic();
-        let surface = &cosmic.background.component;
+        let surface = &cosmic.background(theme.transparent).component;
         badge_style(
             apply_alpha(surface.base.into(), 0.24),
             apply_alpha(surface.on.into(), 0.52),
             apply_alpha(surface.divider.into(), 0.45),
             theme,
         )
+    })
+}
+
+pub(super) fn badge_accent(label: impl Into<String>) -> Element<'static, Message> {
+    let label = label.into();
+    badge_container(label, move |theme| {
+        let cosmic = theme.cosmic();
+        let color = cosmic.accent.base.into();
+        badge_style(apply_alpha(color, 0.14), color, color, theme)
     })
 }
 
@@ -131,6 +140,22 @@ pub(super) fn badge_with_tooltip(
 }
 
 pub(super) fn account_label_text(label: &str, size: u16) -> Element<'static, Message> {
+    account_label(label, size, None)
+}
+
+pub(super) fn disabled_account_label_text(label: &str, size: u16) -> Element<'static, Message> {
+    account_label(
+        label,
+        size,
+        Some(cosmic::theme::Text::Custom(disabled_account_label_style)),
+    )
+}
+
+ fn account_label(
+    label: &str,
+    size: u16,
+    class: Option<cosmic::theme::Text>,
+) -> Element<'static, Message> {
     let effective_label = if label.trim().is_empty() {
         fl!("account-label")
     } else {
@@ -140,6 +165,10 @@ pub(super) fn account_label_text(label: &str, size: u16) -> Element<'static, Mes
     let text = widget::text(truncated.clone())
         .size(size)
         .width(Length::Fill);
+    let text = match class {
+        Some(class) => text.class(class),
+        None => text,
+    };
     if truncated == effective_label {
         return text.into();
     }
@@ -149,6 +178,21 @@ pub(super) fn account_label_text(label: &str, size: u16) -> Element<'static, Mes
         widget::tooltip::Position::Top,
     )
     .into()
+}
+
+fn disabled_account_label_style(theme: &cosmic::Theme) -> cosmic::iced::widget::text::Style {
+    cosmic::iced::widget::text::Style {
+        color: Some(apply_alpha(
+            theme
+                .cosmic()
+                .background(theme.transparent)
+                .component
+                .on
+                .into(),
+            0.45,
+        )),
+        ..Default::default()
+    }
 }
 
 fn badge_container(

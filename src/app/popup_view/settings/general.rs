@@ -151,6 +151,7 @@ fn reset_time_section(current_format: ResetTimeFormat) -> Element<'static, Messa
         reset_at: Some(now + chrono::Duration::hours(4)),
         window_seconds: None,
         reset_description: None,
+        group: None,
     };
 
     let buttons = options.iter().fold(
@@ -264,7 +265,7 @@ fn refresh_option_interaction_style(
 ) -> widget::button::Style {
     let cosmic = theme.cosmic();
     let mut style = widget::button::Style::new();
-    let surface = &cosmic.background.component;
+    let surface = &cosmic.background(theme.transparent).component;
 
     let (background, foreground, border_color) = if selected {
         (
@@ -280,7 +281,7 @@ fn refresh_option_interaction_style(
         )
     } else if interaction.hovered {
         (
-            cosmic.background.component.hover.into(),
+            cosmic.background(theme.transparent).component.hover.into(),
             surface.on.into(),
             surface.divider.into(),
         )

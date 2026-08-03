@@ -2,7 +2,7 @@
 
 # YapCap
 
-**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Gemini, Minimax, and GitHub Copilot.**
+**A native COSMIC panel applet that tracks AI coding quota for Codex, Claude Code, Cursor, Antigravity, Gemini, Minimax, and GitHub Copilot.**
 
 <img src="resources/screenshots/screenshot-hero.png" alt="YapCap panel applet" width="780" />
 
@@ -26,12 +26,13 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
     - **Codex** — 5h/weekly windows + credits
     - **Claude** — session/weekly/extra usage
     - **Cursor** — Auto/Composer and API usage 
+    - **Antigravity** — grouped Gemini and Claude/GPT model quota (5h + weekly)
     - **Gemini** — Pro / Flash / Lite quota bars (OAuth accounts only)
     - **Minimax** — API key usage tracking
     - **GitHub Copilot** — Free chat/completions or paid premium interactions
 - 👥 **Multi-account view** — add, switch, and remove accounts per provider. Turn on **Show all accounts** to lay out each selected account side by side in the popup and show one usage-bar group per account in the panel.
-- 🔐 **In-app login** — guided browser login for Codex, Claude, Gemini, and Copilot; Cursor scans the local IDE state.
-- ✅ **Active badge** — marks the account currently in use by your host CLI for Codex, Claude, and Gemini.
+- 🔐 **In-app login** — guided browser login for Codex, Claude, Antigravity, Gemini, and Copilot; Cursor scans the local IDE state.
+- ✅ **Active badge** — marks the account currently in use by your host CLI for Codex, Claude, Gemini, and Minimax.
 - ⚙️ **Configurable panel** — logo+bars, bars only, logo+%, or %-only; used/left toggle; relative or absolute reset times.
 
 ## Screenshots
@@ -70,6 +71,21 @@ YapCap lives in your COSMIC panel and shows how much of your AI coding quota you
 <img src="resources/screenshots/screenshot-copilot.png" alt="YapCap popup showing GitHub Copilot usage" />
 
 </td>
+<td align="center" valign="top" width="33%">
+
+<strong>Antigravity usage</strong><br />
+<img src="resources/screenshots/screenshot-antigravity.png" alt="YapCap popup showing Antigravity usage" />
+
+</td>
+</tr>
+<tr>
+<td align="center" valign="top" width="33%">
+
+<strong>Minimax usage</strong><br />
+<img src="resources/screenshots/screenshot-minimax.png" alt="YapCap popup showing Minimax usage" />
+
+</td>
+<td align="center" valign="top" width="33%"></td>
 <td align="center" valign="top" width="33%"></td>
 </tr>
 </table>
@@ -159,11 +175,11 @@ just install
 
 Each provider supports multiple accounts. Manage them from the popup under **Settings → [Provider]**.
 
-- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, Gemini browser OAuth, GitHub Copilot browser device flow, or Cursor IDE account scanning, without leaving YapCap.
+- **Add account** — triggers the provider's own login flow: Codex browser OAuth, native Claude OAuth in the browser, Antigravity and Gemini browser OAuth, GitHub Copilot browser device flow, or Cursor IDE account scanning, without leaving YapCap.
 - **Switch account** — tap any account row to make it active; the panel and popup update immediately.
 - **Remove account** — deletes only YapCap's copy of the credentials. Provider accounts and host app configs are never touched.
 
-Codex, Claude, Cursor, Gemini, and Minimax keep at most one account per email address. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username.
+Codex, Claude, Cursor, Antigravity, Gemini, and Minimax keep at most one account per email address. Copilot keeps at most one account per GitHub numeric user id and displays the current GitHub username.
 
 ## Panel styles
 
@@ -202,20 +218,21 @@ YapCap stores provider credentials under YapCap-owned account storage and calls 
 
 | Path | Purpose |
 | --- | --- |
-| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v500/` | Settings (provider toggles, accounts, display options) |
-| `~/.cache/yapcap/snapshots.json` | Cached usage state (loaded on startup) |
-| `~/.local/state/yapcap/`{`codex`,`claude`,`cursor`,`gemini`,`copilot`}`-accounts/` | Managed credential copies |
+| `~/.config/cosmic/io.github.TopiCsarno.YapCap/v600/` | Settings (provider toggles, accounts, display options) |
+| `~/.cache/yapcap/snapshots.json` | Former cached usage state; current builds leave it on disk but do not load it |
+| `~/.local/state/yapcap/<provider>-accounts/` | Managed credential copies (`<provider>` is one of `codex`, `claude`, `cursor`, `gemini`, `minimax`, `copilot`, `antigravity`) |
 | `~/.local/state/yapcap/logs/yapcap.log` | Log output |
 
-**Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap cache and state live only under `~/.var/app/io.github.TopiCsarno.YapCap/` — use `cache/yapcap/` for snapshots and `data/yapcap/` for accounts and logs. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
+**Flatpak** (`io.github.TopiCsarno.YapCap`): YapCap account state and logs live only under `~/.var/app/io.github.TopiCsarno.YapCap/data/yapcap/`. Old Flatpak snapshot caches under `~/.var/app/io.github.TopiCsarno.YapCap/cache/yapcap/` may remain on disk but are no longer active runtime state. The manifest mounts host `~/.config/cosmic` read-write for COSMIC app settings (not `xdg-config/cosmic`, for compatibility with Flatpak path resolution).
 
 ## Limitations
 
 - COSMIC only. No GNOME, KDE, or tray fallback.
-- **No Active badge for Copilot.** The GitHub Copilot CLI stores its host
-  token in the OS keychain rather than a readable file, so YapCap has no
-  cross-distro / Flatpak-safe way to detect which Copilot account the host
-  CLI is currently using. Copilot account rows never show an Active marker.
+- **No Active badge for Copilot or Antigravity.** The GitHub Copilot CLI and
+  Antigravity both store their host token in the OS keychain rather than a
+  readable file, so YapCap has no cross-distro / Flatpak-safe way to detect
+  which account the host app is currently using. Their account rows never show
+  an Active marker.
 - **Gemini OAuth only.** YapCap meters Gemini accounts authenticated via Google OAuth.
   API-key (`selectedAuthType: gemini-api-key`) and Vertex AI (`selectedAuthType:
   vertex-ai`) gemini-cli configurations are not supported — switch the account to

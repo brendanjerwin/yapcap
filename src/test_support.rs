@@ -10,13 +10,22 @@ pub fn env_lock() -> MutexGuard<'static, ()> {
 pub struct TestEnv {
     _guard: MutexGuard<'static, ()>,
     saved: Vec<(OsString, Option<OsString>)>,
+    _root: Option<tempfile::TempDir>,
 }
 
 pub fn test_env() -> TestEnv {
-    TestEnv {
+    let mut env = TestEnv {
         _guard: lock_env(),
         saved: Vec::new(),
-    }
+        _root: None,
+    };
+    let root = tempfile::tempdir().expect("create isolated test root");
+    env.set("XDG_CONFIG_HOME", root.path().join("config"));
+    env.set("XDG_STATE_HOME", root.path().join("state"));
+    env.set("XDG_CACHE_HOME", root.path().join("cache"));
+    env.remove("FLATPAK_ID");
+    env._root = Some(root);
+    env
 }
 
 impl TestEnv {

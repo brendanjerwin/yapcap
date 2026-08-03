@@ -21,6 +21,8 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
 pub use account::{apply_login_account, discover_accounts, sync_managed_accounts};
+#[cfg(test)]
+pub use login::CodexLoginSuccess;
 pub use login::{CodexLoginEvent, CodexLoginState, CodexLoginStatus, prepare};
 
 use crate::config::ManagedCodexAccountConfig;
@@ -47,6 +49,9 @@ pub(crate) fn system_active_account_id(
 
 const ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 const REFRESH_BEFORE_EXPIRY: Duration = Duration::minutes(5);
+const SESSION_WINDOW_SECONDS: i64 = 5 * 60 * 60;
+const WEEKLY_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
+const WINDOW_DURATION_TOLERANCE_SECONDS: u64 = 60;
 
 pub async fn fetch(
     client: &reqwest::Client,
@@ -292,7 +297,7 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
         .and_then(|r| r.primary_window.as_ref())
     {
         windows.push(normalize_window(
-            "Session",
+            codex_window_label(w.limit_window_seconds, "Session"),
             w.used_percent,
             w.reset_at,
             w.limit_window_seconds,
@@ -304,7 +309,7 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
         .and_then(|r| r.secondary_window.as_ref())
     {
         windows.push(normalize_window(
-            "Weekly",
+            codex_window_label(w.limit_window_seconds, "Weekly"),
             w.used_percent,
             w.reset_at,
             w.limit_window_seconds,
@@ -351,6 +356,22 @@ fn normalize_oauth(payload: CodexUsageResponse) -> Result<UsageSnapshot, CodexEr
     })
 }
 
+fn codex_window_label(limit_window_seconds: Option<i64>, fallback: &'static str) -> &'static str {
+    match limit_window_seconds {
+        Some(seconds)
+            if seconds.abs_diff(SESSION_WINDOW_SECONDS) <= WINDOW_DURATION_TOLERANCE_SECONDS =>
+        {
+            "Session"
+        }
+        Some(seconds)
+            if seconds.abs_diff(WEEKLY_WINDOW_SECONDS) <= WINDOW_DURATION_TOLERANCE_SECONDS =>
+        {
+            "Weekly"
+        }
+        _ => fallback,
+    }
+}
+
 fn normalize_window(
     label: &str,
     used_percent: f32,
@@ -363,5 +384,6 @@ fn normalize_window(
         reset_at: DateTime::from_timestamp(reset_at_epoch, 0),
         window_seconds,
         reset_description: None,
+        group: None,
     }
 }

@@ -8,7 +8,7 @@ read_when:
 
 # YapCap — COSMIC Panel Applet Architecture
 
-**Status:** As-built v0.5.1 · **Last updated:** 2026-06-25
+**Status:** As-built v0.6.0 · **Last updated:** 2026-07-16
 
 ## Document Metadata
 
@@ -18,15 +18,15 @@ read_when:
 | Target desktop | COSMIC |
 | Target language | Rust (edition 2024) |
 | Target runtime | libcosmic applet runtime |
-| Providers | Codex, Claude Code, Cursor, Gemini, Minimax, GitHub Copilot |
+| Providers | Codex, Claude Code, Cursor, Gemini, Minimax, GitHub Copilot, Antigravity |
 
 ## Document Map
 
 | Area | Subsections |
 | --- | --- |
 | 1. Product Definition | 1.1 Scope and Non-Goals<br>1.2 Supported Sources |
-| 2. Architecture | 2.1 System Context<br>2.2 Crate Layout<br>2.3 Runtime and Message Flow |
-| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Copilot<br>3.5 Gemini<br>3.6 Minimax |
+| 2. Architecture | 2.1 System Context<br>2.2 Crate Layout<br>2.3 Runtime and Message Flow<br>2.4 Multi-Process Applet Model |
+| 3. Providers | 3.1 Codex<br>3.2 Claude<br>3.3 Cursor<br>3.4 Copilot<br>3.5 Gemini<br>3.6 Minimax<br>3.7 Antigravity |
 | 4. Auth and Config | 4.1 OAuth Credential Files<br>4.2 Cursor Token Source<br>4.3 Configuration |
 | 5. Data Model | 5.1 UsageSnapshot<br>5.2 ProviderRuntimeState and Health<br>5.3 Stale/Fresh Rules |
 | 6. Persistence, Logging, Paths | |
@@ -39,7 +39,7 @@ read_when:
 
 ### 1.1 Scope and Non-Goals
 
-- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, Gemini, Minimax, and GitHub Copilot.
+- YapCap is a native Linux COSMIC panel applet that shows local usage state for Codex, Claude Code, Cursor, Gemini, Minimax, GitHub Copilot, and Antigravity.
 - Ships only on COSMIC. No GNOME, KDE, tray, or generic indicator paths exist.
 - Reads locally available credentials and caches. No user account, no cloud sync, no telemetry.
 - Out of scope: additional providers, historical charts, notifications, plugin architecture, doctor command, secret vault, alternative DEs.
@@ -49,7 +49,7 @@ read_when:
 | Provider | Primary | Fallback |
 | --- | --- | --- |
 | Codex | Active Codex account resolved from YapCap-owned `metadata.json`/`tokens.json` | Codex OAuth token refresh via `auth.openai.com/oauth/token` before expiry or once after 401/403 |
-| Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://console.anthropic.com/v1/oauth/token` (`grant_type=refresh_token`) |
+| Claude | Active Claude account resolved from YapCap-owned `claude-accounts/<id>/` (`tokens.json`, `metadata.json`) | OAuth access-token refresh via `POST https://claude.ai/v1/oauth/token` (`grant_type=refresh_token`) |
 | Cursor | Active Cursor account resolved from YapCap-owned `cursor-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | — |
 | Gemini | Active Gemini account resolved from YapCap-owned `gemini-accounts/<id>/` (`metadata.json`, `tokens.json`, optional `snapshot.json`) | OAuth refresh-token grant against `oauth2.googleapis.com/token` before expiry or once after a `loadCodeAssist` / `retrieveUserQuota` 401 |
 | Copilot | Active GitHub Copilot account resolved from YapCap-owned `copilot-accounts/<id>/` (`metadata.json`, `tokens.json`) | None; token is long-lived and re-auth is user-driven after revocation |
@@ -100,7 +100,7 @@ Library modules (`src/`, also usable from tests):
 
 | Module | Purpose |
 | --- | --- |
-| `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. |
+| `runtime` | `refresh_one(provider)`, `refresh_provider(...)`, `load_initial_state`, `persist_state`. Startup state is reconciled from shared runtime config, not from `snapshots.json`. |
 | `providers::minimax` | Minimax API key-based account management, usage fetch, and token quota tracking. |
 | `providers::registry` | Provider-facing interface used by runtime and UI code. It exposes provider capabilities, account discovery, account deletion, account status refresh, and usage fetch through provider adapters. |
 | `providers::adapters` | Provider adapter implementations for Codex, Claude, Cursor, Gemini, Minimax, and Copilot. Each adapter maps the shared provider interface onto provider-specific account and fetch modules. |
@@ -110,10 +110,11 @@ Library modules (`src/`, also usable from tests):
 | `providers::cursor` | Cursor web API via YapCap-owned tokens scanned from Cursor IDE's local SQLite state. |
 | `providers::copilot` | GitHub device-flow login, id-based YapCap-owned account listing/dedupe, single-call usage fetch, and Free/paid Copilot schema parsing under `src/providers/copilot/`. |
 | `providers::minimax` | API key-based authentication, YapCap-owned account storage, usage quota tracking, and Minimax API integration under `src/providers/minimax/`. |
-| `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. All write entry points (`create_account`, `replace_account`, `save_metadata`, `save_tokens`, `save_snapshot`) create the full account directory chain on demand, so callers do not need to pre-create the provider account root. |
+| `account_storage` | Shared explicit-account storage foundation for provider migrations. It writes account metadata, provider tokens, and per-account cached snapshots as separate JSON files under opaque YapCap-owned account directories. All write entry points (`create_account`, `replace_account`, `save_metadata`, `save_tokens`, `save_snapshot`) create the full account directory chain on demand, so callers do not need to pre-create the provider account root. It also exposes lower-level `create_private_dir`/`set_private_file_permissions`/`write_json`/`read_json` primitives (owner-only `0o700` dirs, `0o600` files) that providers with a bespoke on-disk schema — Copilot and Minimax — use directly instead of hand-rolling their own permission-setting code. |
 | `auth` | Parses JWT identity claims used by Codex OAuth compatibility paths. |
-| `config` | COSMIC config entry, provider toggles, and provider account preferences. |
-| `cache` | Load/save `snapshots.json`. |
+| `config` | COSMIC config entry, provider toggles, provider account preferences, and the shared app ID constant used by all COSMIC config entries. |
+| `shared_state` | Versioned COSMIC-backed shared runtime and shared control entries. Shared runtime wraps the app runtime payload with generation and write timestamp metadata. Shared control stores per-provider explicit refresh requests with request metadata. |
+| `refresh_owner` | OS file-lock based refresh ownership. It creates `refresh-owner.lock` under the YapCap state directory, records per-process diagnostics, distinguishes owner/non-owner/read-only startup states, and supports blocking takeover when the owner exits. |
 | `model` | `UsageSnapshot`, `ProviderRuntimeState`, `ProviderHealth`, `AuthState`, `AppState`. |
 | `updates` | GitHub release check; `UpdateStatus` and debug-only update simulation. |
 | `usage_display` | Shared "expired window" percent/label formatting. |
@@ -126,14 +127,14 @@ The applet is a libcosmic `Application`. Messages flow:
 
 ```mermaid
 sequenceDiagram
-    participant Cache as cache
+    participant Shared as shared_state
     participant Timer as "iced time::every"
     participant App as "AppModel::update"
     participant Refresh as app::refresh
     participant Task as "Task::perform"
     participant Provider as "providers::*"
-    App->>Cache: load_initial_state()
-    Cache-->>App: Message::Refreshed(state)
+    App->>Shared: load shared runtime/control
+    Shared-->>App: AppState or empty fallback
     App->>Refresh: refresh_provider_tasks(config, state)
     App->>Timer: subscription()
     Timer-->>App: Message::Tick
@@ -143,25 +144,127 @@ sequenceDiagram
     Provider-->>Task: ProviderRefreshResult
     Task-->>App: Message::ProviderRefreshed(provider + account state)
     App->>App: state.upsert_provider/provider_account(state)
-    App->>App: persist_state
+    App->>Shared: persist_state writes shared runtime
 ```
 
-- On startup, `Message::Refreshed` loads cached state and immediately dispatches a refresh for enabled providers.
-- On a brand-new config, YapCap does one provider-visibility initialization pass:
-  all providers stay enabled so providers without accounts surface `Login required`
-  instead of disappearing. The login-required provider detail includes an action
-  that opens that provider’s Settings page so the user can add an account. The
-  auto-init mode is then marked complete so later launches preserve the user’s
-  explicit provider toggles.
-- `Message::Tick` fires on a fixed interval (`refresh_interval_seconds.max(10)`).
-- `Message::RefreshNow` is the popup’s "Refresh now" button and uses the same dispatcher.
-- Account switching marks and refreshes only the selected provider instead of dispatching a global refresh.
+- On startup, `AppModel::init` loads durable config, then loads shared runtime
+  and shared control through COSMIC config. Missing or invalid shared runtime
+  falls back to an empty `AppState` reconciled with durable config. The refresh
+  owner then dispatches automatic refresh for enabled providers whose selected
+  accounts are missing runtime data or older than the configured refresh
+  interval.
+- Each applet process tries to acquire `refresh-owner.lock` under the YapCap
+  state directory. The first process to acquire the file lock records itself as
+  refresh owner for its process lifetime and clears pending shared refresh
+  requests. A contending process records itself as non-owner and starts a
+  background blocking wait for takeover. If the wait acquires ownership after
+  the previous owner exits, the process transitions to owner state and clears
+  pending shared refresh requests. Lock acquisition errors are logged and leave
+  the process in read-only/non-owner behavior.
+- Every applet instance subscribes to durable config, shared runtime, and shared
+  control updates through COSMIC config watching. Shared runtime updates replace
+  the local display `AppState` and are reconciled with the current durable
+  config before redraw. Shared control updates are retained locally for later
+  owner-driven refresh handling.
+- The panel opens on the persisted `selected_provider` from config. Selecting a provider tab writes that provider back to config so all applet processes switch to the same provider and the next launch opens on the same provider; if the saved provider is disabled, startup falls back to the first enabled provider. When the selected enabled provider has missing or stale selected-account runtime data, the selecting process writes a provider-selected shared refresh request for the refresh owner.
+- Provider enablement is resolved from a per-provider `Auto` / `Enabled` /
+  `Disabled` setting. `Auto` enables only providers detected on the machine or
+  with a YapCap account; explicit settings override that result. New configs
+  use `Auto`, while the one-shot legacy migration preserves prior boolean
+  settings as explicit enablement. The settings toggle writes only explicit
+  `Enabled` or `Disabled` values.
+- Provider detection runs at startup and re-runs after debounced host-auth
+  watcher events for its marker paths. A changed detection snapshot reconciles
+  effective enablement without polling; stored accounts still keep a provider
+  enabled when its marker disappears.
+- `Message::Tick` polls automatic-refresh eligibility every 10 seconds. Provider
+  data remains eligible only after `refresh_interval_seconds` has elapsed since
+  its last successful refresh, so a due refresh can begin up to 10 seconds after
+  the configured interval. Only the refresh owner handles timer refresh. Non-owner
+  ticks do not refresh providers and do not create refresh requests.
+- `Message::RefreshNow` is the popup’s "Refresh now" button. Any applet process
+  handles it by writing shared control requests for enabled providers. The
+  refresh owner observes those requests, evaluates each provider's refresh
+  eligibility, ignores disabled, already-refreshing, and not-ready providers,
+  publishes shared runtime with the existing refreshing state before provider
+  work, and consumes a provider request after publishing that provider's final
+  runtime result. Non-owners never execute provider refresh directly. User-driven
+  requests — the "Refresh now" button and account actions — are forced: they
+  bypass the per-account backoff timer so a ready provider whose selected account
+  is backing off after an error still refreshes (and briefly shows the refreshing
+  state) instead of being silently skipped. Accounts that need re-authentication
+  (`AuthState::ActionRequired`) are still skipped, since a retry cannot succeed
+  without login.
+- Before each timer refresh cycle the owner resolves stale refreshes: any provider
+  left in the refreshing state for more than 60 seconds (for example because the
+  previous owner process exited mid-refresh) is cleared, shown a "Refresh timed
+  out" error, and its selected accounts are given a failure backoff. This prevents
+  a provider from spinning on "Refreshing" indefinitely.
+- Login, re-authentication, account switching, provider enablement, and account
+  deletion write account storage and durable config from the process handling
+  the user action. Those actions then write a provider-scoped shared refresh
+  request; only the refresh owner executes provider refresh and publishes shared
+  runtime status, usage snapshots, account health, auth state, refresh errors,
+  or runtime cleanup.
+- A successful login (or Minimax API key save) clears the login state
+  immediately: the account controls return to the normal add-account state with
+  no confirmation message or dismiss step. Failed logins keep showing the error
+  with `Add another` / `Dismiss` controls.
 - Each provider has a persisted `show_all_accounts` setting. When it is off, selecting an account makes that provider single-account and YapCap keeps only one selected account for it. When it is on, the provider can keep multiple selected accounts and render up to four accounts. Enabling it selects at most four account ids per provider: the current active account when still available, then additional stored accounts in stable account order. If older or manually edited state contains more than four selected account ids, the panel and provider detail popup still render only the first four. This is a multi-account selection and rendering cap, not a storage limit.
 - Provider HTTP calls use a shared `reqwest::Client` with a 5s connect timeout and 20s total request timeout.
 - Refresh dispatch runs only when the provider is enabled and its account resolver is `Ready`.
 - When multiple accounts are selected for a provider, `app::refresh` spawns one independent `Task::perform` per account and batches them with `Task::batch`. Results arrive concurrently; the popup rerenders after each individual account completes.
 - `runtime::refresh_account` takes an explicit `account_id` and resolves which YapCap-owned account to fetch. If the requested account is not found it falls back to the first available account; if no accounts exist it returns a `LoginRequired` state.
 - `runtime::refresh_provider_account` keeps the previous account snapshot on error so the UI never drops data on a transient failure. It instead flips the account’s `ProviderHealth::Error`.
+
+### 2.4 Multi-Process Applet Model
+
+COSMIC can run one YapCap applet process per panel output. YapCap supports that
+model directly: each process owns its local surface state, while product state is
+coordinated through COSMIC config and a refresh-owner lock.
+
+Shared state:
+
+- Durable user config: selected provider, enabled providers, selected account
+  ids, show-all account settings, display preferences, refresh interval, and
+  managed account metadata.
+- Shared runtime config: the versioned runtime document containing provider and
+  account runtime state, usage snapshots, refresh status, generation, and write
+  timestamp.
+- Shared control config: the versioned refresh-request document containing
+  provider-scoped requests, reason, request timestamp, requesting process id,
+  generation, and update timestamp.
+- YapCap-owned account storage: provider metadata, tokens, and per-account
+  snapshots under the native or Flatpak state directory.
+
+Local per-process state:
+
+- Popup open/closed state, popup route, popup size measurements, focus, hover
+  state, copied-code hints, login task handles, and in-progress text input.
+- Refresh-owner diagnostics such as PID, generated process id, and
+  `COSMIC_PANEL_OUTPUT`, which are logged but not stored in shared runtime.
+
+Refresh responsibilities:
+
+- Exactly one process is the refresh owner while it holds
+  `refresh-owner.lock` under the YapCap state directory.
+- The owner executes startup refresh, timer refresh, and observed shared-control
+  refresh requests. It is the only process that writes shared runtime.
+- Non-owners do not execute timer refresh and do not write shared runtime. They
+  may write durable user config and shared-control refresh requests, then observe
+  shared runtime updates from the owner.
+- Any process can select a provider, change provider/account settings, add,
+  re-authenticate, or delete accounts. Those actions update config/account
+  storage immediately and request owner refresh when runtime state needs to
+  change.
+- Non-owner processes wait for the owner lock in the background. When the owner
+  exits or its output disappears, one waiting process takes ownership, clears old
+  shared refresh requests, and evaluates startup freshness.
+
+`snapshots.json` is not active runtime state. Existing native and Flatpak
+snapshot files are left on disk but are not read or written during normal
+runtime behavior; shared runtime through COSMIC config is the cross-process
+source of truth.
 
 ## 3. Providers
 
@@ -196,7 +299,9 @@ Codex account model:
 - Host Codex CLI session hint: YapCap read-only reads `~/.codex/auth.json` to set
   `system_active_account_id` (JWT user id vs stored `provider_account_id`) for the
   **Active** badge. An inotify-backed subscription (via the `notify` crate on Linux)
-  reapplies Codex reconciliation when that file changes; when the file is missing
+  reapplies Codex reconciliation when that file is created, modified, removed,
+  or atomically replaced; read/access events are ignored so rereading the file
+  cannot trigger a self-sustaining reconciliation loop. When the file is missing
   but `~/.codex` exists, the directory is watched for `auth.json` events. Under
   Flatpak, the `~/.codex` / auth path uses the passwd home directory so it stays
   aligned with `finish-args` mounts when `HOME` points at `~/.var/app/...`.
@@ -237,8 +342,11 @@ Usage request: `GET https://chatgpt.com/backend-api/wham/usage` with:
 
 Response shape (subset consumed):
 
-- `rate_limit.primary_window.used_percent` / `reset_at` → 5h window.
-- `rate_limit.secondary_window.used_percent` / `reset_at` → 7d window.
+- Each non-null `rate_limit.primary_window` and `rate_limit.secondary_window`
+  supplies `used_percent` and `reset_at`. YapCap derives the label from
+  `limit_window_seconds`: values within 60 seconds of 5h are Session and values
+  within 60 seconds of 7d are Weekly. Missing or unknown durations retain the
+  positional fallback: primary is Session and secondary is Weekly.
 - `credits.balance` (string or number, nullable) → parsed into a `ProviderCost { units: "credits" }`; null or absent balance is silently ignored.
 
 OAuth refresh:
@@ -308,14 +416,16 @@ Primary: `GET https://api.anthropic.com/api/oauth/usage` with:
 - `Authorization: Bearer <access_token>` (current access token from account `tokens.json`)
 - `anthropic-beta: oauth-2025-04-20`
 - Token must carry scope `user:profile`; otherwise `MissingProfileScope` is returned before the request.
-- Before the request, YapCap preflights token expiry. If `expires_at` is within five minutes, YapCap calls `POST https://console.anthropic.com/v1/oauth/token` with `grant_type=refresh_token`, writes updated tokens to account storage (and updates metadata when the response includes identity fields), then continues with the fresh access token and performs exactly one usage request in that cycle.
+- Before the request, YapCap preflights token expiry. If `expires_at` is within five minutes, YapCap calls `POST https://claude.ai/v1/oauth/token` with `grant_type=refresh_token`, writes updated tokens to account storage (and updates metadata when the response includes identity fields), then continues with the fresh access token and performs exactly one usage request in that cycle.
 - If the usage endpoint returns HTTP 401, YapCap attempts one token refresh via the same OAuth token endpoint, persists new tokens when that succeeds, and retries the usage request once immediately with the fresh access token. If the retry also returns 401, the cycle ends as unauthorized without another refresh attempt.
 
 Response shape:
 
 - `five_hour.utilization` / `resets_at` → Session window (utilization is 0..100).
 - `seven_day.utilization` / `resets_at` → Weekly window.
-- `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` → model-specific weekly windows (Max plan only; null on Pro).
+- Model-scoped weekly windows come from one of two shapes, in priority order:
+  - When `limits` is present and non-empty, each entry with `group == "weekly"` and `kind == "weekly_scoped"` and a non-empty `scope.model.display_name` maps to a weekly window labeled by that `display_name` (e.g. `"Fable"`), using `percent` for fill and `resets_at` for the reset time. Entries without a `percent` are skipped (no data, matching the legacy behavior when `utilization` is absent). Entries are emitted in array order immediately after the Weekly window. `is_active` is not used as a filter (it has been observed `false` on applicable limits). Duplicates are collapsed by `scope.model.id` when present and non-empty, otherwise by `display_name`, keeping the first occurrence. When `limits` is present, the legacy `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` fields are ignored.
+  - When `limits` is absent or empty, `seven_day_sonnet` / `seven_day_opus` / `seven_day_cowork` map to Sonnet/Opus/Cowork weekly windows (Max plan only; null on Pro).
 - When present, Claude maps `extra_usage` to `UsageSnapshot.extra_usage`:
   - `is_enabled: false` → `ExtraUsageState::Disabled` (popup: **Extra usage** with **Disabled** subtitle, no progress bar).
   - otherwise → `ExtraUsageState::Active` with bar fill from `utilization`, or from `(used_credits / monthly_limit) * 100` when utilization is omitted; amounts come from `used_credits` / `monthly_limit` / `currency` (credits scaled by dividing by 100; currency defaults to `"$"` if absent). In the popup, formatted amounts separate the number from the rendered symbol with a space (symbols follow common ISO‑4217 mappings such as `$` for USD, `€` for EUR); hovering the amount line shows the three-letter ISO code in a tooltip.
@@ -326,11 +436,11 @@ Claude usage windows are partially tolerant because the endpoint can return null
 
 Usage fallback: none. Claude usage is fetched only through the OAuth usage endpoint.
 
-All routine access-token refresh uses `POST https://console.anthropic.com/v1/oauth/token` with `grant_type=refresh_token` and the stored refresh token. The Claude CLI is not involved.
+All routine access-token refresh uses `POST https://claude.ai/v1/oauth/token` with `grant_type=refresh_token` and the stored refresh token. The Claude CLI is not involved.
 
 HTTP 429 surfaces as `ClaudeError::RateLimited { retry_after_secs: Option<u64> }`, is marked transient, and displays the message "Rate limited by Claude — will retry automatically", optionally appended with "(retry in Xm)" when a `Retry-After` header is present. Token refresh HTTP 4xx errors other than 429 are permanent re-auth failures (`requires_user_action = true`).
 
-**Rate limit backoff:** When a refresh cycle encounters a 429, YapCap records `rate_limit_until` on the per-account state. The value is taken from the `Retry-After` response header when present; otherwise it uses exponential backoff: `300s * 2^(consecutive-1)`, capped at 3600s. Subsequent refresh cycles skip any account where `rate_limit_until > now`. On the next successful refresh, `rate_limit_until` and `consecutive_rate_limits` are cleared. Network/transient failures (connection errors, timeouts) do not update `rate_limit_until` and do not increment the consecutive counter — they leave the stale snapshot visible with an error status without deleting tokens.
+**Refresh backoff:** When a refresh cycle fails for any reason, YapCap records `retry_after` on the per-account state and increments `consecutive_failures`. The delay is taken from the `Retry-After` response header when the error carries one (rate limits); otherwise it uses exponential backoff: `300s * 2^(consecutive-1)`, capped at 3600s. Automatic (timer) refresh cycles skip any account that is still backing off (`retry_after > now`); user-driven refreshes force through the backoff as described above. On the next successful refresh, `retry_after` and `consecutive_failures` are cleared. Transient failures (connection errors, timeouts, HTTP 5xx, HTTP 429) leave the last good snapshot visible with an error status and never delete tokens. The `retry_after`/`consecutive_failures` fields migrate from the earlier `rate_limit_until`/`consecutive_rate_limits` names via serde aliases.
 
 ### 3.3 Cursor
 
@@ -466,52 +576,102 @@ Usage request:
 - `User-Agent: GitHubCopilotChat/0.35.0`
 - `X-Github-Api-Version: 2026-03-10`
 
-Free response shape (`access_type_sku == "free_limited_copilot"`):
+Unified response shape (`quota_snapshots` present):
 
-- `monthly_quotas.chat` and `monthly_quotas.completions` are entitlements.
-- `limited_user_quotas.chat` and `limited_user_quotas.completions` are
-  remaining quota.
-- `limited_user_reset_date` is used as `reset_at` for both windows.
-- YapCap renders two usage windows in order: `chat`, then `completions`.
-  Headline usage points at `completions`, and the plan badge is **Free**.
-- Usage window titles render as user-facing labels: `chat` → **Chat**,
-  `completions` → **Completions**.
-- Free windows infer `window_seconds = 30 days` when
-  `limited_user_reset_date` is in the future. Expired resets leave
-  `window_seconds = None`, which skips the popup pace marker.
-- `UsageSnapshot.identity.email` stays empty; `identity.display_name` uses the
-  GitHub `login`.
+GitHub's 2026-06-01 AI-credits migration removed the legacy Free fields
+(`monthly_quotas`, `limited_user_quotas`, `limited_user_reset_date`) and now
+reports every plan through `quota_snapshots`. One parser path serves Free and
+paid accounts: it routes on `quota_snapshots` presence and reads the per-quota
+fields below.
 
-Paid response shape (`quota_snapshots` present):
+| Field | Scope | Meaning |
+| --- | --- | --- |
+| `quota_snapshots.<key>` | response | Per-quota object; keys `premium_interactions`, `chat`, `completions` are read in that order |
+| `entitlement` | per-quota | Quota allowance for the window |
+| `remaining` | per-quota | Floored integer remaining |
+| `percent_remaining` | per-quota | Remaining as a 0–100 percentage; preferred fill source |
+| `has_quota` | per-quota | Whether the quota is metered |
+| `unlimited` | per-quota | Whether the quota is uncapped |
+| `overage_count` | per-quota | Interactions consumed beyond the entitlement |
+| `quota_reset_date_utc` | response | RFC 3339 reset timestamp; preferred `reset_at` source |
+| `quota_reset_date` | response | Date-only reset fallback |
+| `token_based_billing` | response | Present in the unrecognized-response error detail |
 
-- `quota_snapshots.premium_interactions.entitlement`, `remaining`, and
-  `percent_remaining` are the paid interaction quota. `quota_remaining` is
-  accepted as informational response data and not surfaced.
-- `quota_reset_date` is used as `reset_at`.
-- YapCap renders one usage window, `premium_interactions`. Headline usage points
-  at that window. `chat` and `completions` snapshots are skipped because paid
-  tiers report them as unlimited. The popup labels this window **Premium**.
-- When `premium_interactions.overage_count > 0`, the popup renders
-  `+<count> over plan` directly under the premium usage bar. The panel applet
-  still renders only the usage percentage.
-- The premium window infers `window_seconds` from
-  `quota_reset_date - <previous UTC calendar-month boundary>`. The inferred
-  start is the first day of the same month when `quota_reset_date` falls after
-  the 1st; otherwise it is the first day of the prior month. Expired or
-  non-positive inferred windows leave `window_seconds = None`, which skips the
-  popup pace marker.
-- Plan badge mapping is: `free_limited_copilot` → **Free**,
-  `plus_monthly_subscriber_quota` → **Pro+**,
-  `copilot_standalone_seat_quota` → **Business**. Unknown paid SKUs fall back
-  by `premium_interactions.entitlement`: 300 → **Pro**, 1500 → **Pro+**,
-  anything else → **Plan**.
+- **Window emission.** Keys are iterated in fixed order `premium_interactions`,
+  `chat`, `completions`. A window is emitted for a metered quota:
+  `has_quota == true && unlimited == false`. When `has_quota` is absent (tolerated
+  pre-migration paid responses), the quota is metered when `unlimited != true`
+  and `entitlement > 0`. Free accounts emit `chat` and `completions`; paid
+  accounts emit only `premium_interactions` because their `chat`/`completions`
+  quotas are `unlimited`.
+- **Fill.** `used_percent = 100 − percent_remaining` when `percent_remaining` is
+  present; otherwise `remaining / entitlement`. Both are clamped 0–100, and a
+  non-positive entitlement yields 0.
+- **Reset and window seconds.** `reset_at` prefers `quota_reset_date_utc`
+  (RFC 3339) and falls back to `quota_reset_date` (date-only, parsed as UTC
+  midnight). Per-quota `quota_reset_at` is ignored. Every window, Free and paid,
+  infers `window_seconds` from `reset_at − <previous UTC calendar-month
+  boundary>`. The inferred start is the first day of the same month when
+  `reset_at` falls after the 1st; otherwise the first day of the prior month.
+  Expired or non-positive inferred windows leave `window_seconds = None`, which
+  skips the popup pace marker.
+- **Headline.** Free headlines `completions` (previous behavior); paid headlines
+  the `premium_interactions` window. Panel bar counts stay derived from the
+  window count, so mixed Free/paid account groups keep their bar shapes.
+- **Labels.** Usage window titles render as user-facing labels: `chat` →
+  **Chat**, `completions` → **Completions**. The `premium_interactions` window
+  is labeled **Credits** (Fluent `copilot-window-credits`) when the response is
+  token-based (`token_based_billing == true`), reflecting that the paid quota is
+  now AI Credits money; tolerated pre-migration (non-token-based) responses keep
+  the **Premium** label.
+- **Credits cost card.** A token-based paid account (`token_based_billing ==
+  true` with a metered `premium_interactions` quota) populates `provider_cost`
+  so the popup renders a dollar cost card under the Credits bar via the existing
+  cost-card path (Codex credits precedent): `used = (entitlement − remaining) /
+  100` and `limit = entitlement / 100`, both in USD, where `remaining` prefers
+  fractional `quota_remaining` and falls back to integer `remaining` — 1 credit
+  = $0.01, so a Pro+ account (7,000 entitlement, 4,200 remaining) reads
+  `$28.00 / $70.00`. Free accounts get no cost card: their chat/completions
+  quotas are request counts even though the response carries
+  `token_based_billing: true`, and their unmetered `premium_interactions`
+  produces no cost.
+- **Overage.** When `premium_interactions.overage_count > 0`, the popup renders
+  `+<count> over plan` directly under the Credits (or Premium) usage bar. The
+  panel applet still renders only the usage percentage.
+- **Identity.** `UsageSnapshot.identity.email` stays empty;
+  `identity.display_name` uses the GitHub `login`.
+- **Plan badge mapping.** SKU strings map first and keep their meanings:
+  `free_limited_copilot` → **Free**, `plus_monthly_subscriber_quota` → **Pro+**,
+  `copilot_standalone_seat_quota` → **Business**. A known SKU wins regardless of
+  entitlement. For an unknown SKU the fallback depends on the billing model,
+  where token-based means a strict top-level `token_based_billing == true`
+  (field presence, a string, or a number does not count):
+
+  | SKU | Billing model | Metered premium quota | Badge |
+  | --- | --- | --- | --- |
+  | `free_limited_copilot` | any | any | **Free** |
+  | `plus_monthly_subscriber_quota` | any | any | **Pro+** |
+  | `copilot_standalone_seat_quota` | any | any | **Business** |
+  | unknown | token-based | yes, `premium_interactions.entitlement` ≤ 2,000 | **Pro** |
+  | unknown | token-based | yes, ≤ 10,000 | **Pro+** |
+  | unknown | token-based | yes, > 10,000 | **Max** |
+  | unknown | token-based | no | **Plan** |
+  | unknown | not token-based | `entitlement` == 300 | **Pro** |
+  | unknown | not token-based | `entitlement` == 1500 | **Pro+** |
+  | unknown | anything else | anything else | **Plan** |
+
+  Token-based ranges rather than exact values because GitHub adjusts the
+  variable credit top-up over time; the exact-entitlement fallback (300 →
+  **Pro**, 1500 → **Pro+**) applies only to non-token-based responses.
 
 Copilot HTTP 401 and 403 mark the account `ActionRequired` and preserve any
 stale snapshot. HTTP 429 is transient and uses the shared per-account
 rate-limit backoff. HTTP 5xx, timeouts, and network errors are transient. An
-unrecognized response shape returns "Unrecognized Copilot response: <detail>"
-with details such as `access_type_sku=no_access` or a missing quota field, and
-preserves any stale snapshot.
+unrecognized response shape (no `quota_snapshots`, or no metered quota in it)
+returns "Unrecognized Copilot response: <detail>" and preserves any stale
+snapshot. The detail lists `access_type_sku`, `login` when present, and always
+whether `token_based_billing` was present (`token_based_billing=true|false` or
+`token_based_billing=absent`).
 
 Copilot accounts in `ActionRequired` show a `Re-auth needed` badge and the
 same per-account re-auth action as Gemini. Healthy Copilot accounts show no
@@ -538,23 +698,30 @@ Token format:
 
 Reference response shapes:
 
-Free tier (`access_type_sku == "free_limited_copilot"`):
+Free tier (`access_type_sku == "free_limited_copilot"`, post-migration):
 
 ```json
 {
   "access_type_sku": "free_limited_copilot",
   "copilot_plan": "individual",
-  "limited_user_quotas":     { "chat": 480, "completions": 4000 },
-  "monthly_quotas":          { "chat": 500, "completions": 4000 },
-  "limited_user_reset_date": "2026-06-03",
+  "quota_reset_date": "2026-08-01",
+  "quota_reset_date_utc": "2026-08-01T00:00:00.000Z",
+  "quota_snapshots": {
+    "chat":        { "entitlement": 200,  "remaining": 200,  "percent_remaining": 100.0, "has_quota": true,  "unlimited": false },
+    "completions": { "entitlement": 2000, "remaining": 2000, "percent_remaining": 100.0, "has_quota": true,  "unlimited": false },
+    "premium_interactions": { "entitlement": 0, "remaining": 0, "percent_remaining": 0.0, "has_quota": false, "unlimited": false }
+  },
+  "token_based_billing": true,
   "login": "TopiCsarno"
 }
 ```
 
-`monthly_quotas.<field>` is the entitlement, `limited_user_quotas.<field>` is
-remaining; used percent is `1 - remaining / entitlement`. Entitlement values
-vary across captures (GitHub adjusts Free limits over time); field names are
-stable.
+Free accounts report through the same `quota_snapshots` shape as paid accounts.
+Only `chat` and `completions` are metered; the zero-entitlement
+`premium_interactions` quota is not metered and emits no window. Free
+entitlements vary across captures (GitHub adjusts Free limits over time), so
+they are always taken from the response. Despite the top-level
+`token_based_billing: true`, Free quotas are request counts, not credits.
 
 Paid tiers (`quota_snapshots` present):
 
@@ -584,14 +751,22 @@ Paid tiers (`quota_snapshots` present):
 equivalent reflecting per-model multipliers and is accepted but not surfaced.
 The parser tolerates extra top-level fields (`analytics_tracking_id`,
 `assigned_date`, `can_signup_for_limited`, `chat_enabled`,
-`organization_login_list`, `organization_list`, `quota_reset_date_utc`) and
-extra per-quota fields (`quota_id`, `timestamp_utc`, `overage_permitted`)
-without failing.
+`organization_login_list`, `organization_list`) and extra per-quota fields
+(`quota_id`, `timestamp_utc`, `overage_permitted`, `quota_reset_at`,
+`quota_remaining`) without failing.
 
 No real fixture exists for Pro (GitHub paused Pro upgrades in May 2026) or
 Enterprise. Unknown paid SKUs fall back to entitlement-based plan-badge
 disambiguation (see §3.4 plan badge mapping above). `YAPCAP_DEMO` seeds an
 `overage_count > 0` Pro+ account because no real overage capture exists.
+
+`copilot_user_pro_plus_token_response.json` is a **synthetic** token-based Pro+
+fixture (unknown SKU `pro_plus_credit_quota`, `token_based_billing == true`,
+metered premium entitlement 7,000 with partial consumption, unlimited
+chat/completions, both reset date fields). It is handcrafted from published
+post-migration observations and marked synthetic in its `_source` field until a
+real capture exists, the same convention used for the Pro and Enterprise notes
+above. Its entitlement lands in the token-based **Pro+** range (≤ 10,000).
 
 ### 3.5 Gemini
 
@@ -756,8 +931,11 @@ Minimax account model:
   with account metadata and the API key stored in YapCap-owned files.
 - Minimax account identity is a user-provided label; duplicate labels are allowed
   and managed as separate accounts.
-- Minimax does not have a host CLI active-account resolver; YapCap tracks the
-  user-selected active account through its own account selection mechanism.
+- Minimax's active-account resolver checks the `MINIMAX_API_KEY` environment
+  variable: when set and non-empty, the managed account whose
+  `api_key_source` is `env:MINIMAX_API_KEY` is reported as the **Active**
+  account; otherwise YapCap tracks the user-selected active account through
+  its own account selection mechanism.
 
 Managed Minimax add-account flow:
 
@@ -777,6 +955,115 @@ Error classification (`MinimaxError`):
 - **Permanent / `requires_user_action`:** `InvalidApiKey`, `Unauthorized`.
 - **Transient:** `RateLimited { retry_after_secs }`, network errors, timeouts.
 - **No usage data:** invalid or missing quota response preserves prior snapshot.
+
+### 3.7 Antigravity
+
+Antigravity is a second Google Code Assist provider modeled on Gemini (§3.5):
+YapCap runs its own Google OAuth login and stores its own tokens; it never
+reads Antigravity's keyring or talks to the local language server.
+
+Antigravity account model:
+
+- Each managed account is stored under
+  `<state-root>/yapcap/antigravity-accounts/<id>/` with `metadata.json`,
+  `tokens.json`, and optional `snapshot.json`.
+- Account identity is the normalized OAuth `id_token` email (trim + ASCII
+  lowercase) with duplicate-login dedupe.
+- Antigravity keeps its own token in the OS keyring, which YapCap does not read,
+  so `system_active_account_id` is always `None` — there is **no Active badge**
+  (like Copilot/Minimax).
+- Plan badge from `currentTier.id`: `free-tier` → Free, `standard-tier` /
+  `g1-pro-tier` → Pro, `g1-ultra-tier` → Ultra, anything else → Plan.
+
+Managed Antigravity add-account flow:
+
+- Settings exposes `Add account` under the Antigravity accounts card,
+  running the shared Google OAuth installed-app PKCE loopback flow (the Gemini
+  flow is the template) with Antigravity's own client pair and scopes. The
+  redirect is an ephemeral-port loopback (`http://localhost:<port>/oauth/callback`,
+  OS-assigned); live-verified accepted by Google (issue 006, 2026-07-14), so no
+  fixed-port fallback is used.
+- Client id/secret default to the public pair embedded in the `agy` binary and
+  are overridable via `YAPCAP_ANTIGRAVITY_CLIENT_ID` /
+  `YAPCAP_ANTIGRAVITY_CLIENT_SECRET`. Scopes: `openid`, `email`, `profile`,
+  `cloud-platform`, and the Antigravity-specific `aicode` scope. Live-verified
+  sufficient for the quota endpoint (issue 006, 2026-07-14): a token minted with
+  exactly this set fetches quota successfully — no widening to the app's 7-scope
+  set is needed.
+- On callback: validate state, exchange the code, decode `id_token` for
+  email/sub, call `loadCodeAssist` (`ideType: ANTIGRAVITY`) for the tier id,
+  then commit to storage with normalized-email dedupe. Cancel/abort commits
+  nothing.
+- Re-auth reuses the flow with `login_hint=<email>` and rejects a mismatched
+  returned email; account rows show a re-auth icon on auth failure.
+
+API surface and host:
+
+- `POST <host>/v1internal:loadCodeAssist` and
+  `POST <host>/v1internal:retrieveUserQuotaSummary`, headers
+  `Authorization: Bearer`, `Content-Type: application/json`,
+  `User-Agent: antigravity`. `loadCodeAssist` metadata uses
+  `ideType: ANTIGRAVITY`. The quota call sends `{"project": <id>}` using the
+  `cloudaicompanionProject` discovered by `loadCodeAssist`, falling back to an
+  empty body when the field is absent (no cloud-resource-manager fallback).
+  **The project id is load-bearing for free accounts** (live-verified
+  2026-07-15): with an empty body a free account's quota response degrades to a
+  single `All Models` group of per-model buckets carrying no `window` field and a
+  flat `remainingFraction: 1`, i.e. wrong values. Passing the project id returns
+  the normal grouped shape with real usage. Paid accounts return the same
+  response either way. `User-Agent: antigravity` is required — the quota endpoint
+  answers 403 `PERMISSION_DENIED` without it.
+- Default host `cloudcode-pa.googleapis.com`, overridable via
+  `YAPCAP_ANTIGRAVITY_HOST`. Live-verified (issue 001, 2026-07-14): all three
+  endpoints return 200 on the prod host and the quota shape matches the fixtures;
+  the env override remains as a safety valve.
+
+Usage fetch (per refresh cycle, same shape as Gemini):
+
+1. Preflight token refresh when within the refresh window; persist the rotated
+   access token and keep the stored refresh token (refresh responses return
+   none).
+2. `loadCodeAssist` → tier id + `cloudaicompanionProject`. A 401 triggers one
+   reactive refresh + one retry.
+3. `retrieveUserQuotaSummary` (project id from step 2) → groups, sharing the same
+   single reactive-refresh budget across the cycle.
+4. Normalize into one `UsageWindow` per bucket: per group in server order, Five
+   Hour then Weekly. Per window: `group` = group `displayName`, `label` = bucket
+   `displayName`, `used_percent = (1 − remainingFraction) × 100` clamped,
+   `window_seconds` = 604 800 (weekly) / 18 000 (5h) / `None` for unknown,
+   `reset_at` from the RFC3339 `resetTime`. Empty `groups` → `NoUsageData`
+   preserving the prior snapshot. Snapshot headline index points at the first
+   5-hour window, falling back to the first weekly window (free accounts have no
+   5-hour bucket), then to index 0.
+5. Snapshot `source: "OAuth"`, identity email from stored metadata, plan badge
+   from the tier mapping; persist snapshot + updated metadata (last tier id).
+
+Bucket count is tier-dependent; the layout is not. Both tiers return the same two
+groups with the same labels, so no tier-specific rendering exists:
+
+- **Paid (`paidTier.id` = `g1-pro-tier`/`g1-ultra-tier`): four bars** — Gemini
+  Models {Weekly, Five Hour}, Claude and GPT models {Weekly, Five Hour}.
+- **Free (`paidTier.id` = `free-tier`, "Antigravity Starter Quota"): two bars** —
+  Gemini Models {Weekly}, Claude and GPT models {Weekly}. Free tier has no
+  5-hour cap, so the server sends no 5h bucket.
+
+Display:
+
+- **Panel headline:** the two 5-hour bars (Gemini 5h + Claude/GPT 5h) — the
+  fast-moving ambient signal. When fewer than two 5-hour windows exist (free
+  tier), the applet falls back to the first two windows, which are the two weekly
+  bars.
+- **Popup:** all bars, grouped under the server's group `displayName`s
+  (Gemini Models / Claude and GPT models), Five Hour then Weekly within each;
+  each group renders as one rounded container card per §7's grouped-window rule.
+
+Error classification (`AntigravityError`), mirroring Gemini §3.5:
+
+- **Permanent / `requires_user_action`:** refresh HTTP 400/401/403,
+  `Unauthorized` after the reactive-refresh retry.
+- **Transient:** `RateLimited { retry_after_secs }` (429 with Retry-After),
+  5xx, network errors, timeouts.
+- **No usage data:** empty `groups` preserves the prior snapshot.
 
 ## 4. Auth and Config
 
@@ -805,9 +1092,15 @@ Copilot OAuth material lives only under YapCap-owned
 GitHub or Copilot CLI config for Copilot, and Copilot has no host-session
 Active badge.
 
-Codex, Claude, Gemini, and Copilot OAuth material used by normal refresh all
-lives under YapCap-owned account directories as `tokens.json`. Provider errors
-bubble up as `requires_user_action = true` when user login is needed.
+Antigravity OAuth material lives only under YapCap-owned
+`antigravity-accounts/<id>/tokens.json` (see §3.7). YapCap does not read
+Antigravity's keyring token or talk to its local language server, and
+Antigravity has no host-session Active badge.
+
+Codex, Claude, Gemini, Copilot, and Antigravity OAuth material used by normal
+refresh all lives under YapCap-owned account directories as `tokens.json`.
+Provider errors bubble up as `requires_user_action = true` when user login is
+needed.
 
 ### 4.2 Cursor Token Source
 
@@ -824,8 +1117,8 @@ that integration: settings live under `…/cosmic/io.github.TopiCsarno.YapCap/vN
 state from an older schema. YapCap does not copy or merge from other `v*`
 folders; remove stale dirs yourself if you want to reclaim disk space, or copy
 files manually if you need to salvage values after a version bump.
-The Copilot release uses schema `v500` as a deliberate fresh-start boundary
-after the provider account model changes. Existing `v400` COSMIC settings may
+The 0.6.0 release uses schema `v600` as a deliberate fresh-start boundary
+after the tri-state provider enablement and provider detection changes. Existing `v503` COSMIC settings may
 remain on disk, but YapCap starts from fresh defaults and users must re-add
 accounts. The schema bump does not delete YapCap-owned account directories,
 snapshot caches, or logs.
@@ -904,12 +1197,13 @@ log_level = "info"
   There is at most one managed Copilot account per GitHub numeric user id.
 - Account add/remove, login that adds a managed account, active-account
   selection, and COSMIC `watch_config` updates all re-run the same merge from
-  config into in-memory `AppState` and rewrite the snapshot cache, so the
-  managed account rows, UI account lists, and on-disk state stay consistent.
+  config into in-memory `AppState`, so managed account rows and UI account lists
+  update immediately across applet processes. Only the refresh owner publishes
+  the reconciled runtime cleanup or refreshed usage state to shared runtime.
 
 ## 5. Data Model
 
-The runtime state is intentionally layered. `AppState` is the cacheable root,
+The runtime state is intentionally layered. `AppState` is the shared runtime payload,
 each provider has one `ProviderRuntimeState`, and account-owned
 `ProviderAccountRuntimeState` entries hold successful `UsageSnapshot` values
 with a dynamic number of usage windows.
@@ -963,7 +1257,7 @@ ExtraUsageState
 ```
 
 `ProviderRuntimeState` describes provider enablement, active-account selection,
-refresh activity, and legacy display data from older caches.
+refresh activity, and legacy display data from older snapshot payloads.
 `ProviderAccountRuntimeState` describes account health and owns the provider's
 last successful usage payload normalized into YapCap's common shape.
 `UsageHeadline` is a newtype index into `windows` that says which window should
@@ -1055,7 +1349,7 @@ In single-account view the badge appears in the account header. In multi-account
 - `reset_at` is present and `≤ now` (elapsed), or
 - `used_percent ≤ 0` and the window is in its **fresh fraction** — `now - (reset_at - window_seconds) < window_seconds / 20` (the first 5 % of the window since it last reset). When `window_seconds` or `reset_at` are missing, the fresh-fraction check degrades to "used_percent ≤ 0" so providers like Claude that can omit `resets_at` after a reset still surface the label.
 
-Otherwise it formats `reset_at` per `ResetTimeFormat`. The rule is provider-agnostic and applies uniformly to every `UsageWindow` rendered in the popup (Codex Session/Weekly, Claude Session/Weekly/Sonnet/Opus/Cowork, Cursor Total/Auto+Composer/API, Gemini Pro/Flash/Lite, Minimax Token, Copilot Free Chat/Completions, Copilot Paid Premium).
+Otherwise it formats `reset_at` per `ResetTimeFormat`. The rule is provider-agnostic and applies uniformly to every `UsageWindow` rendered in the popup (Codex Session/Weekly, Claude Session/Weekly plus per-model scoped windows such as Sonnet/Opus/Cowork/Fable, Cursor Total/Auto+Composer/API, Gemini Pro/Flash/Lite, Minimax Token, Copilot Free Chat/Completions, Copilot Paid Credits/Premium).
 
 ## 6. Persistence, Logging, Paths
 
@@ -1063,15 +1357,18 @@ All paths come from `config::paths()`.
 
 **Native** (Flatpak not used; `FLATPAK_ID` unset):
 
-- Config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v500`
-- Snapshot cache: under the XDG cache root (typically `~/.cache/yapcap/snapshots.json`)
+- Durable config: `cosmic_config` under app ID `io.github.TopiCsarno.YapCap`, schema `v600`
+- Shared runtime config: versioned COSMIC config entry containing `document_version`, `generation`, `written_at`, and an `AppState` payload.
+- Shared control config: versioned COSMIC config entry containing `document_version`, `generation`, `updated_at`, and per-provider refresh requests.
+- Refresh owner lock: `refresh-owner.lock` under the YapCap state directory.
 - Managed accounts and logs: under the XDG state root (typically
   `~/.local/state/yapcap/`), including `codex-accounts/`, `claude-accounts/`,
   `cursor-accounts/`, `gemini-accounts/`, and `copilot-accounts/`
 
 **Flatpak** (`FLATPAK_ID` set): YapCap-owned cache and state **only** under the per-app tree on the host filesystem:
 
-- Snapshot cache: `~/.var/app/<app-id>/cache/yapcap/` (e.g. `snapshots.json`)
+- Shared runtime and shared control use the same COSMIC config entries as native installs.
+- Refresh owner lock: `refresh-owner.lock` under the YapCap Flatpak state directory.
 - Managed accounts and logs: `~/.var/app/<app-id>/data/yapcap/`, including
   `codex-accounts/`, `claude-accounts/`, `cursor-accounts/`,
   `gemini-accounts/`, and `copilot-accounts/`
@@ -1083,14 +1380,80 @@ config; on startup those paths are rewritten to the current canonical
 `<state-root>/yapcap/.../<account-id>/` trees so installs that share COSMIC config
 (native vs Flatpak) do not continue using another build's absolute directories.
 
-Snapshot cache serializes `AppState` (providers + account states +
-`updated_at`) via `serde_json`. It is rewritten whenever any provider or
-account state changes and loaded on startup so the popup has something to show
-while the immediate startup refresh runs.
+`snapshots.json` is no longer read or written during normal runtime behavior.
+Existing files are left untouched on disk. Shared runtime serializes `AppState`
+(providers + account states + `updated_at`) through COSMIC config instead, and
+shared control provides a separate document for explicit refresh requests from
+any applet process. Shared runtime writes advance a generation counter so logs
+can correlate observed state changes across applet processes. Runtime write logs
+include a stable reason label such as `account_status_refresh`,
+`automatic_refresh_started`, `shared_refresh_started`,
+`provider_refresh_finished`, `provider_setting_changed`,
+`show_all_accounts_changed`, `host_cli_auth_changed`, `external_config_update`,
+`account_selection_changed`, or `account_deleted`.
+Live shared-runtime reconciliation preserves provider refresh flags so every
+display observes the owner's in-progress refresh state. Startup reconciliation
+clears those flags because a persisted in-progress operation cannot survive the
+process that owned it.
+Provider and account runtime upserts are idempotent: replacing an entry with
+identical data does not change `AppState.updated_at`, which keeps no-op
+reconciliation from producing redundant shared-runtime generations.
 
-Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. No credentials, bearer tokens, or cookie values are logged.
+Host CLI auth file watching is path- and event-kind-filtered. YapCap reacts to
+create, modify, remove, and atomic-replacement style events on the Codex,
+Claude, and Gemini host-session hint files, but ignores access/read events
+emitted by some Linux file watchers when YapCap rereads those files.
 
-Log level is hardcoded to `"info"` in `main` because config is not available before the applet loop starts. `RUST_LOG` still overrides this at runtime. A `config.log_level` field exists but currently has no effect until a future restart-aware approach is added.
+COSMIC config watchers report the keys associated with each filesystem event.
+YapCap merges only those keys into its current config so notifications from a
+multi-key local write cannot temporarily restore stale values for keys whose
+notifications have not arrived yet. Shared runtime and control watcher updates
+are handled only when their `app_state` and `requests` payload keys arrive;
+metadata-only notifications do not replay an incomplete document.
+
+Logging uses `tracing` with `tracing-subscriber` `EnvFilter` and `tracing-appender` for the log file. The default release filter is `warn,cosmic::theme=off,yapcap=info`, which keeps YapCap diagnostics and dependency warnings/errors while suppressing routine dependency `info` output. File logs are plain text without ANSI terminal styling. No credentials, bearer tokens, or cookie values are logged.
+
+The `cosmic::theme=off` directive suppresses libcosmic's `error loading system dark theme` / `error loading system light theme` events. These fire when the installed COSMIC desktop writes a theme config that predates a key the pinned libcosmic expects (for example a missing `list_button`). libcosmic substitutes its default for the missing key and the applet renders correctly, so the events are noise that YapCap cannot act on. The target logs nothing else. Setting `RUST_LOG` overrides the whole default filter, so `RUST_LOG=debug` restores these events.
+
+Support logs are an INFO-level audit trail for reconstructing what happened from
+a user-provided log file. A clean `YapCap started` line is the first routine
+startup entry and includes PID, process id, owner status, Flatpak/native status,
+launch mode, selected provider, enabled-provider count, effective runtime account
+count, and refresh interval. Lock errors and ownership takeovers are logged
+separately; routine successful owner acquisition is summarized by the startup
+line. Shared runtime/control logs cover missing or invalid document fallbacks,
+reason-labeled runtime writes, watched runtime observations after reconciliation
+against durable config, request creation and consumption, refresh eligibility
+decisions, provider refresh start/finish, and refresh errors. After evaluating
+shared refresh requests, the owner logs requested, scheduled, skipped, and
+unresolved provider counts, the control generation, unique requester process
+ids, compact request-reason counts, and per-provider outcomes such as
+`login_required` or `already_refreshing`. Shared runtime write and observation
+logs use the same compact provider-status buckets and refreshing-provider names
+so each generation can be compared at publication and observation without
+diffing the runtime document. Duplicate metadata notifications and unchanged
+effective runtime states are not logged. External config update logs include the
+observing process, changed keys, selected provider, enabled-provider count,
+selected-account count, and managed-account count. Raw shared runtime loads are
+not logged at INFO because they can contain stale account state before startup
+reconciliation.
+
+User actions are logged at INFO: popup open/close, route navigation, provider tab
+selection, manual refresh, settings changes, account selection/deletion,
+login/reauthentication lifecycle, Cursor scan lifecycle, manual update checks,
+host CLI auth changes, and user quit. User-action logs contain the fields that
+describe the action plus the stable process id so simultaneous applet instances
+can be distinguished. Routine operational events use process id and owner status;
+OS PID is reserved for startup, ownership, and error diagnostics. Logs include
+stable identifiers such as provider, account id, reason, selected count, request
+generation, and runtime generation where those fields help reconstruct ordering.
+Successful local config writes do not produce a second generic event after their
+semantic user-action event. Logs do not include auth URLs, pasted OAuth codes,
+bearer tokens, cookies, or raw provider response bodies.
+
+Log level is hardcoded in `main` because config is not available before the applet loop starts. `RUST_LOG` still overrides this at runtime. A `config.log_level` field exists but currently has no effect until a future restart-aware approach is added.
+
+Dated YapCap log files are pruned on startup. The app keeps the current day plus the previous six days and deletes older `yapcap.log.YYYY-MM-DD` files from the YapCap log directory.
 
 `tracing_appender::non_blocking` returns a `WorkerGuard` that must stay alive for background log flushing. It is held in `main` as `let _log_guard`; the applet runtime blocks until process exit so the guard lives for the full process lifetime.
 
@@ -1099,6 +1462,7 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 ### 7.1 Panel
 
 - A single button using the configured panel icon style: selected provider icon plus compact usage bars, bars only, selected provider icon plus the first applet usage window percentage, or only that percentage.
+- Whenever no enabled provider has any account, the panel button instead renders the plain YapCap app icon (`resources/icon.svg`) alone — no bars, no percents — overriding the configured `panel_icon_style`. The fallback is keyed on account presence, not enablement flags: it covers both zero-enabled-providers and enabled-but-no-account states, and clears as soon as at least one account exists on an enabled provider (normal per-provider rendering then applies, including transient loading states). Clicking still toggles the popup. The icon-only state uses a fixed button size (panel icon square plus applet padding) applied consistently by `applet_settings()`, startup suggested bounds, and panel bound syncing; `applet_settings()` approximates the condition from config (no enabled provider has selected account ids) before runtime state loads.
 - Installed panel applets launch through `cosmic::applet::run` with `LaunchMode::Panel`; the panel view wraps the button in `core.applet.autosize_window` so COSMIC can size the applet surface around the rectangular icon-plus-bars content.
 - Local `cargo run` launches through `cosmic::app::run` with `LaunchMode::Standalone`; `applet_settings()` gives the standalone preview the same calculated button dimensions without using the applet autosize wrapper.
 - Both launch modes share the same button sizing helpers. The usage bar width is at least `suggested_height * APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER`.
@@ -1108,29 +1472,31 @@ Log level is hardcoded to `"info"` in `main` because config is not available bef
 - Clicking toggles the popup.
 - Provider icons have a Default (dark panel) and Reversed (light panel) SVG variant. `app::provider_assets::provider_icon_variant()` calls `cosmic::theme::is_dark()` at render time to select the correct variant. Codex and Cursor use themed monochrome pairs; Claude and Gemini use a single brand-colored SVG (`claude-color.svg`, `gemini-color.svg`) for both variants.
 - YAPCAP subscribes to the active COSMIC theme config and theme mode config so accent and light/dark changes trigger an immediate redraw while the process is running. Native and Flatpak builds both rely on the COSMIC settings daemon config watcher for those live updates.
+- The COSMIC theme config is versioned (`~/.config/cosmic/com.system76.CosmicTheme.<Mode>/v<N>/`), and the version YAPCAP reads is whatever the pinned `libcosmic` declares on `Theme`. COSMIC keeps older version directories on disk without updating them, so a `libcosmic` pin older than the desktop's theme version silently reads a stale accent instead of failing. `cosmic-config` falls back to `version - 1` when a version directory is missing, so a newer pin still themes correctly on older COSMIC installs; a stale pin is the only broken direction. Bump `libcosmic` when COSMIC bumps its theme config version.
 
 ### 7.2 Popup
 
 `app::popup_view::popup_content` composes the popup shell, while `app::popup_view::detail`
 owns provider detail cards and `app::popup_view::settings::*` owns the settings routes:
 
-- Header: "YapCap" + "Refresh now" button.
+- Header: "YapCap", an `Add account` (`+`) button, and a `Refresh now` button. The Add account button replaces the provider detail with a 420 px wide chooser: the “Detected on this machine” section lists providers with no YapCap account first as two-column tiles with a subtle `Connect account` action; remaining providers follow as compact tiles. Every tile opens that provider's Settings category. The chooser is 680 px tall so all providers remain visible; it hides the provider navigation while open. When no provider tabs are available, both header actions are hidden.
 - Navigation row:
-  - provider detail: one tab per enabled provider with its icon and headline percent;
-  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Minimax, and Copilot, using a theme-symbolic gear icon for General and provider icons for provider settings.
+  - provider detail: one tab per enabled provider with its icon and headline percent. With exactly one enabled provider the navigation row is hidden entirely (there is nothing to choose) and the popup shrinks by the row height plus its chrome gap. With two or three enabled providers the tabs share the full row width equally (wider buttons, no empty slots). With four or more, tabs wrap into additional rows after four per row; partial rows keep four equal-width slots so every tab has the same width, and the popup grows taller by one tab-row height per extra row;
+  - settings: category tabs for General, Codex, Claude, Cursor, Gemini, Antigravity, Copilot, and Minimax, using a theme-symbolic gear icon for General and provider icons for provider settings. These tabs wrap the same way, with General occupying the first slot of the first row.
+- Providers render in a single fixed order (`ProviderId::ALL`) everywhere they are listed: Codex, Claude, Cursor, Antigravity, Gemini, Copilot, Minimax.
 - Provider and settings tabs, segmented option buttons, and selected account rows use a soft accent fill and accent border; settings section wrappers around titles and bodies stay visually neutral (layout only).
-- Body panel (scrollable): shows either the selected provider details or the selected settings category.
-- Provider view always starts with a provider title card (icon + name). Below it, each displayed selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. When a provider has exactly one displayed selected account the column fills the full popup width. When a provider has two or more displayed selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to four columns and up to the widest provider across all tabs.
-  - Provider settings categories put the provider enable toggle first. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive; account status badges and account action icons use softer inactive colors in both light and dark themes.
+- Body panel (scrollable): shows either the selected provider details or the selected settings category. When no provider tabs are available, the provider route suppresses the navigation row and shows a centered YapCap/provider-logo hero with “No providers set up yet”, guidance to connect a provider in Settings, and a suggested Open Settings action. The popup sizes itself from the measured hero body.
+- Provider view always starts with a provider title card (icon + name). A provider detected on this machine with no YapCap account additionally shows an accent `Detected` chip and an add-account call to action that opens its Settings category. Below it, each displayed selected account is rendered in its own account column containing: an account header card ("Account" label, email, plan badge, per-account status badge, "Updated X ago" timestamp) followed by usage window cards and a cost/credits card. Usage windows that carry a `group` render inside a single rounded group container per consecutive group run: the container has a component-background fill, rounded corners, and a 1 px component-divider border (which keeps the group visible against the identically filled account column in multi-account view), the group name as an 18 px header, and the group's usage sections stacked inside it (no per-window card and no dividers inside the container). Ungrouped windows keep their own individual cards. Section/card titles ("Account", window labels, "Extra usage", "Credits") render at 15 px so group headers sit above them in the type hierarchy. When a provider has exactly one displayed selected account the column fills the full popup width. When a provider has two or more displayed selected accounts the columns are displayed side by side as cards, each taking an equal `FillPortion` with a component-background fill and rounded corners, with 8 px gaps between them; the popup width expands by one `POPUP_COLUMN_WIDTH` (420 px) per additional column, up to four columns and up to the widest provider across all tabs.
+  - Provider settings categories put the provider enable toggle first. A provider detected on this machine with no YapCap account shows a “Detected on this machine” caption on its settings page, including when explicitly disabled. When a provider is disabled, the provider-specific settings below that toggle are dimmed and non-interactive; account status badges and account action icons use softer inactive colors in both light and dark themes.
   - Each provider settings card shows a `Show all accounts` toggle with a tooltip only when that provider currently has more than one account. Off means the provider follows one active account and collapses to a single column; on means up to four selected accounts render as columns in the panel and popup.
   - General settings contains app-wide settings such as Autorefresh segmented interval buttons, panel icon style preview buttons, reset time format, usage amount format, and about/update status. If the startup update check fails, YapCap keeps retrying in the background with exponential backoff and shows the latest detailed failure plus the next retry delay in About. Error state also shows a manual "Check again" action.
   - When an update is available, a small red notification dot appears next to the main Settings gear icon, on the General settings tab, and next to the About section title. Hovering the tab or About dot shows "Update available".
-  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all six providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets two managed demo accounts with synthetic Session and Weekly usage windows and show-all enabled; **Claude** gets one Max managed demo account with Session and Weekly usage windows, plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend; **Cursor** gets one managed demo account; **Gemini** gets one Pro-tier managed demo account with Pro/Flash/Lite usage windows and a "Pro" plan badge; **Minimax** gets one managed demo account with token usage tracking; **Copilot** gets two selected managed demo accounts with show-all enabled: `casey-free` on the Free plan with chat and completions windows, and `morgan-pro` on Pro+ with one premium-interactions window plus `+42 over plan`; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; snapshot-cache writes are skipped; and demo data is re-applied after config reconciliation.
+  - Debug builds can force the About update-available state with `YAPCAP_DEBUG_UPDATE_AVAILABLE`. Values `1`, `true`, `yes`, and empty string use `v9.9.9`; any other value is treated as the release version. Debug builds can also simulate offline HTTP with `YAPCAP_DEBUG_OFFLINE`; values `0`, `false`, `no`, and `off` disable it, while any other present value enables it. `YAPCAP_DEMO` (debug only; inert in release) seeds a screenshot-oriented synthetic config plus `AppState`: all seven providers are enabled with `provider_visibility_mode = user_managed`; **Codex** gets three managed demo accounts with synthetic Session and Weekly usage windows and show-all enabled; **Claude** gets two managed demo accounts: a Pro account (`pro@example.com`) with Session, Weekly, and Fable usage windows plus synthetic **extra usage** enabled at an **EUR 20.00** monthly limit and partial spend, and a Max account (`max@example.com`) with Session, Weekly, and per-model scoped weekly windows (Sonnet, Opus, Cowork, Fable); **Cursor** gets one managed demo account; **Gemini** gets one Pro-tier managed demo account with Pro/Flash/Lite usage windows and a "Pro" plan badge; **Minimax** gets one managed demo account with token usage tracking; **Copilot** gets two selected managed demo accounts with show-all enabled: `casey-free` on the Free plan with chat and completions windows, and `morgan-pro` as a token-based Pro+ credits account with one **Credits** window, a dollar cost card (`$28.00 / $70.00`), and `+42 over plan`; **Antigravity** gets two selected managed demo accounts with show-all enabled: `pro@example.com` on the Pro tier with grouped Gemini Models / Claude and GPT models windows (Five Hour then Weekly per group), and `free@example.com` on the Free tier with a Weekly Limit window; display settings otherwise follow defaults (panel icon style, reset time format, usage format, autorefresh interval); the default startup `Task` batch is skipped; provider refresh becomes a no-op; shared-runtime writes are skipped; and demo data is re-applied after config reconciliation.
   - Provider account cards list currently valid account sources as separate selector rows with a selected outline/checkmark, a row press to make an account active, and account action icons. Long account labels are truncated in-row and reveal the full label on hover. Codex add-account login opens the browser from the Settings flow and stores the result in YapCap-owned account storage. Codex account rows show the same login-required warning badge and row highlight as other providers when `auth_state = ActionRequired` (for example after refresh token failure). Claude add-account opens the native OAuth browser flow from Settings, shows the same browser account/private-window hint as Copilot, and asks the user to paste the returned authentication code; malformed pasted input is rejected with plain-language guidance to paste the authentication code (no internal format jargon). Claude account rows use email-derived labels and show login-required, error, or stale badges when account state needs attention. Claude accounts with `auth_state = ActionRequired` show a per-account re-authenticate action (refresh icon) in Settings alongside the delete action; clicking it starts a targeted OAuth flow that must complete with the same email — a different email is rejected with an error and the existing account is left unchanged; success immediately triggers a usage refresh. Generic Claude add-account keeps duplicate-by-email upsert behavior. Cursor add-account scans Cursor IDE's local SQLite state database and imports the currently logged-in Cursor account tokens into YapCap-owned storage. Cursor accounts that need user action show a `Re-auth needed` badge plus a per-account refresh action in Settings, and the provider status text tells the user to log into that account in Cursor and rescan. Cursor `Active` reflects the account currently used by Cursor IDE and can appear alongside `Re-auth needed` when YapCap's copied session needs a fresh scan. Gemini add-account opens the Google OAuth browser flow and stores only YapCap-owned account storage. Copilot add-account starts GitHub device flow, shows the shared browser account/private-window hint near the Settings control, displays the user code and `Open Browser` fallback while polling, and stores accounts by GitHub numeric user id. Copilot account rows never show an Active badge; rows needing user action show `Re-auth needed` plus a refresh action that must complete with the same GitHub id. Codex, Claude, Cursor, Gemini, Minimax, and Copilot account removal deletes only YapCap-owned account homes/config dirs/profile roots. Cursor accounts are always managed and displayed with the email address as the account label. Copilot accounts are displayed with the GitHub login label. If no accounts remain for a provider, the provider detail shows an empty state pointing the user to Settings.
 - Footer: "Quit" + "Settings" / "Done". The Settings button opens the General
   settings category by default.
 
-The base popup column width is 420 px (`POPUP_COLUMN_WIDTH`). The popup expands horizontally to `n × 420 px` when the selected provider has `n` displayed selected accounts, capped at four columns, and shrinks back when switching to a single-account provider or opening Settings. Horizontal resize is applied via `xdg_popup::reposition` (`set_size`) each time the provider tab or route changes. The popup height is computed separately for the provider-detail route and the settings route: provider height is the tallest provider across all tabs (independent of settings height); settings height covers only the settings content. The window resizes when switching between the two routes. Both heights are capped at 1080 px; the body panel scrolls when content exceeds the available space. The header, navigation row, and footer are constrained to a single 420 px column centered within the wider popup surface; only the body expands with the additional columns.
+The base popup column width is 420 px (`POPUP_COLUMN_WIDTH`). The popup expands horizontally to `n × 420 px` when the selected provider has `n` displayed selected accounts, capped at four columns, and shrinks back when switching to a single-account provider or opening Settings. Horizontal resize is applied via `xdg_popup::reposition` (`set_size`) each time the provider tab or route changes. The popup height is computed separately for the provider-detail route and the settings route: provider height is the tallest provider across all tabs (independent of settings height); settings height covers only the settings content. The window resizes when switching between the two routes. Both heights are capped at 1080 px; the body panel scrolls when content exceeds the available space. Body heights are measured at the width the body actually renders in (popup width minus the popup and body-panel padding), so text that wraps at that narrower width is included in the measured height. The header, navigation row, and footer are constrained to a single 420 px column centered within the wider popup surface; only the body expands with the additional columns.
 
 Settings writes go through a `cosmic_config::Config` context acquired with the app ID — there is no `config.save()` method. The same context is used in `AppModel::init` and in `Message::SetProviderEnabled`.
 
@@ -1180,7 +1546,8 @@ Most user-visible strings in `src/app/popup_view.rs`, `src/app/popup_view/detail
 
 ## 10. Testing
 
-- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all five provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, Copilot device-flow parsing/storage, Copilot Free and paid parser branches, Copilot overage text, Copilot usage fetch/error classification, Gemini id_token decoding, Gemini plan-label mapping, Gemini bucket-family classification (Pro/Flash/Lite, free-tier Pro hide, lowest-remaining aggregation), Gemini OAuth refresh-error classification (400/401/403/429/5xx) and rate-limit backoff, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
+- `cargo test` runs unit and integration tests covering: config defaults and legacy-field compatibility, usage display formatting, app-state helpers, model status/headline helpers, all five provider normalizers against JSON fixtures, Claude account listing, Claude credential refresh, Copilot device-flow parsing/storage, Copilot Free and paid parser branches, Copilot token-based Credits window label and dollar cost card, Copilot overage text, Copilot usage fetch/error classification, Gemini id_token decoding, Gemini plan-label mapping, Gemini bucket-family classification (Pro/Flash/Lite, free-tier Pro hide, lowest-remaining aggregation), Gemini OAuth refresh-error classification (400/401/403/429/5xx) and rate-limit backoff, runtime refresh state machine, error classification, update check version parsing, debug update simulation, provider adapter behavior, and app-level state transitions.
 - No tests hit real provider APIs. Fixtures under `fixtures/{claude,codex,copilot,cursor,gemini}/` are redacted probe captures (envelope plus `body_json` / `body_text` where applicable) or handcrafted JSON; Copilot uses device-code, OAuth-token, GitHub identity, and `copilot_internal/user` captures; Cursor uses `usage_summary_response.json` and `auth_me_response.json` alongside OAuth token captures; Gemini uses `oauth_token_response.json`, `load_code_assist_response.json`, and `retrieve_user_quota_response.json` plus optional error-path captures (`oauth_token_400_response.json` / `oauth_token_429_response.json`) recorded via `fixtures/gemini/probe.py` and its `--simulate-bad-refresh` flag.
 - `cargo clippy` and `cargo fmt --check` are expected clean on main.
-- Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale snapshot display on cold-start, settings persistence across restarts, update-check UI states, and dark/light theme icon variants.
+- Tests must never read or write the developer's real COSMIC config or state. `config::cosmic_config_context()` is the only way to open a `cosmic_config::Config`; under `cfg(test)` it resolves to a per-test-thread temporary root via `Config::with_custom_path`, so isolation does not depend on a test remembering a guard. `test_support::test_env()` additionally points `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` at a temporary root and clears `FLATPAK_ID`, which is what isolates `config::paths()` for tests that touch account storage. Opening `cosmic_config::Config::new` directly from app code reintroduces the hazard: a test that constructs an `AppModel` with a default config and reaches `write_config` will overwrite the real account registry.
+- Manual QA should cover: install via `just install`, each provider's auth refresh flow, transient provider failures showing "Stale" not "Error", stale shared-runtime display on cold-start, settings persistence across restarts, multi-process two-display sync and owner takeover, update-check UI states, and dark/light theme icon variants.

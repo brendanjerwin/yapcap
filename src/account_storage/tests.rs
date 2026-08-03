@@ -290,3 +290,31 @@ fn delete_account_removes_account_directory() {
             .unwrap()
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn create_private_dir_sets_owner_only_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = test_dir("private-dir");
+    create_private_dir(&dir).unwrap();
+
+    let mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700);
+}
+
+#[cfg(unix)]
+#[test]
+fn set_private_file_permissions_restricts_to_owner_read_write() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = test_dir("private-file");
+    create_private_dir(&dir).unwrap();
+    let file = dir.join("secret.json");
+    write_json(&file, &"secret").unwrap();
+
+    set_private_file_permissions(&file).unwrap();
+
+    let mode = fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}

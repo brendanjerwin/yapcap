@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::cache::{load_cached_state, save_cached_state};
-use crate::config::Config;
+use crate::config::{APP_ID, Config};
 use crate::demo_env;
 use crate::error::AppError;
 use crate::model::{
@@ -9,6 +8,7 @@ use crate::model::{
     ProviderId, ProviderRuntimeState, UsageSnapshot,
 };
 use crate::providers;
+use crate::shared_state::{SharedRuntimeState, SharedStateWriter};
 use chrono::Utc;
 use std::time::Duration;
 
@@ -25,21 +25,38 @@ pub struct ProviderRefreshResult {
     pub accounts: Vec<ProviderAccountRuntimeState>,
 }
 
-pub fn load_initial_state(config: &Config) -> AppState {
-    let mut state = load_cached_state()
-        .ok()
-        .flatten()
-        .unwrap_or_else(AppState::empty);
-    reconcile_state(config, &mut state);
+#[derive(Clone)]
+pub struct RefreshProcessContext {
+    pub process_id: String,
+    pub owner_status: &'static str,
+}
+
+pub fn load_initial_state(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    shared_runtime: Option<SharedRuntimeState>,
+) -> AppState {
+    let mut state = match shared_runtime {
+        Some(shared) => shared.app_state,
+        None => {
+            tracing::info!("shared runtime unavailable; starting from empty runtime state");
+            AppState::empty()
+        }
+    };
+    reconcile_state(config, detection, &mut state);
     state
 }
 
-pub fn persist_state(state: &AppState) {
+pub fn persist_state_as(
+    state: &AppState,
+    reason: &'static str,
+    writer: Option<SharedStateWriter<'_>>,
+) {
     if demo_env::is_active() {
         return;
     }
-    if let Err(error) = save_cached_state(state) {
-        tracing::error!(error = %error, "failed to save snapshot cache");
+    if let Err(error) = crate::shared_state::save_runtime_as(APP_ID, state, reason, writer) {
+        tracing::error!(error = ?error, "failed to save shared runtime state");
     }
 }
 
@@ -85,11 +102,53 @@ pub(crate) fn debug_env_value_enabled(value: &str) -> bool {
         || value.eq_ignore_ascii_case("off"))
 }
 
-pub(crate) fn rate_limit_backoff_secs(consecutive: u32) -> u64 {
+pub(crate) fn retry_backoff_secs(consecutive: u32) -> u64 {
     const BASE: u64 = 300;
     const CAP: u64 = 3600;
     let shift = consecutive.saturating_sub(1).min(12);
     BASE.saturating_mul(1u64 << shift).min(CAP)
+}
+
+pub(crate) const REFRESH_STALE_AFTER_SECS: i64 = 60;
+
+const STALE_REFRESH_MESSAGE: &str = "Refresh timed out";
+
+pub fn resolve_stale_refreshes(state: &mut AppState) -> bool {
+    let now = Utc::now();
+    let stale = chrono::Duration::seconds(REFRESH_STALE_AFTER_SECS);
+    let mut stale_providers = Vec::new();
+    for provider in &mut state.providers {
+        if !provider.is_refreshing {
+            continue;
+        }
+        if provider
+            .refresh_started_at
+            .is_some_and(|started| now - started < stale)
+        {
+            continue;
+        }
+        provider.is_refreshing = false;
+        provider.refresh_started_at = None;
+        provider.error = Some(STALE_REFRESH_MESSAGE.to_string());
+        tracing::warn!(
+            provider = provider.provider.label(),
+            "resolved stale provider refresh as timed out"
+        );
+        stale_providers.push((provider.provider, provider.selected_account_ids.clone()));
+    }
+    for (provider, account_ids) in &stale_providers {
+        for account in state.provider_accounts.iter_mut().filter(|account| {
+            account.provider == *provider && account_ids.contains(&account.account_id)
+        }) {
+            account.health = ProviderHealth::Error;
+            account.auth_state = AuthState::Error;
+            account.error = Some(STALE_REFRESH_MESSAGE.to_string());
+            account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+            let backoff = retry_backoff_secs(account.consecutive_failures);
+            account.retry_after = Some(now + chrono::Duration::seconds(backoff.cast_signed()));
+        }
+    }
+    !stale_providers.is_empty()
 }
 
 pub(crate) fn classify_auth_state(error: &AppError) -> AuthState {
@@ -111,11 +170,25 @@ pub async fn refresh_provider_account_statuses(
 pub async fn refresh_account(
     config: Config,
     provider: ProviderId,
+    enabled: bool,
     account_id: String,
     previous: Option<ProviderRuntimeState>,
     previous_accounts: Vec<ProviderAccountRuntimeState>,
+    process: Option<RefreshProcessContext>,
 ) -> ProviderRefreshResult {
-    let enabled = config.provider_enabled(provider);
+    tracing::info!(
+        process_id = process
+            .as_ref()
+            .map(|process| process.process_id.as_str())
+            .unwrap_or("unknown"),
+        owner_status = process
+            .as_ref()
+            .map(|process| process.owner_status)
+            .unwrap_or("unknown"),
+        provider = provider.label(),
+        account_id = %account_id,
+        "provider account refresh started"
+    );
     let client = http_client();
     let accounts = providers::registry::discover_accounts(provider, &config);
 
@@ -195,6 +268,11 @@ where
     F: std::future::Future<Output = crate::error::Result<(String, UsageSnapshot), AppError>>,
 {
     if !enabled {
+        tracing::info!(
+            provider = provider.label(),
+            account_id = %account_id,
+            "provider refresh skipped because provider is disabled"
+        );
         return ProviderRefreshResult {
             provider: ProviderRuntimeState::disabled(provider),
             accounts: Vec::new(),
@@ -221,10 +299,12 @@ where
         Ok((source_label, snapshot)) => {
             tracing::info!(
                 provider = provider.label(),
+                account_id = %account.account_id,
                 source = source_label.as_str(),
                 "provider refresh succeeded"
             );
             state.is_refreshing = false;
+            state.refresh_started_at = None;
             state.error = None;
             account.health = ProviderHealth::Ok;
             account.auth_state = AuthState::Ready;
@@ -232,8 +312,8 @@ where
             account.last_success_at = Some(Utc::now());
             account.snapshot = Some(snapshot);
             account.error = None;
-            account.rate_limit_until = None;
-            account.consecutive_rate_limits = 0;
+            account.retry_after = None;
+            account.consecutive_failures = 0;
             if provider == ProviderId::Claude
                 && let Some(email) = account
                     .snapshot
@@ -246,12 +326,23 @@ where
         }
         Err(error) => {
             if error.is_transient() {
-                tracing::warn!(provider = provider.label(), error = %error, "provider refresh skipped (transient)");
+                tracing::warn!(
+                    provider = provider.label(),
+                    account_id = %account.account_id,
+                    error = %error,
+                    "provider refresh skipped after transient error"
+                );
             } else {
-                tracing::error!(provider = provider.label(), error = %error, "provider refresh failed");
+                tracing::error!(
+                    provider = provider.label(),
+                    account_id = %account.account_id,
+                    error = %error,
+                    "provider refresh failed"
+                );
             }
             let user_message = error.user_message();
             state.is_refreshing = false;
+            state.refresh_started_at = None;
             if providers::registry::auth_error_requires_reauth_prompt(provider)
                 && error.requires_user_action()
             {
@@ -263,14 +354,12 @@ where
             account.health = ProviderHealth::Error;
             account.auth_state = classify_auth_state(&error);
             account.error = Some(user_message);
-            if error.is_rate_limited() {
-                account.consecutive_rate_limits = account.consecutive_rate_limits.saturating_add(1);
-                let backoff_secs = error
-                    .rate_limit_retry_after_secs()
-                    .unwrap_or_else(|| rate_limit_backoff_secs(account.consecutive_rate_limits));
-                account.rate_limit_until =
-                    Some(Utc::now() + chrono::Duration::seconds(backoff_secs.cast_signed()));
-            }
+            account.consecutive_failures = account.consecutive_failures.saturating_add(1);
+            let backoff_secs = error
+                .rate_limit_retry_after_secs()
+                .unwrap_or_else(|| retry_backoff_secs(account.consecutive_failures));
+            account.retry_after =
+                Some(Utc::now() + chrono::Duration::seconds(backoff_secs.cast_signed()));
         }
     }
 
@@ -280,27 +369,60 @@ where
     }
 }
 
-pub fn reconcile_state(config: &Config, state: &mut AppState) {
+pub fn reconcile_state(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+) {
+    reconcile_state_with_refresh(config, detection, state, false);
+}
+
+pub fn reconcile_shared_state(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+) {
+    reconcile_state_with_refresh(config, detection, state, true);
+}
+
+fn reconcile_state_with_refresh(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+    preserve_refreshing: bool,
+) {
     ensure_provider_states(state);
     for provider in ProviderId::ALL {
         providers::registry::reconcile_provider_accounts(provider, config, state);
     }
     for provider in &mut state.providers {
-        provider.enabled = config.provider_enabled(provider.provider);
-        provider.is_refreshing = false;
+        provider.enabled =
+            crate::provider_enablement::provider_enabled(config, detection, provider.provider);
+        if !preserve_refreshing {
+            provider.is_refreshing = false;
+            provider.refresh_started_at = None;
+        }
         if !provider.enabled {
             provider.account_status = AccountSelectionStatus::Unavailable;
             provider.selected_account_ids = Vec::new();
+            provider.is_refreshing = false;
+            provider.refresh_started_at = None;
         }
     }
 }
 
-pub fn reconcile_provider(config: &Config, state: &mut AppState, provider: ProviderId) {
+pub fn reconcile_provider(
+    config: &Config,
+    detection: &crate::detection::DetectionSnapshot,
+    state: &mut AppState,
+    provider: ProviderId,
+) {
     ensure_provider_states(state);
     providers::registry::reconcile_provider_accounts(provider, config, state);
     if let Some(entry) = state.provider_mut(provider) {
-        entry.enabled = config.provider_enabled(provider);
+        entry.enabled = crate::provider_enablement::provider_enabled(config, detection, provider);
         entry.is_refreshing = false;
+        entry.refresh_started_at = None;
         if !entry.enabled {
             entry.account_status = AccountSelectionStatus::Unavailable;
             entry.selected_account_ids = Vec::new();
@@ -308,12 +430,35 @@ pub fn reconcile_provider(config: &Config, state: &mut AppState, provider: Provi
     }
 }
 
-fn ensure_provider_states(state: &mut AppState) {
-    for provider in ProviderId::ALL {
-        if state.provider(provider).is_none() {
-            state.providers.push(ProviderRuntimeState::empty(provider));
-        }
+pub(crate) fn mark_account_reauthenticated(
+    state: &mut AppState,
+    provider: ProviderId,
+    account_id: &str,
+) {
+    if let Some(account) = state
+        .provider_accounts
+        .iter_mut()
+        .find(|a| a.provider == provider && a.account_id == account_id)
+    {
+        account.health = ProviderHealth::Ok;
+        account.auth_state = AuthState::Ready;
+        account.error = None;
+        account.retry_after = None;
+        account.consecutive_failures = 0;
     }
+}
+
+fn ensure_provider_states(state: &mut AppState) {
+    let mut ordered = Vec::with_capacity(ProviderId::ALL.len());
+    for provider in ProviderId::ALL {
+        let existing = state
+            .providers
+            .iter()
+            .position(|entry| entry.provider == provider)
+            .map(|index| state.providers.swap_remove(index));
+        ordered.push(existing.unwrap_or_else(|| ProviderRuntimeState::empty(provider)));
+    }
+    state.providers = ordered;
 }
 
 #[cfg(test)]
@@ -333,6 +478,38 @@ mod tests {
             extra_usage: None,
             identity: ProviderIdentity::default(),
         }
+    }
+
+    #[test]
+    fn mark_account_reauthenticated_clears_failure_state_so_refresh_can_run() {
+        let mut state = AppState::empty();
+        let mut account = ProviderAccountRuntimeState::empty(
+            ProviderId::Antigravity,
+            "antigravity-1",
+            "user@example.com",
+        );
+        account.snapshot = Some(snapshot());
+        account.health = ProviderHealth::Error;
+        account.auth_state = AuthState::ActionRequired;
+        account.error = Some("antigravity token refresh returned HTTP 400".to_string());
+        account.consecutive_failures = 2;
+        account.retry_after = Some(Utc::now() + chrono::Duration::seconds(600));
+        state.upsert_account(account);
+
+        mark_account_reauthenticated(&mut state, ProviderId::Antigravity, "antigravity-1");
+
+        let account = state
+            .provider_accounts
+            .iter()
+            .find(|a| a.account_id == "antigravity-1")
+            .unwrap();
+        assert_eq!(account.auth_state, AuthState::Ready);
+        assert_eq!(account.health, ProviderHealth::Ok);
+        assert!(account.error.is_none());
+        assert!(account.retry_after.is_none());
+        assert_eq!(account.consecutive_failures, 0);
+        assert!(!account.is_backing_off());
+        assert!(account.snapshot.is_some());
     }
 
     #[test]
@@ -371,13 +548,118 @@ mod tests {
     }
 
     #[test]
-    fn load_initial_state_returns_empty_when_no_cache() {
+    fn load_initial_state_returns_empty_when_shared_runtime_is_missing() {
         let config = Config::default();
-        let state = load_initial_state(&config);
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            None,
+        );
         assert_eq!(state.providers.len(), ProviderId::ALL.len());
         for provider in &state.providers {
             assert!(!provider.is_refreshing);
         }
+    }
+
+    #[test]
+    fn load_initial_state_reorders_stale_shared_runtime_into_canonical_order() {
+        let config = Config::default();
+        let mut shared_state = AppState::empty();
+        shared_state.providers.rotate_left(1);
+        shared_state
+            .provider_mut(ProviderId::Antigravity)
+            .unwrap()
+            .is_refreshing = true;
+
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            Some(SharedRuntimeState::new(shared_state, 1)),
+        );
+
+        let order: Vec<ProviderId> = state.providers.iter().map(|entry| entry.provider).collect();
+        assert_eq!(order, ProviderId::ALL.to_vec());
+        assert!(state.provider(ProviderId::Antigravity).is_some());
+    }
+
+    #[test]
+    fn load_initial_state_uses_shared_runtime_when_present() {
+        let config = Config::default();
+        let mut shared_state = AppState::empty();
+        shared_state.upsert_provider(ProviderRuntimeState::disabled(ProviderId::Cursor));
+        shared_state
+            .provider_mut(ProviderId::Codex)
+            .unwrap()
+            .is_refreshing = true;
+        let state = load_initial_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            Some(SharedRuntimeState::new(shared_state, 1)),
+        );
+
+        assert_eq!(state.providers.len(), ProviderId::ALL.len());
+        assert!(state.provider(ProviderId::Cursor).is_some());
+        assert!(!state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    #[test]
+    fn reconcile_shared_state_preserves_refreshing_provider() {
+        let config = Config {
+            codex_enablement: crate::config::ProviderEnablement::Enabled,
+            ..Config::default()
+        };
+        let mut state = AppState::empty();
+        state.provider_mut(ProviderId::Codex).unwrap().is_refreshing = true;
+
+        reconcile_shared_state(
+            &config,
+            &crate::detection::DetectionSnapshot::default(),
+            &mut state,
+        );
+
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
+    }
+
+    fn state_with_refreshing_provider(started_at: Option<chrono::DateTime<Utc>>) -> AppState {
+        let mut state = AppState::empty();
+        {
+            let provider = state.provider_mut(ProviderId::Codex).unwrap();
+            provider.is_refreshing = true;
+            provider.refresh_started_at = started_at;
+            provider.selected_account_ids = vec!["codex-1".to_string()];
+        }
+        state.upsert_account(ProviderAccountRuntimeState::empty(
+            ProviderId::Codex,
+            "codex-1",
+            "Codex",
+        ));
+        state
+    }
+
+    #[test]
+    fn resolve_stale_refreshes_resolves_orphaned_refresh() {
+        let mut state = state_with_refreshing_provider(None);
+
+        assert!(resolve_stale_refreshes(&mut state));
+
+        let provider = state.provider(ProviderId::Codex).unwrap();
+        assert!(!provider.is_refreshing);
+        assert!(provider.refresh_started_at.is_none());
+        let account = state
+            .provider_accounts
+            .iter()
+            .find(|account| account.account_id == "codex-1")
+            .unwrap();
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.is_backing_off());
+    }
+
+    #[test]
+    fn resolve_stale_refreshes_ignores_fresh_refresh() {
+        let mut state = state_with_refreshing_provider(Some(Utc::now()));
+
+        assert!(!resolve_stale_refreshes(&mut state));
+        assert!(state.provider(ProviderId::Codex).unwrap().is_refreshing);
     }
 
     #[tokio::test]
@@ -565,8 +847,40 @@ mod tests {
 
         assert_eq!(account.health, ProviderHealth::Error);
         assert_eq!(account.auth_state, AuthState::Error);
-        assert_eq!(account.consecutive_rate_limits, 1);
-        assert!(account.rate_limit_until.is_some());
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.retry_after.is_some());
+        assert!(account.snapshot.is_some());
+    }
+
+    #[tokio::test]
+    async fn generic_failure_records_backoff_and_preserves_snapshot() {
+        let previous = ProviderRuntimeState::empty(ProviderId::Copilot);
+        let mut previous_account =
+            ProviderAccountRuntimeState::empty(ProviderId::Copilot, "copilot-1", "octocat");
+        previous_account.snapshot = Some(snapshot());
+        previous_account.last_success_at = Some(Utc::now());
+
+        let result = refresh_provider_account(
+            ProviderId::Copilot,
+            true,
+            Some(&previous),
+            Some(&previous_account),
+            "copilot-1".to_string(),
+            "octocat".to_string(),
+            async {
+                Err(AppError::from(
+                    crate::error::CopilotError::UnrecognizedResponse {
+                        detail: "access_type_sku=free_limited_copilot, login=octocat, token_based_billing=absent".to_string(),
+                    },
+                ))
+            },
+        )
+        .await;
+        let account = result.accounts.first().unwrap();
+
+        assert_eq!(account.health, ProviderHealth::Error);
+        assert_eq!(account.consecutive_failures, 1);
+        assert!(account.is_backing_off());
         assert!(account.snapshot.is_some());
     }
 

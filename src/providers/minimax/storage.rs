@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::account_storage;
 use std::fs;
 use std::path::Path;
 
@@ -7,9 +8,9 @@ pub const API_KEY_FILE: &str = "api_key.txt";
 
 pub fn write_api_key(account_dir: &Path, api_key: &str) -> Result<(), String> {
     create_private_dir(account_dir)?;
-    fs::write(account_dir.join(API_KEY_FILE), api_key)
-        .map_err(|error| format!("failed to write api key: {error}"))?;
-    set_private_file_permissions(&account_dir.join(API_KEY_FILE))?;
+    let path = account_dir.join(API_KEY_FILE);
+    fs::write(&path, api_key).map_err(|error| format!("failed to write api key: {error}"))?;
+    account_storage::set_private_file_permissions(&path).map_err(stringify)?;
     Ok(())
 }
 
@@ -19,32 +20,48 @@ pub fn load_api_key(account_dir: &Path) -> Result<String, String> {
 }
 
 pub fn create_private_dir(path: &Path) -> Result<(), String> {
-    fs::create_dir_all(path)
-        .map_err(|error| format!("failed to create {}: {error}", path.display()))?;
-    set_private_dir_permissions(path)?;
-    Ok(())
+    account_storage::create_private_dir(path).map_err(stringify)
 }
 
-#[cfg(unix)]
-fn set_private_dir_permissions(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .map_err(|error| format!("failed to set permissions on {}: {error}", path.display()))
+fn stringify(error: account_storage::AccountStorageError) -> String {
+    error.to_string()
 }
 
-#[cfg(unix)]
-fn set_private_file_permissions(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .map_err(|error| format!("failed to set permissions on {}: {error}", path.display()))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
 
-#[cfg(not(unix))]
-fn set_private_dir_permissions(_path: &Path) -> Result<(), String> {
-    Ok(())
-}
+    #[test]
+    fn write_api_key_creates_missing_provider_root() {
+        let temp = tempdir().unwrap();
+        let provider_root = temp.path().join("minimax-accounts");
+        assert!(!provider_root.exists());
+        let dir = provider_root.join("minimax-1");
 
-#[cfg(not(unix))]
-fn set_private_file_permissions(_path: &Path) -> Result<(), String> {
-    Ok(())
+        write_api_key(&dir, "sk-test").unwrap();
+
+        assert!(provider_root.is_dir());
+        assert_eq!(load_api_key(&dir).unwrap(), "sk-test");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_api_key_sets_private_directory_and_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let dir = temp.path().join("minimax-1");
+
+        write_api_key(&dir, "sk-test").unwrap();
+
+        let dir_mode = fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700);
+        let file_mode = fs::metadata(dir.join(API_KEY_FILE))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(file_mode, 0o600);
+    }
 }

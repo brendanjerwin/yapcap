@@ -1,10 +1,13 @@
+use super::super::provider_assets::app_icon_handle;
 use super::{
-    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_SPACING, PROVIDER_SECTION_HEIGHT,
-    PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT, PopupRoute, SettingsRoute,
-    account_label_text, apply_alpha, badge_destructive, badge_neutral, badge_success,
-    badge_warning, badge_with_tooltip, card, info_block, plan_badge, provider_summary,
+    Message, PROVIDER_ACCOUNT_HEADER_HEIGHT, PROVIDER_CARD_PADDING, PROVIDER_CARD_SPACING,
+    PROVIDER_GROUP_HEADER_HEIGHT, PROVIDER_GROUP_PADDING, PROVIDER_GROUP_SPACING,
+    PROVIDER_SECTION_HEIGHT, PROVIDER_SECTION_WITH_ACTION_HEIGHT, PROVIDER_SUMMARY_HEIGHT,
+    PopupRoute, SettingsRoute, account_label_text, apply_alpha, badge_destructive, badge_neutral,
+    badge_success, badge_warning, badge_with_tooltip, card, detected_without_accounts, info_block,
+    plan_badge, provider_icon_handle, provider_icon_variant, provider_summary,
 };
-use crate::config::{Config, ResetTimeFormat, UsageAmountFormat};
+use crate::config::{Config, UsageAmountFormat};
 use crate::currency_format;
 use crate::fl;
 use crate::model::{
@@ -22,16 +25,18 @@ pub(super) fn selected_provider_view<'a>(
     provider: Option<&'a ProviderRuntimeState>,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Element<'a, Message> {
     let Some(provider) = provider else {
-        return no_providers_view();
+        return empty_state_view();
     };
     let accounts = state.display_selected_accounts(provider.provider);
-    let summary = provider_summary(provider);
+    let detected_without_accounts = detected_without_accounts(state, detection, provider.provider);
+    let summary = provider_summary(provider, detected_without_accounts);
 
     if accounts.len() <= 1 {
         let account = accounts.first().copied();
-        let items = account_column_items(account, provider, state, config);
+        let items = account_column_items(account, provider, state, config, detection);
         let mut content = column![summary]
             .spacing(PROVIDER_CARD_SPACING)
             .width(Length::Fill);
@@ -45,7 +50,9 @@ pub(super) fn selected_provider_view<'a>(
             .width(Length::Fill);
         let mut cols_row = row![].spacing(8);
         for account in &accounts {
-            cols_row = cols_row.push(account_column_view(account, provider, state, config));
+            cols_row = cols_row.push(account_column_view(
+                account, provider, state, config, detection,
+            ));
         }
         content = content.push(cols_row);
         Element::from(content)
@@ -84,12 +91,15 @@ fn account_column_items<'a>(
     provider: &'a ProviderRuntimeState,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Vec<Element<'a, Message>> {
     let mut items = Vec::new();
     if let Some(account) = account {
         items.push(account_column_header(account, provider));
     }
-    items.extend(account_column_body_items(account, provider, state, config));
+    items.extend(account_column_body_items(
+        account, provider, state, config, detection,
+    ));
     items
 }
 
@@ -98,21 +108,15 @@ fn account_column_body_items<'a>(
     provider: &'a ProviderRuntimeState,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Vec<Element<'a, Message>> {
     let mut items = Vec::new();
     let snapshot = active_snapshot_for_account(account, provider);
     if let Some(snapshot) = snapshot {
         if account.is_some_and(|account| account.health == ProviderHealth::Error) {
-            items.extend(provider_status_info(provider, state, account));
+            items.extend(provider_status_info(provider, state, account, detection));
         }
-        for window in &snapshot.windows {
-            items.push(usage_section(
-                window,
-                window_display_label(snapshot.provider, &window.label),
-                config.reset_time_format,
-                config.usage_amount_format,
-            ));
-        }
+        items.extend(window_sections(snapshot, config));
         match snapshot.provider {
             ProviderId::Claude => {
                 if let Some(extra) = snapshot.extra_usage.as_ref() {
@@ -131,7 +135,7 @@ fn account_column_body_items<'a>(
             }
         }
     } else {
-        items.extend(provider_status_info(provider, state, account));
+        items.extend(provider_status_info(provider, state, account, detection));
     }
     items
 }
@@ -172,7 +176,7 @@ fn account_column_header<'a>(
 
     card(
         column![
-            widget::text(fl!("account-label")).size(18),
+            widget::text(fl!("account-label")).size(15),
             label_row,
             status_row,
         ]
@@ -186,9 +190,10 @@ fn account_column_view<'a>(
     provider: &'a ProviderRuntimeState,
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a crate::detection::DetectionSnapshot,
 ) -> Element<'a, Message> {
     let header = account_column_header(account, provider);
-    let body = account_column_body_items(Some(account), provider, state, config);
+    let body = account_column_body_items(Some(account), provider, state, config, detection);
     let mut content = column![header]
         .spacing(PROVIDER_CARD_SPACING)
         .width(Length::Fill);
@@ -198,43 +203,74 @@ fn account_column_view<'a>(
     container(content)
         .width(Length::FillPortion(1))
         .padding([0, 8])
-        .style(|theme: &cosmic::Theme| {
-            let cosmic = theme.cosmic();
-            widget::container::Style {
-                text_color: None,
-                background: Some(Background::Color(cosmic.background.component.base.into())),
-                border: cosmic::iced::Border {
-                    radius: cosmic.corner_radii.radius_m.into(),
-                    width: 0.0,
-                    color: Color::TRANSPARENT,
-                },
-                shadow: cosmic::iced::Shadow::default(),
-                icon_color: None,
-                snap: false,
-            }
-        })
+        .style(component_card_style)
         .into()
 }
 
-fn no_providers_view<'a>() -> Element<'a, Message> {
-    card(
-        column![
-            widget::text(fl!("no-providers")).size(16),
-            widget::text(fl!("no-providers-detail")).size(13),
-            widget::button::standard(fl!("no-providers-open-settings")).on_press(
-                Message::NavigateTo(PopupRoute::Settings(SettingsRoute::General))
-            ),
-        ]
-        .spacing(10)
-        .width(Length::Fill),
-    )
+fn component_card_style(theme: &cosmic::Theme) -> widget::container::Style {
+    let cosmic = theme.cosmic();
+    widget::container::Style {
+        text_color: None,
+        background: Some(Background::Color(
+            cosmic.background(theme.transparent).component.base.into(),
+        )),
+        border: cosmic::iced::Border {
+            radius: cosmic.corner_radii.radius_m.into(),
+            width: 0.0,
+            color: Color::TRANSPARENT,
+        },
+        shadow: cosmic::iced::Shadow::default(),
+        icon_color: None,
+        snap: false,
+    }
+}
+
+pub(super) fn empty_state_view<'a>() -> Element<'a, Message> {
+    let logos = row![
+        widget::icon::icon(provider_icon_handle(
+            ProviderId::Claude,
+            provider_icon_variant()
+        ))
+        .size(22),
+        widget::icon::icon(app_icon_handle()).size(48),
+        widget::icon::icon(provider_icon_handle(
+            ProviderId::Codex,
+            provider_icon_variant()
+        ))
+        .size(22),
+    ]
+    .spacing(12)
+    .align_y(Alignment::Center);
+    let content = column![
+        logos,
+        widget::text(fl!("no-providers")).size(22),
+        widget::text(fl!("no-providers-detail")).size(13),
+        widget::button::suggested(fl!("no-providers-open-settings")).on_press(Message::NavigateTo(
+            PopupRoute::Settings(SettingsRoute::General)
+        )),
+    ]
+    .spacing(12)
+    .align_x(Alignment::Center)
+    .width(Length::Fill);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
+        .padding(32)
+        .into()
 }
 
 fn provider_status_info(
     provider: &ProviderRuntimeState,
     state: &AppState,
     active_account: Option<&ProviderAccountRuntimeState>,
+    detection: &crate::detection::DetectionSnapshot,
 ) -> Option<Element<'static, Message>> {
+    if detected_without_accounts(state, detection, provider.provider) {
+        return Some(detected_provider_cta(provider.provider));
+    }
     let message = provider_status_message(provider, state, active_account);
     if message.is_empty() {
         return None;
@@ -245,6 +281,21 @@ fn provider_status_info(
         None,
         login_required_settings_action(provider, state, active_account),
     ))
+}
+
+fn detected_provider_cta(provider: ProviderId) -> Element<'static, Message> {
+    info_block(
+        fl!("provider-detected-chip"),
+        fl!("provider-detected-cta", provider = provider.label()),
+        None,
+        Some(
+            widget::button::suggested(fl!("provider-detected-add-account"))
+                .on_press(Message::NavigateTo(PopupRoute::Settings(
+                    SettingsRoute::Provider(provider),
+                )))
+                .into(),
+        ),
+    )
 }
 
 fn login_required_settings_action(
@@ -335,9 +386,18 @@ fn provider_body_height_for_account(
             cards += 1;
         }
 
-        let window_count = f32::from(u16::try_from(snapshot.windows.len()).unwrap_or(u16::MAX));
-        height += window_count * PROVIDER_SECTION_HEIGHT;
-        cards += snapshot.windows.len();
+        let ungrouped = snapshot
+            .windows
+            .iter()
+            .filter(|window| window.group.is_none())
+            .count();
+        height += f32::from(u16::try_from(ungrouped).unwrap_or(u16::MAX)) * PROVIDER_SECTION_HEIGHT;
+        cards += ungrouped;
+
+        for run in grouped_run_lengths(&snapshot.windows) {
+            height += group_card_height(run);
+            cards += 1;
+        }
         match snapshot.provider {
             ProviderId::Claude => {
                 if snapshot.extra_usage.is_some() || snapshot.provider_cost.as_ref().is_some() {
@@ -376,26 +436,101 @@ fn active_snapshot_for_account<'a>(
         .or(provider.legacy_display_snapshot.as_ref())
 }
 
-fn usage_section(
+fn window_sections<'a>(
+    snapshot: &'a UsageSnapshot,
+    config: &'a Config,
+) -> Vec<Element<'static, Message>> {
+    let mut items = Vec::new();
+    let mut windows = snapshot.windows.iter().peekable();
+    while let Some(window) = windows.next() {
+        let Some(group) = window.group.as_deref() else {
+            items.push(card(usage_section_content(
+                window,
+                snapshot.provider,
+                config,
+            )));
+            continue;
+        };
+        let mut sections = vec![usage_section_content(window, snapshot.provider, config)];
+        while let Some(next) = windows.next_if(|next| next.group.as_deref() == Some(group)) {
+            sections.push(usage_section_content(next, snapshot.provider, config));
+        }
+        items.push(usage_group_card(group, sections));
+    }
+    items
+}
+
+fn usage_group_card(
+    group: &str,
+    sections: Vec<Element<'static, Message>>,
+) -> Element<'static, Message> {
+    let mut content = column![widget::text(group.to_string()).size(18)]
+        .spacing(PROVIDER_GROUP_SPACING)
+        .width(Length::Fill);
+    for section in sections {
+        content = content.push(section);
+    }
+    container(content)
+        .width(Length::Fill)
+        .padding(PROVIDER_GROUP_PADDING / 2.0)
+        .style(group_card_style)
+        .into()
+}
+
+fn group_card_style(theme: &cosmic::Theme) -> widget::container::Style {
+    let cosmic = theme.cosmic();
+    let mut style = component_card_style(theme);
+    style.border.width = 1.0;
+    style.border.color = cosmic
+        .background(theme.transparent)
+        .component
+        .divider
+        .into();
+    style
+}
+
+fn usage_section_content(
     window: &UsageWindow,
-    display_label: String,
-    reset_time_format: ResetTimeFormat,
-    usage_amount_format: UsageAmountFormat,
+    provider: ProviderId,
+    config: &Config,
 ) -> Element<'static, Message> {
     let now = chrono::Utc::now();
     let pace = usage_display::pace(window, now);
-    usage_block(
-        display_label,
-        usage_display::displayed_amount_percent(window, now, usage_amount_format),
-        usage_display::usage_amount_label(window, now, usage_amount_format),
+    usage_block_content(
+        window_display_label(provider, &window.label),
+        usage_display::displayed_amount_percent(window, now, config.usage_amount_format),
+        usage_display::usage_amount_label(window, now, config.usage_amount_format),
         UsageBlockDetails {
-            secondary: usage_display::reset_label(window, now, reset_time_format),
+            secondary: usage_display::reset_label(window, now, config.reset_time_format),
             secondary_tooltip: None,
             pace,
-            pace_marker_percent: pace_marker_percent(pace, usage_amount_format),
+            pace_marker_percent: pace_marker_percent(pace, config.usage_amount_format),
             overage: overage_text(window),
         },
     )
+}
+
+fn group_card_height(windows: usize) -> f32 {
+    let n = f32::from(u16::try_from(windows).unwrap_or(u16::MAX));
+    PROVIDER_GROUP_PADDING
+        + PROVIDER_GROUP_HEADER_HEIGHT
+        + n * (PROVIDER_SECTION_HEIGHT - PROVIDER_CARD_PADDING)
+        + n * PROVIDER_GROUP_SPACING
+}
+
+fn grouped_run_lengths(windows: &[UsageWindow]) -> Vec<usize> {
+    let mut runs = Vec::new();
+    let mut previous: Option<&str> = None;
+    for window in windows {
+        if let Some(group) = window.group.as_deref() {
+            match runs.last_mut() {
+                Some(last) if previous == Some(group) => *last += 1,
+                _ => runs.push(1),
+            }
+        }
+        previous = window.group.as_deref();
+    }
+    runs
 }
 
 fn window_display_label(provider: ProviderId, label: &str) -> String {
@@ -404,6 +539,7 @@ fn window_display_label(provider: ProviderId, label: &str) -> String {
             "chat" => return fl!("copilot-window-chat"),
             "completions" => return fl!("copilot-window-completions"),
             "premium_interactions" => return fl!("copilot-window-premium"),
+            "credits" => return fl!("copilot-window-credits"),
             _ => {}
         }
     }
@@ -411,7 +547,7 @@ fn window_display_label(provider: ProviderId, label: &str) -> String {
 }
 
 fn overage_text(window: &UsageWindow) -> Option<String> {
-    if window.label == "premium_interactions" {
+    if window.label == "premium_interactions" || window.label == "credits" {
         return window.reset_description.clone();
     }
     None
@@ -455,6 +591,7 @@ fn extra_usage_cost_bar(
         reset_at: None,
         window_seconds: None,
         reset_description: None,
+        group: None,
     };
     let (cost_line, cost_tip) = currency_format::format_provider_cost(cost);
     usage_block(
@@ -481,7 +618,7 @@ fn cost_section(provider: ProviderId, cost: &ProviderCost) -> Element<'static, M
         widget::text(iso_tip).size(12),
         widget::tooltip::Position::Top,
     );
-    card(column![widget::text(fl!("extra-usage-label")).size(18), body,].spacing(6))
+    card(column![widget::text(fl!("extra-usage-label")).size(15), body,].spacing(6))
 }
 
 fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
@@ -493,7 +630,7 @@ fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
 
     card(
         column![
-            widget::text(fl!("credits-label")).size(18),
+            widget::text(fl!("credits-label")).size(15),
             widget::text(fl!("credits-available", balance = balance.as_str())).size(14),
         ]
         .spacing(6),
@@ -501,6 +638,15 @@ fn credit_section(cost: &ProviderCost) -> Element<'static, Message> {
 }
 
 fn usage_block(
+    title: String,
+    percent: f32,
+    primary: String,
+    details: UsageBlockDetails,
+) -> Element<'static, Message> {
+    card(usage_block_content(title, percent, primary, details))
+}
+
+fn usage_block_content(
     title: String,
     percent: f32,
     primary: String,
@@ -517,7 +663,7 @@ fn usage_block(
     .align_y(Alignment::Center);
 
     let mut content = column![
-        widget::text(title).size(18),
+        widget::text(title).size(15),
         paced_progress_bar(
             percent,
             details.pace_marker_percent,
@@ -530,7 +676,7 @@ fn usage_block(
         content = content.push(overage_line(overage));
     }
 
-    card(content.push(pct_row))
+    content.push(pct_row).into()
 }
 
 struct UsageBlockDetails {
@@ -726,6 +872,56 @@ mod tests {
     use super::*;
     use crate::model::{AccountSelectionStatus, AuthState, ProviderHealth};
 
+    fn grouped_window(group: &str) -> UsageWindow {
+        UsageWindow {
+            label: "Weekly Limit".to_string(),
+            used_percent: 10.0,
+            reset_at: None,
+            window_seconds: Some(5 * 3600),
+            reset_description: None,
+            group: Some(group.to_string()),
+        }
+    }
+
+    fn ungrouped_window() -> UsageWindow {
+        UsageWindow {
+            label: "Session".to_string(),
+            used_percent: 10.0,
+            reset_at: None,
+            window_seconds: None,
+            reset_description: None,
+            group: None,
+        }
+    }
+
+    #[test]
+    fn grouped_run_lengths_splits_runs_at_group_boundaries() {
+        let windows = vec![
+            grouped_window("Gemini Models"),
+            grouped_window("Gemini Models"),
+            grouped_window("Claude and GPT models"),
+            grouped_window("Claude and GPT models"),
+        ];
+        assert_eq!(grouped_run_lengths(&windows), vec![2, 2]);
+    }
+
+    #[test]
+    fn grouped_run_lengths_skips_ungrouped_windows() {
+        let windows = vec![
+            ungrouped_window(),
+            grouped_window("Gemini Models"),
+            ungrouped_window(),
+            grouped_window("Gemini Models"),
+        ];
+        assert_eq!(grouped_run_lengths(&windows), vec![1, 1]);
+    }
+
+    #[test]
+    fn grouped_run_lengths_is_empty_for_ungrouped_providers() {
+        let windows = vec![ungrouped_window(), ungrouped_window()];
+        assert!(grouped_run_lengths(&windows).is_empty());
+    }
+
     #[test]
     fn action_required_account_reports_reauth_message() {
         let provider = ProviderRuntimeState {
@@ -736,6 +932,7 @@ mod tests {
             system_active_account_id: None,
             account_status: AccountSelectionStatus::Ready,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: None,
         };
@@ -767,6 +964,7 @@ mod tests {
             system_active_account_id: Some("cursor-1".to_string()),
             account_status: AccountSelectionStatus::Ready,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: None,
         };
@@ -805,6 +1003,7 @@ mod tests {
             system_active_account_id: None,
             account_status: AccountSelectionStatus::LoginRequired,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: Some("Login required".to_string()),
         };
@@ -827,6 +1026,7 @@ mod tests {
                 system_active_account_id: None,
                 account_status: AccountSelectionStatus::LoginRequired,
                 is_refreshing: false,
+                refresh_started_at: None,
                 legacy_display_snapshot: None,
                 error: Some("Login required".to_string()),
             };
@@ -848,6 +1048,7 @@ mod tests {
             system_active_account_id: None,
             account_status: AccountSelectionStatus::LoginRequired,
             is_refreshing: false,
+            refresh_started_at: None,
             legacy_display_snapshot: None,
             error: Some("Login required".to_string()),
         };
@@ -862,6 +1063,39 @@ mod tests {
 
         assert!(!should_show_login_required_settings_action(
             &provider, &state, None
+        ));
+    }
+
+    #[test]
+    fn detected_provider_without_accounts_shows_detected_cta() {
+        let home = tempfile::tempdir().expect("create temporary home");
+        std::fs::create_dir(home.path().join(".codex")).expect("create Codex marker");
+        let detection = crate::detection::detect(home.path());
+        let state = AppState::empty();
+
+        assert!(detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Codex
+        ));
+        assert!(!detected_without_accounts(
+            &state,
+            &detection,
+            ProviderId::Claude
+        ));
+
+        let mut with_account = state.clone();
+        with_account
+            .provider_accounts
+            .push(ProviderAccountRuntimeState::empty(
+                ProviderId::Codex,
+                "codex-test",
+                "test@example.com",
+            ));
+        assert!(!detected_without_accounts(
+            &with_account,
+            &detection,
+            ProviderId::Codex
         ));
     }
 }

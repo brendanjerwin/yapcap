@@ -2,7 +2,7 @@ mod accounts;
 mod general;
 
 use super::{
-    AppState, Config, Element, Message, ProviderId, ProviderLoginStates,
+    AppState, Config, DetectionSnapshot, Element, Message, ProviderId, ProviderLoginStates,
     SETTINGS_PROVIDER_ROW_HEIGHT, SETTINGS_SECTION_HEIGHT, UpdateStatus,
 };
 
@@ -16,10 +16,11 @@ pub(super) fn general_settings_view<'a>(
 pub(super) fn provider_settings_view<'a>(
     state: &'a AppState,
     config: &'a Config,
+    detection: &'a DetectionSnapshot,
     logins: ProviderLoginStates<'a>,
     provider_id: ProviderId,
 ) -> Element<'a, Message> {
-    accounts::provider_settings_view(state, config, logins, provider_id)
+    accounts::provider_settings_view(state, config, detection, logins, provider_id)
 }
 
 pub(super) fn settings_body_height(state: &AppState) -> f32 {

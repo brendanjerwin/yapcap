@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use crate::config::{
-    Config, ManagedClaudeAccountConfig, ManagedCodexAccountConfig, ManagedCopilotAccountConfig,
-    ManagedCursorAccountConfig, ManagedGeminiAccountConfig, ManagedMinimaxAccountConfig,
+    Config, ManagedAntigravityAccountConfig, ManagedClaudeAccountConfig, ManagedCodexAccountConfig,
+    ManagedCopilotAccountConfig, ManagedCursorAccountConfig, ManagedGeminiAccountConfig,
+    ManagedMinimaxAccountConfig,
     ManagedOllamaCloudAccountConfig, ManagedOpencodeGoAccountConfig,
 };
 use crate::error::AppError;
@@ -64,6 +65,7 @@ pub enum ProviderAccountHandle {
     Minimax(ManagedMinimaxAccountConfig),
     OpencodeGo(ManagedOpencodeGoAccountConfig),
     OllamaCloud(ManagedOllamaCloudAccountConfig),
+    Antigravity(ManagedAntigravityAccountConfig),
 }
 
 
@@ -77,6 +79,10 @@ pub trait ProviderAdapter: Send + Sync {
     fn delete_account(&self, account_id: &str, config: &mut Config) -> bool;
 
     fn reconcile_provider_accounts(&self, config: &Config, state: &mut AppState);
+
+    fn system_active_account_id(&self, _config: &Config) -> Option<String> {
+        None
+    }
 
     fn fetch_account<'a>(
         &self,
