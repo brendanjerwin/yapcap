@@ -151,7 +151,7 @@ pub fn popup_content<'a>(
     ]
     .align_y(Alignment::Center);
 
-    let body_panel: Element<'_, Message> = container(panel(scrollable(body).width(Length::Fill)))
+    let body_panel: Element<'_, Message> = container(panel(body))
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
