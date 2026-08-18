@@ -27,47 +27,38 @@ impl CookieSource for FirefoxSource {
 fn find_firefox_profiles() -> Vec<PathBuf> {
     let mut profiles = Vec::new();
 
-    // Standard Firefox location
-    let firefox_dir = dirs::home_dir().map(|h| h.join(".mozilla/firefox"));
-    if let Some(dir) = firefox_dir
-        && let Ok(entries) = std::fs::read_dir(&dir)
-    {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("cookies.sqlite").exists() {
-                profiles.push(path);
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return profiles,
+    };
+
+    let search_dirs = [
+        home.join(".mozilla/firefox"),
+        home.join(".config/mozilla/firefox"),
+        home.join(".var/app/org.mozilla.firefox/.mozilla/firefox"),
+        home.join(".var/app/org.mozilla.firefox/files/.mozilla/firefox"),
+        home.join("snap/firefox/common/.mozilla/firefox"),
+    ];
+
+    for dir in &search_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.join("cookies.sqlite").exists() {
+                    profiles.push(path);
+                }
             }
         }
     }
 
-    // Also check for Flatpak Firefox
-    let flatpak_firefox_dir =
-        dirs::home_dir().map(|h| h.join(".var/app/org.mozilla.firefox/.mozilla/firefox"));
-    if let Some(dir) = flatpak_firefox_dir
-        && let Ok(entries) = std::fs::read_dir(&dir)
-    {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("cookies.sqlite").exists() {
-                profiles.push(path);
-            }
-        }
-    }
-
-    // Sort: prefer default-release profiles first
     profiles.sort_by_key(|p| {
-        let name = p
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        // default-release first, then default, then anything else
-        if name.contains("default-release") {
-            0
-        } else if name.contains("default") {
-            1
-        } else {
-            2
-        }
+        let mtime = std::fs::metadata(p.join("cookies.sqlite"))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        std::cmp::Reverse(mtime)
     });
 
     profiles
