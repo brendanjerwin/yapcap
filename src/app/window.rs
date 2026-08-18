@@ -55,7 +55,8 @@ pub(super) fn popup_size_limits_with_max_width(size: Size, max_width: f32) -> Li
     Limits::NONE
         .min_width(1.0)
         .max_width(max_width.max(size.width))
-        .height(size.height.clamp(1.0, f32::from(POPUP_MAX_HEIGHT)))
+        .min_height(1.0)
+        .max_height(size.height.clamp(1.0, f32::from(POPUP_MAX_HEIGHT)))
 }
 
 pub(super) fn popup_size_tuple(size: Size) -> (u32, u32) {
