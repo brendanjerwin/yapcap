@@ -101,6 +101,7 @@ cursor-scan-connect = Connect
 cursor-scan-reconnect = Reconnect
 cursor-scan-try-again = Try again
 open-browser = Open Browser
+open-browser-auth = Browser Login
 refresh-section-title = Autorefresh
 refresh-interval-label = Auto refresh interval
 panel-icon-section-title = Panel icon

@@ -67,8 +67,26 @@ impl LoginFlow for OpencodeGoLoginFlow {
     fn on_event(app: &mut AppModel, event: Self::Event) -> Task<Message> {
         match event {
             OpencodeGoLoginEvent::Started
-            | OpencodeGoLoginEvent::BrowserAuthStarted
-            | OpencodeGoLoginEvent::BrowserAuthComplete { .. } => Task::none(),
+            | OpencodeGoLoginEvent::BrowserAuthStarted => Task::none(),
+            OpencodeGoLoginEvent::BrowserAuthComplete {
+                auth_cookie,
+                workspaces,
+            } => {
+                if let Some(login) = app.opencode_go_login.as_mut() {
+                    login.auth_cookie = auth_cookie;
+                    login.error = None;
+                    login.discovered_workspaces = workspaces.clone();
+                    if workspaces.len() == 1 {
+                        login.workspace_id = workspaces[0].id.clone();
+                        login.status = OpencodeGoLoginStatus::Editing;
+                    } else if workspaces.is_empty() {
+                        login.status = OpencodeGoLoginStatus::Editing;
+                    } else {
+                        login.status = OpencodeGoLoginStatus::SelectWorkspace;
+                    }
+                }
+                Task::none()
+            }
             OpencodeGoLoginEvent::WorkspaceSelected(workspace_id) => {
                 if let Some(login) = app.opencode_go_login.as_mut() {
                     login.update_workspace_id(workspace_id);

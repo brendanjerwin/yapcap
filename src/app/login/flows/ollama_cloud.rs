@@ -60,8 +60,15 @@ impl LoginFlow for OllamaCloudLoginFlow {
     fn on_event(app: &mut AppModel, event: Self::Event) -> Task<Message> {
         match event {
             OllamaCloudLoginEvent::Started
-            | OllamaCloudLoginEvent::BrowserAuthStarted
-            | OllamaCloudLoginEvent::BrowserAuthComplete { .. } => Task::none(),
+            | OllamaCloudLoginEvent::BrowserAuthStarted => Task::none(),
+            OllamaCloudLoginEvent::BrowserAuthComplete { session_cookie } => {
+                if let Some(login) = app.ollama_cloud_login.as_mut() {
+                    login.session_cookie = session_cookie;
+                    login.error = None;
+                    login.status = OllamaCloudLoginStatus::Editing;
+                }
+                Task::none()
+            }
             OllamaCloudLoginEvent::SessionCookieChanged(session_cookie) => {
                 if let Some(login) = app.ollama_cloud_login.as_mut() {
                     login.update_session_cookie(session_cookie);

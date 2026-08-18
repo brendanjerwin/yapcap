@@ -190,6 +190,8 @@ pub enum Message {
     ReauthenticateOpencodeGoAccount(String),
     ReauthenticateOllamaCloudAccount(String),
     StartLogin(ProviderId),
+    StartOpencodeGoBrowserAuth,
+    StartOllamaCloudBrowserAuth,
     CancelLogin(ProviderId),
     LoginEvent(ProviderId, Box<login::LoginEventKind>),
     StartCursorScan,
@@ -720,6 +722,12 @@ impl AppModel {
             Message::StartLogin(provider) => {
                 return Some(session::start_login(self, provider));
             }
+            Message::StartOpencodeGoBrowserAuth => {
+                return Some(self.start_opencode_go_browser_auth());
+            }
+            Message::StartOllamaCloudBrowserAuth => {
+                return Some(self.start_ollama_cloud_browser_auth());
+            }
             Message::CancelLogin(provider) => session::cancel_login(self, provider),
             Message::LoginEvent(provider, kind) => {
                 return Some(match (provider, *kind) {
@@ -998,6 +1006,85 @@ impl AppModel {
 
         let route = self.popup_route;
         self.resize_popup_to_route(&route)
+    }
+
+    fn start_opencode_go_browser_auth(&mut self) -> Task<Message> {
+        crate::browser_cookies::open_browser("https://opencode.ai/auth");
+        if let Some(login) = self.opencode_go_login.as_mut() {
+            login.status = OpencodeGoLoginStatus::Polling;
+            login.error = None;
+        }
+        Task::perform(
+            async move {
+                let cookie = crate::browser_cookies::poll_for_cookie(
+                    "auth",
+                    "opencode.ai",
+                    2000,
+                    120,
+                )
+                .await;
+                if let Some(c) = cookie {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let mut workspaces = crate::browser_cookies::discover_workspaces().await;
+                    let client = crate::runtime::http_client();
+                    for ws in &mut workspaces {
+                        if let Some(name) = crate::browser_cookies::fetch_workspace_name(
+                            &client, &ws.id, &c.value,
+                        ).await {
+                            ws.name = Some(name);
+                        }
+                    }
+                    OpencodeGoLoginEvent::BrowserAuthComplete {
+                        auth_cookie: c.value,
+                        workspaces,
+                    }
+                } else {
+                    OpencodeGoLoginEvent::Failed(
+                        "Timed out waiting for browser login".to_string(),
+                    )
+                }
+            },
+            |event: OpencodeGoLoginEvent| {
+                cosmic::Action::App(Message::LoginEvent(
+                    ProviderId::OpencodeGo,
+                    Box::new(login::LoginEventKind::OpencodeGo(event)),
+                ))
+            },
+        )
+    }
+
+    fn start_ollama_cloud_browser_auth(&mut self) -> Task<Message> {
+        crate::browser_cookies::open_browser("https://ollama.com/signin");
+        if let Some(login) = self.ollama_cloud_login.as_mut() {
+            login.status = OllamaCloudLoginStatus::Polling;
+            login.error = None;
+        }
+        Task::perform(
+            async move {
+                let cookie = crate::browser_cookies::poll_for_cookie(
+                    "__Secure-session",
+                    "ollama.com",
+                    2000,
+                    120,
+                )
+                .await;
+                if let Some(c) = cookie {
+                    OllamaCloudLoginEvent::BrowserAuthComplete {
+                        session_cookie: c.value,
+                    }
+                } else {
+                    OllamaCloudLoginEvent::Failed(
+                        "Timed out waiting for browser login".to_string(),
+                    )
+                }
+            },
+            |event: OllamaCloudLoginEvent| {
+                cosmic::Action::App(Message::LoginEvent(
+                    ProviderId::OllamaCloud,
+                    Box::new(login::LoginEventKind::OllamaCloud(event)),
+                ))
+            },
+        )
     }
 }
 

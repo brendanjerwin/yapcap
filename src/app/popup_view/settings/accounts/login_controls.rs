@@ -570,6 +570,10 @@ pub(super) fn opencode_go_login_controls(
                 .width(Length::Fill),
         );
         content = content.push(
+            widget::button::text(fl!("open-browser-auth"))
+                .on_press_maybe(enabled.then_some(Message::StartOpencodeGoBrowserAuth)),
+        );
+        content = content.push(
             row![
                 widget::button::standard(fl!("account-add")).on_press_maybe(
                     enabled.then_some(opencode_go_login_message(crate::providers::opencode_go::OpencodeGoLoginEvent::Saved))
@@ -650,6 +654,10 @@ pub(super) fn ollama_cloud_login_controls(
             widget::text_input(fl!("account-label"), &login.label)
                 .on_input(|label| ollama_cloud_login_message(crate::providers::ollama_cloud::OllamaCloudLoginEvent::LabelChanged(label)))
                 .width(Length::Fill),
+        );
+        content = content.push(
+            widget::button::text(fl!("open-browser-auth"))
+                .on_press_maybe(enabled.then_some(Message::StartOllamaCloudBrowserAuth)),
         );
         content = content.push(
             row![
