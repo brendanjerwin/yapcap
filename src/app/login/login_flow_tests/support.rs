@@ -22,6 +22,7 @@ pub(super) fn test_app() -> AppModel {
         update_status: crate::updates::UpdateStatus::Unchecked,
         launch_mode: crate::app::LaunchMode::Standalone,
         popup_size: None,
+        popup_window_height: None,
         popup_body_measurements: Default::default(),
         shared_control: Default::default(),
         process_info: crate::refresh_owner::ProcessInfo {

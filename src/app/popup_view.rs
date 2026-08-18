@@ -34,7 +34,6 @@ use crate::providers::minimax::MinimaxLoginState;
 use crate::providers::ollama_cloud::OllamaCloudLoginState;
 use crate::providers::opencode_go::OpencodeGoLoginState;
 use crate::providers::registry;
-use super::popup_max_height;
 use crate::updates::UpdateStatus;
 use crate::usage_display;
 use cosmic::Element;
@@ -252,9 +251,9 @@ pub fn popup_max_width(state: &AppState) -> f32 {
         * POPUP_WIDTH
 }
 
-pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Size {
+pub fn popup_session_size(state: &AppState, selected_provider: ProviderId, max_height: f32) -> Size {
     if popup_empty_state_active(state) {
-        return popup_empty_state_size(EMPTY_STATE_BODY_HEIGHT);
+        return popup_empty_state_size(EMPTY_STATE_BODY_HEIGHT, max_height);
     }
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
@@ -266,7 +265,7 @@ pub fn popup_session_size(state: &AppState, selected_provider: ProviderId) -> Si
         .fold(PROVIDER_SUMMARY_HEIGHT, f32::max);
     Size::new(
         width,
-        popup_total_height(provider_nav_height(state), provider_height),
+        popup_total_height(provider_nav_height(state), provider_height, max_height),
     )
 }
 
@@ -278,33 +277,34 @@ pub fn popup_session_size_with_body_height(
     state: &AppState,
     selected_provider: ProviderId,
     body_height: f32,
+    max_height: f32,
 ) -> Size {
     if popup_empty_state_active(state) {
-        return popup_empty_state_size(body_height);
+        return popup_empty_state_size(body_height, max_height);
     }
     let n_cols = selected_account_count(state, selected_provider);
     let width = POPUP_WIDTH * n_cols;
     Size::new(
         width,
-        popup_total_height(provider_nav_height(state), body_height),
+        popup_total_height(provider_nav_height(state), body_height, max_height),
     )
 }
 
-pub fn popup_settings_size(state: &AppState) -> Size {
+pub fn popup_settings_size(state: &AppState, max_height: f32) -> Size {
     Size::new(
         POPUP_WIDTH,
-        popup_total_height(Some(settings_nav_height()), settings_body_height(state)),
+        popup_total_height(Some(settings_nav_height()), settings_body_height(state), max_height),
     )
 }
 
-pub fn popup_settings_size_with_body_height(body_height: f32) -> Size {
+pub fn popup_settings_size_with_body_height(body_height: f32, max_height: f32) -> Size {
     Size::new(
         POPUP_WIDTH,
-        popup_total_height(Some(settings_nav_height()), body_height),
+        popup_total_height(Some(settings_nav_height()), body_height, max_height),
     )
 }
 
-fn popup_total_height(nav_height: Option<f32>, body_height: f32) -> f32 {
+fn popup_total_height(nav_height: Option<f32>, body_height: f32, max_height: f32) -> f32 {
     let chrome_spacing = if nav_height.is_some() {
         POPUP_CHROME_SPACING
     } else {
@@ -318,10 +318,10 @@ fn popup_total_height(nav_height: Option<f32>, body_height: f32) -> f32 {
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
         + body_height;
-    height.clamp(1.0, popup_max_height())
+    height.clamp(1.0, max_height)
 }
 
-fn popup_empty_state_size(body_height: f32) -> Size {
+fn popup_empty_state_size(body_height: f32, max_height: f32) -> Size {
     let height = POPUP_PADDING
         + POPUP_EMPTY_CHROME_SPACING
         + POPUP_HEADER_HEIGHT
@@ -329,7 +329,7 @@ fn popup_empty_state_size(body_height: f32) -> Size {
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
         + body_height;
-    Size::new(POPUP_WIDTH, height.clamp(1.0, popup_max_height()))
+    Size::new(POPUP_WIDTH, height.clamp(1.0, max_height))
 }
 
 pub(super) fn popup_empty_state_active(state: &AppState) -> bool {
@@ -987,7 +987,7 @@ mod tests {
 
         assert!(popup_empty_state_active(&state));
         assert_eq!(
-            popup_session_size(&state, ProviderId::Codex).width,
+            popup_session_size(&state, ProviderId::Codex, 800.0).width,
             POPUP_WIDTH
         );
 

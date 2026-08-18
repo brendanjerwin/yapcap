@@ -94,71 +94,10 @@ fn automatic_refresh_poll_interval() -> Duration {
     Duration::from_secs(AUTOMATIC_REFRESH_POLL_INTERVAL_SECS)
 }
 
-const PANEL_HEIGHT_ESTIMATE: f32 = 80.0;
-
-pub(crate) fn popup_max_height() -> f32 {
-    (available_screen_height() - PANEL_HEIGHT_ESTIMATE).max(200.0)
+pub(crate) fn popup_max_height(compositor_height: Option<f32>) -> f32 {
+    compositor_height.map(|h| h.max(200.0)).unwrap_or(800.0)
 }
 
-fn available_screen_height() -> f32 {
-    let uid = unsafe { libc::getuid() };
-    let runtime_dir = format!("/run/user/{uid}");
-    let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string());
-
-    let output = std::process::Command::new("cosmic-randr")
-        .arg("list")
-        .env("WAYLAND_DISPLAY", &wayland_display)
-        .env("XDG_RUNTIME_DIR", &runtime_dir)
-        .output();
-
-    let Ok(output) = output else {
-        return 800.0;
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-
-    let mut scale: f32 = 1.0;
-    let mut mode_w: f32 = 800.0;
-    let mut mode_h: f32 = 600.0;
-    let mut transform = String::new();
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("Scale: ") {
-            let pct = rest.trim_end_matches('%');
-            if let Ok(pct_val) = pct.parse::<f32>() {
-                scale = pct_val / 100.0;
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("Transform: ") {
-            transform = rest.trim().to_string();
-        } else if trimmed.contains("(current)") && trimmed.contains('x') {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if let Some(dims) = parts.first() {
-                let hw: Vec<&str> = dims.split('x').collect();
-                if hw.len() == 2 {
-                    if let (Ok(w), Ok(h)) = (hw[0].parse::<f32>(), hw[1].parse::<f32>()) {
-                        mode_w = w;
-                        mode_h = h;
-                    }
-                }
-            }
-        }
-    }
-
-    let rotated = transform.contains("90") || transform.contains("270");
-    let physical_height = if rotated { mode_w } else { mode_h };
-    let panel_height = 80.0;
-    let effective = (physical_height / scale.max(0.1) - panel_height).max(200.0);
-    tracing::info!(
-        mode_w,
-        mode_h,
-        scale,
-        transform = %transform,
-        rotated,
-        effective,
-        "computed available screen height"
-    );
-    effective.max(200.0)
-}
 
 pub struct AppModel {
     core: cosmic::Core,
@@ -173,6 +112,7 @@ pub struct AppModel {
     update_status: UpdateStatus,
     launch_mode: LaunchMode,
     popup_size: Option<Size>,
+    popup_window_height: Option<f32>,
     popup_body_measurements: PopupBodyMeasurements,
     shared_control: SharedControlState,
     process_info: ProcessInfo,
@@ -467,6 +407,7 @@ impl cosmic::Application for AppModel {
             update_status: UpdateStatus::Unchecked,
             launch_mode,
             popup_size: None,
+            popup_window_height: None,
             popup_body_measurements: PopupBodyMeasurements::default(),
             shared_control,
             process_info,
@@ -571,7 +512,7 @@ impl cosmic::Application for AppModel {
     fn view_window(&self, _id: Id) -> Element<'_, Self::Message> {
         let popup_size = self
             .popup_size
-            .unwrap_or_else(|| popup_view::popup_session_size(&self.state, self.selected_provider));
+            .unwrap_or_else(|| popup_view::popup_session_size(&self.state, self.selected_provider, popup_max_height(self.popup_window_height)));
         let content = popup_view::popup_content(
             &self.state,
             &self.config,
@@ -614,6 +555,13 @@ impl cosmic::Application for AppModel {
                 }
             })
             .into()
+    }
+
+    fn on_window_resize(&mut self, id: Id, _width: f32, height: f32) {
+        if self.popup.as_ref() == Some(&id) {
+            self.popup_window_height = Some(height);
+            tracing::info!(height, "popup window resized by compositor");
+        }
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {

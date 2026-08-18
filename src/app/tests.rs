@@ -32,11 +32,11 @@ use std::time::Duration;
 
 #[test]
 fn popup_limits_allow_wider_max() {
-    let limits = popup_size_limits_with_max_width(Size::new(420.0, 640.0), 840.0);
+    let limits = popup_size_limits_with_max_width(Size::new(420.0, 640.0), 840.0, 800.0);
 
     assert_eq!(limits.min().width, 1.0);
     assert_eq!(limits.max().width, 840.0);
-    assert_eq!(limits.min().height, 640.0);
+    assert_eq!(limits.min().height, 1.0);
     assert_eq!(limits.max().height, 640.0);
 }
 
@@ -734,7 +734,7 @@ fn applet_percent_groups_are_capped_to_four_selected_accounts() {
 fn popup_session_width_is_capped_to_four_selected_accounts() {
     let state = state_with_selected_account_percents(&[1.0, 2.0, 3.0, 4.0, 5.0]);
 
-    let size = popup_session_size(&state, ProviderId::Codex);
+    let size = popup_session_size(&state, ProviderId::Codex, 800.0);
 
     assert_eq!(size.width, POPUP_COLUMN_WIDTH * 4.0);
 }
@@ -747,9 +747,9 @@ fn popup_provider_tabs_share_tallest_provider_height() {
         (ProviderId::Cursor, 2, false),
     ]);
 
-    let codex = popup_session_size(&state, ProviderId::Codex);
-    let claude = popup_session_size(&state, ProviderId::Claude);
-    let cursor = popup_session_size(&state, ProviderId::Cursor);
+    let codex = popup_session_size(&state, ProviderId::Codex, 800.0);
+    let claude = popup_session_size(&state, ProviderId::Claude, 800.0);
+    let cursor = popup_session_size(&state, ProviderId::Cursor, 800.0);
 
     assert_eq!(codex.height, claude.height);
     assert_eq!(claude.height, cursor.height);
@@ -765,30 +765,31 @@ fn popup_grows_taller_when_provider_tabs_wrap_to_second_row() {
         ProviderId::Codex,
         ProviderId::Claude,
         ProviderId::Cursor,
-        ProviderId::Gemini,
     ] {
         state.provider_mut(provider).unwrap().enabled = true;
     }
 
-    let four_enabled = popup_session_size(&state, ProviderId::Codex);
+    let three_enabled = popup_session_size(&state, ProviderId::Codex, 800.0);
 
-    state.provider_mut(ProviderId::Minimax).unwrap().enabled = true;
-    let five_enabled = popup_session_size(&state, ProviderId::Codex);
+    for provider in [ProviderId::Gemini, ProviderId::Copilot, ProviderId::Minimax, ProviderId::Antigravity] {
+        state.provider_mut(provider).unwrap().enabled = true;
+    }
+    let seven_enabled = popup_session_size(&state, ProviderId::Codex, 800.0);
 
-    assert!(five_enabled.height > four_enabled.height);
+    assert!(seven_enabled.height > three_enabled.height);
 
-    for provider in [ProviderId::Cursor, ProviderId::Gemini] {
+    for provider in [ProviderId::Gemini, ProviderId::Copilot, ProviderId::Minimax, ProviderId::Antigravity] {
         state.provider_mut(provider).unwrap().enabled = false;
     }
-    state.provider_mut(ProviderId::Minimax).unwrap().enabled = false;
-    let two_enabled = popup_session_size(&state, ProviderId::Codex);
+    let back_to_three = popup_session_size(&state, ProviderId::Codex, 800.0);
 
-    assert_eq!(two_enabled.height, four_enabled.height);
+    assert_eq!(back_to_three.height, three_enabled.height);
 
     state.provider_mut(ProviderId::Claude).unwrap().enabled = false;
-    let one_enabled = popup_session_size(&state, ProviderId::Codex);
+    state.provider_mut(ProviderId::Cursor).unwrap().enabled = false;
+    let one_enabled = popup_session_size(&state, ProviderId::Codex, 800.0);
 
-    assert!(one_enabled.height < four_enabled.height);
+    assert!(one_enabled.height < three_enabled.height);
 }
 
 #[test]
@@ -808,8 +809,8 @@ fn popup_provider_height_is_independent_from_settings_height() {
         }
     }
 
-    let provider = popup_session_size(&state, ProviderId::Codex);
-    let settings = popup_settings_size(&state);
+    let provider = popup_session_size(&state, ProviderId::Codex, 800.0);
+    let settings = popup_settings_size(&state, 800.0);
 
     assert!(settings.height > provider.height);
     assert_eq!(provider.width, POPUP_COLUMN_WIDTH);
@@ -1009,6 +1010,7 @@ pub(super) fn test_app(refresh_owner: Option<RefreshOwner>) -> AppModel {
         update_status: UpdateStatus::Unchecked,
         launch_mode: LaunchMode::Standalone,
         popup_size: None,
+        popup_window_height: None,
         popup_body_measurements: PopupBodyMeasurements::default(),
         shared_control: SharedControlState::default(),
         process_info: ProcessInfo {

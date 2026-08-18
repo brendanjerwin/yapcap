@@ -145,9 +145,9 @@ impl AppModel {
         }
         match route {
             PopupRoute::ProviderDetail => {
-                popup_view::popup_session_size(&self.state, self.selected_provider)
+                popup_view::popup_session_size(&self.state, self.selected_provider, crate::app::popup_max_height(self.popup_window_height))
             }
-            PopupRoute::Settings(_) => popup_view::popup_settings_size(&self.state),
+            PopupRoute::Settings(_) => popup_view::popup_settings_size(&self.state, crate::app::popup_max_height(self.popup_window_height)),
         }
     }
 
@@ -161,6 +161,7 @@ impl AppModel {
                         &self.state,
                         self.selected_provider,
                         height,
+                        crate::app::popup_max_height(self.popup_window_height),
                     )
                 }),
             PopupRoute::ProviderDetail => self
@@ -171,12 +172,13 @@ impl AppModel {
                         &self.state,
                         self.selected_provider,
                         height,
+                        crate::app::popup_max_height(self.popup_window_height),
                     )
                 }),
             PopupRoute::Settings(_) => self
                 .popup_body_measurements
                 .settings_height()
-                .map(popup_view::popup_settings_size_with_body_height),
+                .map(|height| popup_view::popup_settings_size_with_body_height(height, crate::app::popup_max_height(self.popup_window_height))),
         }
     }
 
@@ -259,7 +261,7 @@ impl AppModel {
         &mut self,
         provider: ProviderId,
     ) -> Option<Task<Message>> {
-        let new_size = popup_view::popup_session_size(&self.state, provider);
+        let new_size = popup_view::popup_session_size(&self.state, provider, crate::app::popup_max_height(self.popup_window_height));
         self.resize_popup_to_size(new_size)
     }
 
@@ -291,6 +293,7 @@ impl AppModel {
 
         let popup_size = self.popup_size_for_route(&self.popup_route.clone());
         let max_width = popup_view::popup_max_width(&self.state);
+        let max_height = crate::app::popup_max_height(self.popup_window_height);
         self.popup_size = Some(popup_size);
         tracing::info!(
             process_id = %self.process_info.id,
@@ -312,7 +315,7 @@ impl AppModel {
                         None,
                     );
                     popup_settings.positioner.size_limits =
-                        popup_size_limits_with_max_width(popup_size, max_width);
+                        popup_size_limits_with_max_width(popup_size, max_width, max_height);
                     const XDG_POSITIONER_CONSTRAINT_RESIZE_Y: u32 = 1 << 7;
                     popup_settings.positioner.constraint_adjustment |= XDG_POSITIONER_CONSTRAINT_RESIZE_Y;
                     popup_settings.positioner.reactive = false;

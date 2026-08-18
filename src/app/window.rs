@@ -51,12 +51,12 @@ pub(super) fn resize_popup(id: Id, width: u32, height: u32) -> Task<Message> {
     cosmic::iced::platform_specific::shell::wayland::commands::popup::set_size(id, width, height)
 }
 
-pub(super) fn popup_size_limits_with_max_width(size: Size, max_width: f32) -> Limits {
+pub(super) fn popup_size_limits_with_max_width(size: Size, max_width: f32, max_height: f32) -> Limits {
     Limits::NONE
         .min_width(1.0)
         .max_width(max_width.max(size.width))
         .min_height(1.0)
-        .max_height(size.height.clamp(1.0, super::popup_max_height()))
+        .max_height(size.height.clamp(1.0, max_height))
 }
 
 pub(super) fn popup_size_tuple(size: Size) -> (u32, u32) {
