@@ -529,7 +529,7 @@ impl cosmic::Application for AppModel {
         );
         widget::container(content)
             .width(Length::Fixed(popup_size.width))
-            .height(Length::Fixed(popup_size.height))
+            .height(Length::Fill)
             .style(|theme| {
                 let cosmic = theme.cosmic();
                 let corners = cosmic.corner_radii;
