@@ -167,10 +167,9 @@ pub fn popup_content<'a>(
         .push(narrow_chrome(footer))
         .spacing(14)
         .padding(16)
-        .width(Length::Fill)
-        .height(Length::Fill);
+        .width(Length::Fill);
 
-    Element::from(content)
+    Element::from(scrollable(content).width(Length::Fill).height(Length::Fill))
 }
 
 fn popup_body_view<'a>(
