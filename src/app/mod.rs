@@ -81,10 +81,6 @@ use cosmic::widget;
 use std::time::Duration;
 
 const AUTOMATIC_REFRESH_POLL_INTERVAL_SECS: u64 = 10;
-pub(crate) fn popup_max_height() -> f32 {
-    static CACHED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(available_screen_height);
-    *CACHED
-}
 const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 const APPLET_ICON_GAP: f32 = 6.0;
 const APPLET_ACCOUNT_GAP: f32 = 4.0;
@@ -96,55 +92,6 @@ const UPDATE_RETRY_MAX_SECS: u64 = 15 * 60;
 
 fn automatic_refresh_poll_interval() -> Duration {
     Duration::from_secs(AUTOMATIC_REFRESH_POLL_INTERVAL_SECS)
-}
-
-fn available_screen_height() -> f32 {
-    let uid = unsafe { libc::getuid() };
-    let runtime_dir = format!("/run/user/{uid}");
-    let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string());
-
-    let output = std::process::Command::new("cosmic-randr")
-        .arg("list")
-        .env("WAYLAND_DISPLAY", &wayland_display)
-        .env("XDG_RUNTIME_DIR", &runtime_dir)
-        .output();
-
-    let Ok(output) = output else {
-        return 800.0;
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-
-    let mut scale: f32 = 1.0;
-    let mut mode_width: f32 = 800.0;
-    let mut mode_height: f32 = 600.0;
-    let mut rotated = false;
-
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("Scale: ") {
-            let pct = rest.trim_end_matches('%');
-            if let Ok(pct_val) = pct.parse::<f32>() {
-                scale = pct_val / 100.0;
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("Transform: ") {
-            rotated = rest.contains("90") || rest.contains("270");
-        } else if trimmed.contains("(current)") && trimmed.contains('x') {
-            let parts: Vec<&str> = trimmed.split_whitespace().collect();
-            if let Some(dims) = parts.first() {
-                let hw: Vec<&str> = dims.split('x').collect();
-                if hw.len() == 2 {
-                    if let (Ok(w), Ok(h)) = (hw[0].parse::<f32>(), hw[1].parse::<f32>()) {
-                        mode_width = w;
-                        mode_height = h;
-                    }
-                }
-            }
-        }
-    }
-
-    let physical_height = if rotated { mode_width } else { mode_height };
-    let effective = physical_height / scale.max(0.1);
-    effective.max(200.0)
 }
 
 pub struct AppModel {
