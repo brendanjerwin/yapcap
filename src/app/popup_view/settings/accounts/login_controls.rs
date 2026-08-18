@@ -570,7 +570,9 @@ pub(super) fn opencode_go_login_controls(
                 .width(Length::Fill),
         );
         content = content.push(
-            widget::button::text(fl!("open-browser-auth"))
+            widget::button::standard(fl!("open-browser-auth"))
+                .width(Length::Fill)
+                .padding([12, 16])
                 .on_press_maybe(enabled.then_some(Message::StartOpencodeGoBrowserAuth)),
         );
         content = content.push(
@@ -656,7 +658,9 @@ pub(super) fn ollama_cloud_login_controls(
                 .width(Length::Fill),
         );
         content = content.push(
-            widget::button::text(fl!("open-browser-auth"))
+            widget::button::standard(fl!("open-browser-auth"))
+                .width(Length::Fill)
+                .padding([12, 16])
                 .on_press_maybe(enabled.then_some(Message::StartOllamaCloudBrowserAuth)),
         );
         content = content.push(
