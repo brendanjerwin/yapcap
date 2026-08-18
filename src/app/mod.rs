@@ -95,8 +95,7 @@ fn automatic_refresh_poll_interval() -> Duration {
 }
 
 pub(crate) fn popup_max_height() -> f32 {
-    static CACHED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(available_screen_height);
-    *CACHED
+    available_screen_height()
 }
 
 fn available_screen_height() -> f32 {
