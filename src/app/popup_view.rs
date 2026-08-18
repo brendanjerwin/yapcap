@@ -151,7 +151,7 @@ pub fn popup_content<'a>(
     ]
     .align_y(Alignment::Center);
 
-    let body_panel: Element<'_, Message> = container(panel(scrollable(body).width(Length::Fill)))
+    let body_panel: Element<'_, Message> = container(panel(scrollable(container(body).padding([0, 8, 0, 0])).width(Length::Fill)))
         .width(Length::Fill)
         .height(Length::Fill)
         .into();
@@ -361,7 +361,7 @@ fn narrow_chrome<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Me
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    Element::from(container(content).width(Length::Fill).padding([4, 8, 4, 4]))
+    Element::from(container(content).width(Length::Fill).padding(4))
 }
 
 fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Message> {
