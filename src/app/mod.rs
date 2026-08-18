@@ -99,15 +99,26 @@ fn automatic_refresh_poll_interval() -> Duration {
 }
 
 fn available_screen_height() -> f32 {
+    let uid = unsafe { libc::getuid() };
+    let runtime_dir = format!("/run/user/{uid}");
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").unwrap_or_else(|_| "wayland-0".to_string());
+
     let output = std::process::Command::new("cosmic-randr")
         .arg("list")
+        .env("WAYLAND_DISPLAY", &wayland_display)
+        .env("XDG_RUNTIME_DIR", &runtime_dir)
         .output();
+
     let Ok(output) = output else {
         return 800.0;
     };
     let text = String::from_utf8_lossy(&output.stdout);
+
     let mut scale: f32 = 1.0;
-    let mut mode_height: f32 = 800.0;
+    let mut mode_width: f32 = 800.0;
+    let mut mode_height: f32 = 600.0;
+    let mut rotated = false;
+
     for line in text.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("Scale: ") {
@@ -115,19 +126,24 @@ fn available_screen_height() -> f32 {
             if let Ok(pct_val) = pct.parse::<f32>() {
                 scale = pct_val / 100.0;
             }
+        } else if let Some(rest) = trimmed.strip_prefix("Transform: ") {
+            rotated = rest.contains("90") || rest.contains("270");
         } else if trimmed.contains("(current)") && trimmed.contains('x') {
             let parts: Vec<&str> = trimmed.split_whitespace().collect();
             if let Some(dims) = parts.first() {
                 let hw: Vec<&str> = dims.split('x').collect();
                 if hw.len() == 2 {
-                    if let Ok(h) = hw[1].parse::<f32>() {
+                    if let (Ok(w), Ok(h)) = (hw[0].parse::<f32>(), hw[1].parse::<f32>()) {
+                        mode_width = w;
                         mode_height = h;
                     }
                 }
             }
         }
     }
-    let effective = mode_height / scale.max(0.1);
+
+    let physical_height = if rotated { mode_width } else { mode_height };
+    let effective = physical_height / scale.max(0.1);
     effective.max(200.0)
 }
 
