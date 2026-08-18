@@ -34,6 +34,7 @@ use crate::providers::minimax::MinimaxLoginState;
 use crate::providers::ollama_cloud::OllamaCloudLoginState;
 use crate::providers::opencode_go::OpencodeGoLoginState;
 use crate::providers::registry;
+use super::popup_max_height;
 use crate::updates::UpdateStatus;
 use crate::usage_display;
 use cosmic::Element;
@@ -43,7 +44,6 @@ use cosmic::widget;
 
 pub const POPUP_COLUMN_WIDTH: f32 = 420.0;
 const POPUP_WIDTH: f32 = POPUP_COLUMN_WIDTH;
-const POPUP_MAX_HEIGHT: f32 = 1080.0;
 const POPUP_PADDING: f32 = 32.0;
 const POPUP_CHROME_SPACING: f32 = 42.0;
 const POPUP_EMPTY_CHROME_SPACING: f32 = 28.0;
@@ -318,7 +318,7 @@ fn popup_total_height(nav_height: Option<f32>, body_height: f32) -> f32 {
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
         + body_height;
-    height.clamp(1.0, POPUP_MAX_HEIGHT)
+    height.clamp(1.0, popup_max_height())
 }
 
 fn popup_empty_state_size(body_height: f32) -> Size {
@@ -329,7 +329,7 @@ fn popup_empty_state_size(body_height: f32) -> Size {
         + POPUP_BODY_PANEL_PADDING
         + POPUP_BODY_BOTTOM_SLACK
         + body_height;
-    Size::new(POPUP_WIDTH, height.clamp(1.0, POPUP_MAX_HEIGHT))
+    Size::new(POPUP_WIDTH, height.clamp(1.0, popup_max_height()))
 }
 
 pub(super) fn popup_empty_state_active(state: &AppState) -> bool {

@@ -81,7 +81,10 @@ use cosmic::widget;
 use std::time::Duration;
 
 const AUTOMATIC_REFRESH_POLL_INTERVAL_SECS: u64 = 10;
-const POPUP_MAX_HEIGHT: u16 = 1080;
+pub(crate) fn popup_max_height() -> f32 {
+    static CACHED: std::sync::LazyLock<f32> = std::sync::LazyLock::new(available_screen_height);
+    *CACHED
+}
 const APPLET_BAR_WIDTH_HEIGHT_MULTIPLIER: u16 = 2;
 const APPLET_ICON_GAP: f32 = 6.0;
 const APPLET_ACCOUNT_GAP: f32 = 4.0;
@@ -93,6 +96,39 @@ const UPDATE_RETRY_MAX_SECS: u64 = 15 * 60;
 
 fn automatic_refresh_poll_interval() -> Duration {
     Duration::from_secs(AUTOMATIC_REFRESH_POLL_INTERVAL_SECS)
+}
+
+fn available_screen_height() -> f32 {
+    let output = std::process::Command::new("cosmic-randr")
+        .arg("list")
+        .output();
+    let Ok(output) = output else {
+        return 800.0;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut scale: f32 = 1.0;
+    let mut mode_height: f32 = 800.0;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Scale: ") {
+            let pct = rest.trim_end_matches('%');
+            if let Ok(pct_val) = pct.parse::<f32>() {
+                scale = pct_val / 100.0;
+            }
+        } else if trimmed.contains("(current)") && trimmed.contains('x') {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if let Some(dims) = parts.first() {
+                let hw: Vec<&str> = dims.split('x').collect();
+                if hw.len() == 2 {
+                    if let Ok(h) = hw[1].parse::<f32>() {
+                        mode_height = h;
+                    }
+                }
+            }
+        }
+    }
+    let effective = mode_height / scale.max(0.1);
+    effective.max(200.0)
 }
 
 pub struct AppModel {

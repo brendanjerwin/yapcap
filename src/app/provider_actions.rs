@@ -313,6 +313,8 @@ impl AppModel {
                     );
                     popup_settings.positioner.size_limits =
                         popup_size_limits_with_max_width(popup_size, max_width);
+                    const XDG_POSITIONER_CONSTRAINT_RESIZE_Y: u32 = 1 << 7;
+                    popup_settings.positioner.constraint_adjustment |= XDG_POSITIONER_CONSTRAINT_RESIZE_Y;
                     popup_settings.positioner.reactive = false;
                     popup_settings
                 },

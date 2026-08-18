@@ -1,5 +1,5 @@
 use super::{
-    Duration, Id, Limits, Message, POPUP_MAX_HEIGHT, Size, Task, UPDATE_RETRY_INITIAL_SECS,
+    Duration, Id, Limits, Message, Size, Task, UPDATE_RETRY_INITIAL_SECS,
     UPDATE_RETRY_MAX_SECS, runtime,
 };
 
@@ -56,7 +56,7 @@ pub(super) fn popup_size_limits_with_max_width(size: Size, max_width: f32) -> Li
         .min_width(1.0)
         .max_width(max_width.max(size.width))
         .min_height(1.0)
-        .max_height(size.height.clamp(1.0, f32::from(POPUP_MAX_HEIGHT)))
+        .max_height(size.height.clamp(1.0, super::popup_max_height()))
 }
 
 pub(super) fn popup_size_tuple(size: Size) -> (u32, u32) {
