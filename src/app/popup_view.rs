@@ -361,7 +361,7 @@ fn narrow_chrome<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Me
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    Element::from(container(content).width(Length::Fill).padding(12))
+    Element::from(container(content).width(Length::Fill).padding(4))
 }
 
 fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Message> {
