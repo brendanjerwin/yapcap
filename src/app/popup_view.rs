@@ -49,7 +49,7 @@ const POPUP_CHROME_SPACING: f32 = 42.0;
 const POPUP_EMPTY_CHROME_SPACING: f32 = 28.0;
 const POPUP_HEADER_HEIGHT: f32 = 36.0;
 const POPUP_TAB_HEIGHT: f32 = 68.0;
-const PROVIDER_TABS_PER_ROW: usize = 4;
+const PROVIDER_TABS_PER_ROW: usize = 3;
 const PROVIDER_TAB_ROW_SPACING: f32 = 8.0;
 const POPUP_FOOTER_HEIGHT: f32 = 28.0;
 const POPUP_BODY_PANEL_PADDING: f32 = 24.0;
@@ -361,7 +361,7 @@ fn narrow_chrome<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Me
 }
 
 fn panel<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    Element::from(container(content).width(Length::Fill).padding(4))
+    Element::from(container(content).width(Length::Fill).padding([4, 8, 4, 4]))
 }
 
 fn popup_header(route: &PopupRoute, empty_state: bool) -> Element<'static, Message> {
