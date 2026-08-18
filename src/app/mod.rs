@@ -94,8 +94,10 @@ fn automatic_refresh_poll_interval() -> Duration {
     Duration::from_secs(AUTOMATIC_REFRESH_POLL_INTERVAL_SECS)
 }
 
+const PANEL_HEIGHT_ESTIMATE: f32 = 80.0;
+
 pub(crate) fn popup_max_height() -> f32 {
-    available_screen_height()
+    (available_screen_height() - PANEL_HEIGHT_ESTIMATE).max(200.0)
 }
 
 fn available_screen_height() -> f32 {
@@ -144,7 +146,17 @@ fn available_screen_height() -> f32 {
 
     let rotated = transform.contains("90") || transform.contains("270");
     let physical_height = if rotated { mode_w } else { mode_h };
-    let effective = physical_height / scale.max(0.1);
+    let panel_height = 80.0;
+    let effective = (physical_height / scale.max(0.1) - panel_height).max(200.0);
+    tracing::info!(
+        mode_w,
+        mode_h,
+        scale,
+        transform = %transform,
+        rotated,
+        effective,
+        "computed available screen height"
+    );
     effective.max(200.0)
 }
 
