@@ -310,7 +310,7 @@ impl AppModel {
                     let mut popup_settings = state.core.applet.get_popup_settings(
                         state.core.main_window_id().unwrap(),
                         new_id,
-                        None,
+                        Some(popup_size_tuple(popup_size)),
                         None,
                         None,
                     );
